@@ -37,7 +37,7 @@ static auto make_pool(unsigned int num_threads) -> std::shared_ptr<thread_pool> 
 
 Document::Document()
     : state_{std::make_unique<detail::DocState>()},
-      pool_{make_default_pool()} {}
+      pool_{nullptr} {}
 
 Document::Document(unsigned int num_threads)
     : state_{std::make_unique<detail::DocState>()},
@@ -600,7 +600,7 @@ auto Document::load(std::span<const std::byte> data) -> std::optional<Document> 
     }
     if (!parsed) return std::nullopt;
 
-    auto doc = Document{};
+    auto doc = Document{1u};  // no pool — caller can assign one later
     doc.set_actor_id(parsed->local_actor);
     doc.state_->next_counter = parsed->next_counter;
     doc.state_->local_seq = parsed->local_seq;
