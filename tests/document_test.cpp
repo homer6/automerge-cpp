@@ -2608,7 +2608,7 @@ TEST(Document, concurrent_reads_are_safe) {
     });
 
     // Launch multiple threads doing concurrent reads
-    auto threads = std::vector<std::jthread>{};
+    auto threads = std::vector<std::thread>{};
     auto errors = std::atomic<int>{0};
     for (int t = 0; t < 8; ++t) {
         threads.emplace_back([&doc, &errors, t]() {
@@ -2625,7 +2625,7 @@ TEST(Document, concurrent_reads_are_safe) {
             }
         });
     }
-    threads.clear();  // join all
+    for (auto& t : threads) t.join();
     EXPECT_EQ(errors.load(), 0);
 }
 
@@ -2692,7 +2692,7 @@ TEST(Document, threaded_fork_merge_batch_put) {
     }
 
     // Execute fork mutations in parallel
-    auto threads = std::vector<std::jthread>{};
+    auto threads = std::vector<std::thread>{};
     for (int f = 0; f < num_forks; ++f) {
         threads.emplace_back([&forks, f]() {
             forks[f].transact([f](auto& tx) {
@@ -2703,7 +2703,7 @@ TEST(Document, threaded_fork_merge_batch_put) {
             });
         });
     }
-    threads.clear();  // join all
+    for (auto& t : threads) t.join();
 
     // Merge sequentially (merge order doesn't matter — CRDT guarantee)
     for (auto& f : forks) {

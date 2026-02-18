@@ -40,7 +40,7 @@ int main() {
     // Document::get() acquires a shared lock — N readers run concurrently.
     {
         auto found = std::atomic<int>{0};
-        auto threads = std::vector<std::jthread>{};
+        auto threads = std::vector<std::thread>{};
         for (int t = 0; t < 8; ++t) {
             threads.emplace_back([&doc, &found, t]() {
                 for (int i = t * 125; i < (t + 1) * 125; ++i) {
@@ -49,7 +49,7 @@ int main() {
                 }
             });
         }
-        threads.clear();  // join all
+        for (auto& t : threads) t.join();
         std::printf("8 threads, 1000 concurrent gets: %d found\n", found.load());
     }
 
@@ -60,7 +60,7 @@ int main() {
 
     {
         constexpr int num_writers = 30;
-        auto threads = std::vector<std::jthread>{};
+        auto threads = std::vector<std::thread>{};
         for (int t = 0; t < num_writers; ++t) {
             threads.emplace_back([&doc, t]() {
                 for (int i = 0; i < 10; ++i) {
@@ -71,7 +71,7 @@ int main() {
                 }
             });
         }
-        threads.clear();
+        for (auto& t : threads) t.join();
         std::printf("%d threads x 10 writes = %zu total keys\n",
                     num_writers, doc.length(am::root));
     }
@@ -91,7 +91,7 @@ int main() {
     auto reads_done = std::atomic<int>{0};
 
     // Writer thread appends text
-    auto writer = std::jthread{[&doc, &text_id, &stop]() {
+    auto writer = std::thread{[&doc, &text_id, &stop]() {
         for (int i = 0; i < 200 && !stop.load(std::memory_order_relaxed); ++i) {
             auto len = doc.length(text_id);
             doc.transact([&text_id, len](auto& tx) {
@@ -103,7 +103,7 @@ int main() {
 
     // Reader threads read concurrently with the writer
     {
-        auto readers = std::vector<std::jthread>{};
+        auto readers = std::vector<std::thread>{};
         for (int t = 0; t < 8; ++t) {
             readers.emplace_back([&doc, &text_id, &stop, &reads_done]() {
                 while (!stop.load(std::memory_order_relaxed)) {
@@ -113,7 +113,7 @@ int main() {
                 }
             });
         }
-        // readers join when writer sets stop
+        for (auto& r : readers) r.join();
     }
 
     writer.join();
@@ -127,13 +127,13 @@ int main() {
 
     auto saved = std::vector<std::vector<std::byte>>(10);
     {
-        auto threads = std::vector<std::jthread>{};
+        auto threads = std::vector<std::thread>{};
         for (int t = 0; t < 10; ++t) {
             threads.emplace_back([&doc, &saved, t]() {
                 saved[t] = doc.save();
             });
         }
-        threads.clear();
+        for (auto& t : threads) t.join();
     }
 
     auto all_same = true;

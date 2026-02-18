@@ -261,8 +261,9 @@ public:
                           {
                               task_promise->set_exception(std::current_exception());
                           }
-                          catch (...)
+                          catch (...) // NOLINT(bugprone-empty-catch)
                           {
+                              // set_exception failed; promise is broken — nothing to do
                           }
                       }
                   });
@@ -296,8 +297,9 @@ public:
                           {
                               task_promise->set_exception(std::current_exception());
                           }
-                          catch (...)
+                          catch (...) // NOLINT(bugprone-empty-catch)
                           {
+                              // set_exception failed; promise is broken — nothing to do
                           }
                       }
                   });

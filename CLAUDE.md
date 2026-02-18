@@ -25,7 +25,7 @@ automerge-cpp/
 │   └── error.hpp                           #   Error, ErrorKind
 ├── src/                                    # IMPLEMENTATION
 │   ├── doc_state.hpp                       #   internal: DocState, ObjectState, MapEntry, ListElement, MarkEntry
-│   ├── thread_pool.hpp                     #   internal: ThreadPool (std::jthread-based parallel_for)
+│   ├── thread_pool.hpp                     #   internal: Barak Shoshany's BS::thread_pool (header-only)
 │   ├── document.cpp                        #   Document methods (core, save/load, sync, patches, time travel, cursors, marks)
 │   ├── transaction.cpp                     #   Transaction methods
 │   ├── crypto/                             #   Cryptographic primitives
@@ -291,7 +291,7 @@ See [docs/benchmark-results.md](docs/benchmark-results.md) for full results.
 - **Build**: CMake 3.28+, C++23 compiler
 - **Test**: Google Test (fetched via CMake FetchContent)
 - **Bench**: Google Benchmark (fetched via CMake FetchContent)
-- **Parallelism**: Internal `std::jthread`-based thread pool (C++20, no external dependencies)
+- **Parallelism**: Barak Shoshany's BS::thread_pool (header-only, fetched via CMake FetchContent)
 - **Crypto**: SHA-256 (vendored or system)
 - **Compression**: zlib (raw DEFLATE, no header)
 

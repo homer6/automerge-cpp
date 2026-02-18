@@ -5,7 +5,7 @@
 // fork N copies, mutate in parallel, and merge back — getting the
 // same result as sequential execution.
 //
-// All parallelism uses std::jthread — no external dependencies.
+// All parallelism uses std::thread — no external dependencies.
 //
 // Build: cmake --build build -DCMAKE_BUILD_TYPE=Release
 // Run:   ./build/examples/parallel_perf_demo
@@ -72,7 +72,7 @@ int main() {
             forks.push_back(doc.fork());
         }
 
-        auto threads = std::vector<std::jthread>{};
+        auto threads = std::vector<std::thread>{};
         for (int f = 0; f < num_forks; ++f) {
             threads.emplace_back([&forks, f]() {
                 forks[f].transact([f](auto& tx) {
@@ -83,7 +83,7 @@ int main() {
                 });
             });
         }
-        threads.clear();  // join all
+        for (auto& t : threads) t.join();
 
         for (auto& f : forks) {
             doc.merge(f);
@@ -105,7 +105,7 @@ int main() {
     // Create documents in parallel
     {
         auto t = Timer{};
-        auto threads = std::vector<std::jthread>{};
+        auto threads = std::vector<std::thread>{};
         auto chunk = doc_count / static_cast<int>(hw);
         for (unsigned int w = 0; w < hw; ++w) {
             auto begin = static_cast<int>(w) * chunk;
@@ -123,7 +123,7 @@ int main() {
                 }
             });
         }
-        threads.clear();
+        for (auto& t : threads) t.join();
         std::printf("Parallel create(%d docs, %u threads): %.1f ms\n",
                     doc_count, hw, t.elapsed_ms());
     }
@@ -132,7 +132,7 @@ int main() {
     auto saved = std::vector<std::vector<std::byte>>(doc_count);
     {
         auto t = Timer{};
-        auto threads = std::vector<std::jthread>{};
+        auto threads = std::vector<std::thread>{};
         auto chunk = doc_count / static_cast<int>(hw);
         for (unsigned int w = 0; w < hw; ++w) {
             auto begin = static_cast<int>(w) * chunk;
@@ -143,7 +143,7 @@ int main() {
                 }
             });
         }
-        threads.clear();
+        for (auto& t : threads) t.join();
         auto total_bytes = std::size_t{0};
         for (const auto& s : saved) total_bytes += s.size();
         std::printf("Parallel save(%d docs, %u threads): %.1f ms, %.1f KB total\n",
@@ -168,7 +168,7 @@ int main() {
     auto loaded = std::vector<std::optional<am::Document>>(doc_count);
     {
         auto t = Timer{};
-        auto threads = std::vector<std::jthread>{};
+        auto threads = std::vector<std::thread>{};
         auto chunk = doc_count / static_cast<int>(hw);
         for (unsigned int w = 0; w < hw; ++w) {
             auto begin = static_cast<int>(w) * chunk;
@@ -179,7 +179,7 @@ int main() {
                 }
             });
         }
-        threads.clear();
+        for (auto& t : threads) t.join();
         auto ok = 0;
         for (const auto& d : loaded) { if (d.has_value()) ++ok; }
         std::printf("Parallel load(%d docs, %u threads): %.1f ms, %d/%d ok\n",
@@ -203,7 +203,7 @@ int main() {
 
     // Create peers in parallel
     {
-        auto threads = std::vector<std::jthread>{};
+        auto threads = std::vector<std::thread>{};
         for (int p = 0; p < peer_count; ++p) {
             threads.emplace_back([&peers, p]() {
                 peers[p] = am::Document{1u};
@@ -216,7 +216,7 @@ int main() {
                 });
             });
         }
-        threads.clear();
+        for (auto& t : threads) t.join();
     }
 
     // Sequential reduce
@@ -246,7 +246,7 @@ int main() {
         // Tree reduce
         while (work.size() > 1) {
             auto next = std::vector<am::Document>{};
-            auto threads = std::vector<std::jthread>{};
+            auto threads = std::vector<std::thread>{};
             auto pairs = work.size() / 2;
             next.resize(pairs + (work.size() % 2));
 
@@ -259,7 +259,7 @@ int main() {
             if (work.size() % 2 == 1) {
                 next[pairs] = std::move(work.back());
             }
-            threads.clear();
+            for (auto& t : threads) t.join();
             work = std::move(next);
         }
 
@@ -278,7 +278,7 @@ int main() {
 
     // Set up source documents in parallel
     {
-        auto threads = std::vector<std::jthread>{};
+        auto threads = std::vector<std::thread>{};
         for (int i = 0; i < sync_pairs; ++i) {
             threads.emplace_back([&sources, i]() {
                 sources[i] = am::Document{1u};
@@ -290,13 +290,13 @@ int main() {
                 });
             });
         }
-        threads.clear();
+        for (auto& t : threads) t.join();
     }
 
     // Sync all pairs in parallel
     {
         auto t = Timer{};
-        auto threads = std::vector<std::jthread>{};
+        auto threads = std::vector<std::thread>{};
         for (int i = 0; i < sync_pairs; ++i) {
             threads.emplace_back([&sources, &targets, i]() {
                 targets[i] = am::Document{1u};
@@ -316,7 +316,7 @@ int main() {
                 }
             });
         }
-        threads.clear();
+        for (auto& t : threads) t.join();
         std::printf("Parallel sync(%d pairs): %.1f ms\n", sync_pairs, t.elapsed_ms());
     }
 
