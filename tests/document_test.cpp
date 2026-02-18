@@ -5169,3 +5169,48 @@ TEST(Document, list_initializer_survives_save_load) {
         EXPECT_EQ(get_scalar<std::string>(*tag), "collaborative");
     }
 }
+
+// -- Raw initializer list tests (no List{}/Map{} wrapper) ---------------------
+
+TEST(Document, put_bare_initializer_list_creates_list) {
+    auto doc = Document{};
+    auto items = doc.transact([](auto& tx) {
+        return tx.put(root, "items", {"Milk", "Eggs", "Bread"});
+    });
+    EXPECT_EQ(doc.length(items), 3u);
+    EXPECT_EQ(doc.get<std::string>(items, std::size_t{0}), "Milk");
+    EXPECT_EQ(doc.get<std::string>(items, std::size_t{2}), "Bread");
+}
+
+TEST(Document, put_bare_initializer_list_creates_map) {
+    auto doc = Document{};
+    auto config = doc.transact([](auto& tx) {
+        return tx.put(root, "config", {{"port", std::int64_t{8080}}, {"host", "localhost"}});
+    });
+    EXPECT_EQ(doc.get<std::int64_t>(config, "port"), 8080);
+    EXPECT_EQ(doc.get<std::string>(config, "host"), "localhost");
+}
+
+TEST(Document, insert_bare_initializer_list_into_list) {
+    auto doc = Document{};
+    auto outer = doc.transact([](auto& tx) {
+        auto outer = tx.put(root, "outer", ObjType::list);
+        tx.insert(outer, 0, {"a", "b", "c"});
+        return outer;
+    });
+    auto nested = doc.get(outer, std::size_t{0});
+    ASSERT_TRUE(nested.has_value());
+    EXPECT_TRUE(is_object(*nested));
+}
+
+TEST(Document, insert_bare_initializer_map_into_list) {
+    auto doc = Document{};
+    auto outer = doc.transact([](auto& tx) {
+        auto outer = tx.put(root, "records", ObjType::list);
+        tx.insert(outer, 0, {{"name", "Alice"}, {"age", std::int64_t{30}}});
+        return outer;
+    });
+    if (auto name = doc.get_path("records", std::size_t{0}, "name")) {
+        EXPECT_EQ(get_scalar<std::string>(*name), "Alice");
+    }
+}

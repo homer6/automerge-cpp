@@ -235,6 +235,48 @@ public:
         return map;
     }
 
+    // -- Raw initializer list overloads (auto-detect list vs map) -------------
+
+    /// Create a list from a bare initializer list of values.
+    /// @code
+    /// auto items = tx.put(root, "items", {"Milk", "Eggs", "Bread"});
+    /// @endcode
+    auto put(const ObjId& obj, std::string_view key,
+             std::initializer_list<ScalarValue> values) -> ObjId {
+        auto list = put_object(obj, key, ObjType::list);
+        std::size_t idx = 0;
+        for (const auto& val : values) insert(list, idx++, val);
+        return list;
+    }
+
+    /// Create a map from a bare initializer list of key-value pairs.
+    /// @code
+    /// auto config = tx.put(root, "config", {{"port", 8080}, {"host", "localhost"}});
+    /// @endcode
+    auto put(const ObjId& obj, std::string_view key,
+             std::initializer_list<std::pair<std::string_view, ScalarValue>> entries) -> ObjId {
+        auto map = put_object(obj, key, ObjType::map);
+        for (const auto& [k, v] : entries) put(map, k, v);
+        return map;
+    }
+
+    /// Insert a list from a bare initializer list of values.
+    auto insert(const ObjId& obj, std::size_t index,
+                std::initializer_list<ScalarValue> values) -> ObjId {
+        auto list = insert_object(obj, index, ObjType::list);
+        std::size_t idx = 0;
+        for (const auto& val : values) insert(list, idx++, val);
+        return list;
+    }
+
+    /// Insert a map from a bare initializer list of key-value pairs.
+    auto insert(const ObjId& obj, std::size_t index,
+                std::initializer_list<std::pair<std::string_view, ScalarValue>> entries) -> ObjId {
+        auto map = insert_object(obj, index, ObjType::map);
+        for (const auto& [k, v] : entries) put(map, std::string_view{k}, v);
+        return map;
+    }
+
     // -- Scalar convenience overloads (list set) ------------------------------
 
     /// Set a std::string at a list index.
