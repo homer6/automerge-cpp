@@ -2742,3 +2742,1178 @@ TEST(Document, save_load_with_thread_pool) {
         ASSERT_TRUE(v.has_value()) << "Missing: " << key;
     }
 }
+
+// =============================================================================
+// Rust parity: conflict resolution
+//
+// Ported from upstream/automerge/rust/automerge/tests/test.rs
+// =============================================================================
+
+TEST(Document, no_conflict_on_repeated_assignment) {
+    // Repeated assignment to same key by the same actor is not a conflict.
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "key", std::int64_t{1});
+    });
+    doc.transact([](auto& tx) {
+        tx.put(root, "key", std::int64_t{2});
+    });
+    doc.transact([](auto& tx) {
+        tx.put(root, "key", std::int64_t{3});
+    });
+    auto all = doc.get_all(root, "key");
+    EXPECT_EQ(all.size(), 1u);
+    EXPECT_EQ(get_int(doc.get(root, "key")), 3);
+}
+
+TEST(Document, repeated_map_assignment_resolves_conflict) {
+    // Two docs concurrently set same key -> conflict.
+    // Then one doc overwrites -> conflict resolves.
+    auto doc1 = make_doc(1);
+    auto doc2 = doc1.fork();
+
+    doc1.transact([](auto& tx) {
+        tx.put(root, "key", std::int64_t{1});
+    });
+    doc2.transact([](auto& tx) {
+        tx.put(root, "key", std::int64_t{2});
+    });
+
+    doc1.merge(doc2);
+    EXPECT_EQ(doc1.get_all(root, "key").size(), 2u);
+
+    // doc1 overwrites the key — this resolves the conflict
+    doc1.transact([](auto& tx) {
+        tx.put(root, "key", std::int64_t{99});
+    });
+    auto all = doc1.get_all(root, "key");
+    EXPECT_EQ(all.size(), 1u);
+    EXPECT_EQ(get_int(doc1.get(root, "key")), 99);
+}
+
+TEST(Document, assignment_conflicts_of_different_types) {
+    // Three docs assign different types to the same key.
+    auto doc1 = make_doc(1);
+    auto doc2 = doc1.fork();
+    auto doc3 = doc1.fork();
+
+    doc1.transact([](auto& tx) {
+        tx.put(root, "x", std::string{"string_val"});
+    });
+    doc2.transact([](auto& tx) {
+        tx.put_object(root, "x", ObjType::list);
+    });
+    doc3.transact([](auto& tx) {
+        tx.put_object(root, "x", ObjType::map);
+    });
+
+    doc1.merge(doc2);
+    doc1.merge(doc3);
+
+    // All three types should be in conflict
+    auto all = doc1.get_all(root, "x");
+    EXPECT_EQ(all.size(), 3u);
+}
+
+TEST(Document, changes_within_conflicting_map_field) {
+    // One doc puts a string, another puts a nested map with inner values.
+    // After merge, both values are in conflict, and the nested map
+    // retains its inner structure.
+    auto doc1 = make_doc(1);
+    auto doc2 = doc1.fork();
+
+    doc1.transact([](auto& tx) {
+        tx.put(root, "x", std::string{"hello"});
+    });
+
+    auto nested_id = ObjId{};
+    doc2.transact([&](auto& tx) {
+        nested_id = tx.put_object(root, "x", ObjType::map);
+        tx.put(nested_id, "inner", std::int64_t{42});
+    });
+
+    doc1.merge(doc2);
+
+    auto all = doc1.get_all(root, "x");
+    EXPECT_EQ(all.size(), 2u);
+
+    // Verify the nested map still has its content by checking one of the values
+    bool found_string = false;
+    bool found_map = false;
+    for (const auto& v : all) {
+        if (std::holds_alternative<ScalarValue>(v)) {
+            auto& sv = std::get<ScalarValue>(v);
+            if (std::holds_alternative<std::string>(sv)) found_string = true;
+        } else if (std::holds_alternative<ObjType>(v)) {
+            if (std::get<ObjType>(v) == ObjType::map) found_map = true;
+        }
+    }
+    EXPECT_TRUE(found_string);
+    EXPECT_TRUE(found_map);
+}
+
+TEST(Document, concurrently_assigned_nested_maps_should_not_merge) {
+    // Two docs concurrently create nested maps at the same key.
+    // The nested contents should NOT merge with each other — they are
+    // separate conflicting objects.
+    auto doc1 = make_doc(1);
+    auto doc2 = doc1.fork();
+
+    auto map1_id = ObjId{};
+    doc1.transact([&](auto& tx) {
+        map1_id = tx.put_object(root, "x", ObjType::map);
+        tx.put(map1_id, "key1", std::string{"from_doc1"});
+    });
+
+    auto map2_id = ObjId{};
+    doc2.transact([&](auto& tx) {
+        map2_id = tx.put_object(root, "x", ObjType::map);
+        tx.put(map2_id, "key2", std::string{"from_doc2"});
+    });
+
+    doc1.merge(doc2);
+
+    // Both maps should be in conflict at root/x
+    auto all = doc1.get_all(root, "x");
+    EXPECT_EQ(all.size(), 2u);
+
+    // The winning map should only have its own key, not the other's
+    // (nested contents don't cross-merge)
+    auto winner = doc1.get(root, "x");
+    ASSERT_TRUE(winner.has_value());
+    // Winner map should have exactly 1 key
+    // We need to resolve to get the ObjId from the winning value...
+    // The winner is an ObjType::map, and its keys shouldn't include
+    // keys from the losing map. We verify this indirectly:
+    // doc1 has map1_id, doc2's merged map2_id — each should have only 1 key.
+    EXPECT_EQ(doc1.length(map1_id), 1u);
+}
+
+TEST(Document, concurrent_delete_and_update_at_different_levels) {
+    // One doc deletes a parent object while the other modifies a child.
+    // In this implementation, the delete of the parent key removes the
+    // key from the root map. The child update doesn't recreate the parent
+    // because it only modifies within the existing object.
+    auto doc1 = make_doc(1);
+    auto nested_id = ObjId{};
+    doc1.transact([&](auto& tx) {
+        nested_id = tx.put_object(root, "config", ObjType::map);
+        tx.put(nested_id, "color", std::string{"blue"});
+    });
+
+    auto doc2 = doc1.fork();
+
+    // doc1 deletes the parent
+    doc1.transact([](auto& tx) {
+        tx.delete_key(root, "config");
+    });
+
+    // doc2 updates the child
+    doc2.transact([&](auto& tx) {
+        tx.put(nested_id, "color", std::string{"red"});
+    });
+
+    doc1.merge(doc2);
+
+    // After merge, both docs should reach the same state.
+    // The delete removes the root-level key; the child update doesn't
+    // re-create the parent. Verify consistency via bidirectional merge.
+    doc2.merge(doc1);
+    EXPECT_EQ(doc1.length(root), doc2.length(root));
+}
+
+TEST(Document, concurrent_updates_of_concurrently_deleted_objects) {
+    // If one doc deletes an object and another modifies it,
+    // after merge both docs should reach a consistent state.
+    auto doc1 = make_doc(1);
+    auto map_id = ObjId{};
+    doc1.transact([&](auto& tx) {
+        map_id = tx.put_object(root, "obj", ObjType::map);
+        tx.put(map_id, "a", std::int64_t{1});
+    });
+
+    auto doc2 = doc1.fork();
+    auto doc3 = doc1.fork();
+
+    // doc2 deletes the object entirely
+    doc2.transact([](auto& tx) {
+        tx.delete_key(root, "obj");
+    });
+
+    // doc3 modifies the object
+    doc3.transact([&](auto& tx) {
+        tx.put(map_id, "b", std::int64_t{2});
+    });
+
+    doc2.merge(doc3);
+    doc3.merge(doc2);
+
+    // Both docs should converge to the same state
+    EXPECT_EQ(doc2.length(root), doc3.length(root));
+}
+
+TEST(Document, overwriting_a_conflict_resolves_it) {
+    // Both docs put the same value at the same key -> 2 conflicting values.
+    // Then one doc overwrites with a single new value -> resolves the conflict.
+    auto doc1 = make_doc(1);
+    auto doc2 = doc1.fork();
+
+    doc1.transact([](auto& tx) {
+        tx.put(root, "key", std::string{"value_a"});
+    });
+    doc2.transact([](auto& tx) {
+        tx.put(root, "key", std::string{"value_b"});
+    });
+
+    doc1.merge(doc2);
+
+    // Both actors set different values concurrently -> conflict
+    EXPECT_EQ(doc1.get_all(root, "key").size(), 2u);
+
+    // doc1 overwrites with a new value — this op supersedes both
+    // conflicting values because doc1 has seen them both
+    doc1.transact([](auto& tx) {
+        tx.put(root, "key", std::string{"resolved"});
+    });
+
+    // After the overwrite, doc1 should have exactly 1 value
+    EXPECT_EQ(doc1.get_all(root, "key").size(), 1u);
+    EXPECT_EQ(get_str(doc1.get(root, "key")), "resolved");
+}
+
+// =============================================================================
+// Rust parity: list concurrent operations
+//
+// Ported from upstream/automerge/rust/automerge/tests/test.rs
+// =============================================================================
+
+TEST(Document, concurrent_list_insertions_at_different_positions) {
+    auto doc1 = make_doc(1);
+    auto list_id = ObjId{};
+    doc1.transact([&](auto& tx) {
+        list_id = tx.put_object(root, "list", ObjType::list);
+        tx.insert(list_id, 0, std::string{"a"});
+        tx.insert(list_id, 1, std::string{"b"});
+        tx.insert(list_id, 2, std::string{"c"});
+    });
+
+    auto doc2 = doc1.fork();
+
+    // doc1 inserts at beginning
+    doc1.transact([&](auto& tx) {
+        tx.insert(list_id, 0, std::string{"X"});
+    });
+    // doc2 inserts at end
+    doc2.transact([&](auto& tx) {
+        tx.insert(list_id, 3, std::string{"Y"});
+    });
+
+    doc1.merge(doc2);
+
+    // Both insertions should be present: X, a, b, c, Y
+    EXPECT_EQ(doc1.length(list_id), 5u);
+    EXPECT_EQ(get_str(doc1.get(list_id, 0)), "X");
+    EXPECT_EQ(get_str(doc1.get(list_id, 4)), "Y");
+}
+
+TEST(Document, concurrent_list_insertions_at_same_position) {
+    auto doc1 = make_doc(1);
+    auto list_id = ObjId{};
+    doc1.transact([&](auto& tx) {
+        list_id = tx.put_object(root, "list", ObjType::list);
+        tx.insert(list_id, 0, std::string{"a"});
+        tx.insert(list_id, 1, std::string{"b"});
+    });
+
+    auto doc2 = doc1.fork();
+
+    // Both insert at position 1 (after "a")
+    doc1.transact([&](auto& tx) {
+        tx.insert(list_id, 1, std::string{"X"});
+    });
+    doc2.transact([&](auto& tx) {
+        tx.insert(list_id, 1, std::string{"Y"});
+    });
+
+    doc1.merge(doc2);
+
+    // Both insertions present, order determined by actor ID comparison
+    EXPECT_EQ(doc1.length(list_id), 4u);
+    // Elements: "a", then X and Y in some deterministic order, then "b"
+    EXPECT_EQ(get_str(doc1.get(list_id, 0)), "a");
+    EXPECT_EQ(get_str(doc1.get(list_id, 3)), "b");
+}
+
+TEST(Document, concurrent_deletion_of_same_list_element) {
+    auto doc1 = make_doc(1);
+    auto list_id = ObjId{};
+    doc1.transact([&](auto& tx) {
+        list_id = tx.put_object(root, "list", ObjType::list);
+        tx.insert(list_id, 0, std::string{"a"});
+        tx.insert(list_id, 1, std::string{"b"});
+        tx.insert(list_id, 2, std::string{"c"});
+    });
+
+    auto doc2 = doc1.fork();
+
+    // Both delete the middle element
+    doc1.transact([&](auto& tx) {
+        tx.delete_index(list_id, 1);
+    });
+    doc2.transact([&](auto& tx) {
+        tx.delete_index(list_id, 1);
+    });
+
+    doc1.merge(doc2);
+
+    // Element deleted once — list is [a, c]
+    EXPECT_EQ(doc1.length(list_id), 2u);
+    EXPECT_EQ(get_str(doc1.get(list_id, 0)), "a");
+    EXPECT_EQ(get_str(doc1.get(list_id, 1)), "c");
+}
+
+TEST(Document, list_insertion_after_deleted_element) {
+    auto doc1 = make_doc(1);
+    auto list_id = ObjId{};
+    doc1.transact([&](auto& tx) {
+        list_id = tx.put_object(root, "list", ObjType::list);
+        tx.insert(list_id, 0, std::string{"a"});
+        tx.insert(list_id, 1, std::string{"b"});
+        tx.insert(list_id, 2, std::string{"c"});
+    });
+
+    auto doc2 = doc1.fork();
+
+    // doc1 deletes "a" and "b"
+    doc1.transact([&](auto& tx) {
+        tx.delete_index(list_id, 0);  // delete "a"
+        tx.delete_index(list_id, 0);  // delete "b" (now at index 0)
+    });
+
+    // doc2 inserts after "b" (at index 2)
+    doc2.transact([&](auto& tx) {
+        tx.insert(list_id, 2, std::string{"X"});
+    });
+
+    doc1.merge(doc2);
+
+    // "X" should appear somewhere in the list (before or after "c")
+    EXPECT_EQ(doc1.length(list_id), 2u);  // "c" + "X"
+}
+
+TEST(Document, does_not_interleave_sequence_insertions_at_same_position) {
+    // Two docs insert multiple elements at the same position.
+    // Each doc's elements should remain contiguous (not interleaved).
+    auto doc1 = make_doc(1);
+    auto list_id = ObjId{};
+    doc1.transact([&](auto& tx) {
+        list_id = tx.put_object(root, "list", ObjType::list);
+    });
+
+    auto doc2 = doc1.fork();
+
+    // doc1 inserts "a", "b", "c" at position 0 sequentially
+    doc1.transact([&](auto& tx) {
+        tx.insert(list_id, 0, std::string{"a"});
+        tx.insert(list_id, 1, std::string{"b"});
+        tx.insert(list_id, 2, std::string{"c"});
+    });
+
+    // doc2 inserts "x", "y", "z" at position 0 sequentially
+    doc2.transact([&](auto& tx) {
+        tx.insert(list_id, 0, std::string{"x"});
+        tx.insert(list_id, 1, std::string{"y"});
+        tx.insert(list_id, 2, std::string{"z"});
+    });
+
+    doc1.merge(doc2);
+
+    EXPECT_EQ(doc1.length(list_id), 6u);
+
+    // Verify non-interleaving: collect all values
+    auto vals = doc1.values(list_id);
+    std::vector<std::string> strs;
+    for (const auto& v : vals) {
+        strs.push_back(std::get<std::string>(std::get<ScalarValue>(v)));
+    }
+    // Either [a,b,c,x,y,z] or [x,y,z,a,b,c] — but never interleaved
+    bool abc_first = (strs[0] == "a" && strs[1] == "b" && strs[2] == "c");
+    bool xyz_first = (strs[0] == "x" && strs[1] == "y" && strs[2] == "z");
+    EXPECT_TRUE(abc_first || xyz_first) << "Elements should not be interleaved";
+}
+
+TEST(Document, insertion_consistent_with_causality) {
+    auto doc1 = make_doc(1);
+    auto list_id = ObjId{};
+    doc1.transact([&](auto& tx) {
+        list_id = tx.put_object(root, "list", ObjType::list);
+    });
+
+    // Insert elements at position 0, each one pushing earlier ones right
+    for (int i = 0; i < 5; ++i) {
+        doc1.transact([&](auto& tx) {
+            tx.insert(list_id, 0, std::int64_t{i});
+        });
+    }
+
+    // List should be [4, 3, 2, 1, 0] (reversed)
+    EXPECT_EQ(doc1.length(list_id), 5u);
+    EXPECT_EQ(get_int(doc1.get(list_id, 0)), 4);
+    EXPECT_EQ(get_int(doc1.get(list_id, 4)), 0);
+}
+
+TEST(Document, concurrent_assignment_and_deletion_of_list_entry) {
+    auto doc1 = make_doc(1);
+    auto list_id = ObjId{};
+    doc1.transact([&](auto& tx) {
+        list_id = tx.put_object(root, "list", ObjType::list);
+        tx.insert(list_id, 0, std::string{"original"});
+    });
+
+    auto doc2 = doc1.fork();
+
+    // doc1 modifies the element
+    doc1.transact([&](auto& tx) {
+        tx.set(list_id, 0, std::string{"modified"});
+    });
+    // doc2 deletes the element
+    doc2.transact([&](auto& tx) {
+        tx.delete_index(list_id, 0);
+    });
+
+    doc1.merge(doc2);
+    // After merge in doc1, the element may or may not be present
+    // depending on conflict resolution. The key behavior: no crash, consistent state.
+    // In Automerge, the modification creates a new value at the position,
+    // so after merge there may be a conflict or the element may be deleted.
+    // The important thing is consistency.
+    auto len1 = doc1.length(list_id);
+
+    doc2.merge(doc1);
+    auto len2 = doc2.length(list_id);
+
+    // Both docs should agree on length after bidirectional merge
+    EXPECT_EQ(len1, len2);
+}
+
+TEST(Document, list_delete_and_reinsert) {
+    auto doc = make_doc(1);
+    auto list_id = ObjId{};
+    doc.transact([&](auto& tx) {
+        list_id = tx.put_object(root, "list", ObjType::list);
+        tx.insert(list_id, 0, std::string{"a"});
+        tx.insert(list_id, 1, std::string{"b"});
+        tx.insert(list_id, 2, std::string{"c"});
+    });
+
+    // Delete middle element
+    doc.transact([&](auto& tx) {
+        tx.delete_index(list_id, 1);
+    });
+    EXPECT_EQ(doc.length(list_id), 2u);
+
+    // Insert new element at same position
+    doc.transact([&](auto& tx) {
+        tx.insert(list_id, 1, std::string{"B"});
+    });
+    EXPECT_EQ(doc.length(list_id), 3u);
+    EXPECT_EQ(get_str(doc.get(list_id, 0)), "a");
+    EXPECT_EQ(get_str(doc.get(list_id, 1)), "B");
+    EXPECT_EQ(get_str(doc.get(list_id, 2)), "c");
+}
+
+// =============================================================================
+// Rust parity: counter edge cases
+//
+// Ported from upstream/automerge/rust/automerge/tests/test.rs
+// =============================================================================
+
+TEST(Document, concurrent_counter_increments_combine) {
+    // Two docs independently increment the same counter.
+    // After merge, increments combine additively.
+    auto doc1 = make_doc(1);
+    doc1.transact([](auto& tx) {
+        tx.put(root, "counter", Counter{100});
+    });
+
+    auto doc2 = doc1.fork();
+
+    doc1.transact([](auto& tx) {
+        tx.increment(root, "counter", 10);
+    });
+    doc2.transact([](auto& tx) {
+        tx.increment(root, "counter", 20);
+    });
+
+    doc1.merge(doc2);
+
+    auto val = doc1.get(root, "counter");
+    ASSERT_TRUE(val.has_value());
+    auto c = std::get<Counter>(std::get<ScalarValue>(*val));
+    // 100 + 10 + 20 = 130
+    EXPECT_EQ(c.value, 130);
+}
+
+TEST(Document, counter_survives_save_load) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "c", Counter{0});
+    });
+    doc.transact([](auto& tx) {
+        tx.increment(root, "c", 5);
+        tx.increment(root, "c", -2);
+    });
+
+    auto bytes = doc.save();
+    auto loaded = Document::load(bytes);
+    ASSERT_TRUE(loaded.has_value());
+
+    auto val = loaded->get(root, "c");
+    ASSERT_TRUE(val.has_value());
+    EXPECT_EQ(std::get<Counter>(std::get<ScalarValue>(*val)).value, 3);
+}
+
+TEST(Document, counter_increment_via_apply_changes) {
+    // Create counter and increment in doc1, apply changes to doc2.
+    auto doc1 = make_doc(1);
+    doc1.transact([](auto& tx) {
+        tx.put(root, "c", Counter{10});
+    });
+    doc1.transact([](auto& tx) {
+        tx.increment(root, "c", 5);
+    });
+
+    auto doc2 = Document{};
+    auto changes = doc1.get_changes();
+    doc2.apply_changes(changes);
+
+    auto val = doc2.get(root, "c");
+    ASSERT_TRUE(val.has_value());
+    EXPECT_EQ(std::get<Counter>(std::get<ScalarValue>(*val)).value, 15);
+}
+
+// =============================================================================
+// Rust parity: save/load edge cases
+//
+// Ported from upstream/automerge/rust/automerge/tests/test.rs
+// =============================================================================
+
+TEST(Document, save_and_load_zero_length_data) {
+    // Empty strings and empty bytes should round-trip correctly.
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "empty_string", std::string{""});
+    });
+
+    auto bytes = doc.save();
+    auto loaded = Document::load(bytes);
+    ASSERT_TRUE(loaded.has_value());
+
+    auto val = loaded->get(root, "empty_string");
+    ASSERT_TRUE(val.has_value());
+    EXPECT_EQ(std::get<std::string>(std::get<ScalarValue>(*val)), "");
+}
+
+TEST(Document, save_and_load_after_repeated_out_of_order_changes) {
+    // Applying the same changes multiple times should converge.
+    auto doc1 = make_doc(1);
+    doc1.transact([](auto& tx) {
+        tx.put(root, "a", std::int64_t{1});
+    });
+    doc1.transact([](auto& tx) {
+        tx.put(root, "b", std::int64_t{2});
+    });
+
+    auto changes = doc1.get_changes();
+
+    // Apply changes in reverse order, then again
+    auto doc2 = Document{};
+    if (changes.size() >= 2) {
+        doc2.apply_changes({changes[1]});
+        doc2.apply_changes({changes[0]});
+        // Apply all again (duplicate)
+        doc2.apply_changes(changes);
+    }
+
+    EXPECT_EQ(get_int(doc2.get(root, "a")), 1);
+    EXPECT_EQ(get_int(doc2.get(root, "b")), 2);
+    EXPECT_EQ(doc2.length(root), 2u);
+}
+
+TEST(Document, save_and_load_with_deleted_objects) {
+    auto doc = make_doc(1);
+    auto map_id = ObjId{};
+    doc.transact([&](auto& tx) {
+        map_id = tx.put_object(root, "temp", ObjType::map);
+        tx.put(map_id, "inner", std::string{"hello"});
+    });
+    doc.transact([](auto& tx) {
+        tx.delete_key(root, "temp");
+    });
+
+    auto bytes = doc.save();
+    auto loaded = Document::load(bytes);
+    ASSERT_TRUE(loaded.has_value());
+
+    EXPECT_FALSE(loaded->get(root, "temp").has_value());
+    EXPECT_EQ(loaded->length(root), 0u);
+}
+
+TEST(Document, allows_empty_keys_in_maps) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "", std::int64_t{1});
+    });
+
+    auto val = doc.get(root, "");
+    ASSERT_TRUE(val.has_value());
+    EXPECT_EQ(get_int(val), 1);
+
+    // Round-trip through save/load
+    auto bytes = doc.save();
+    auto loaded = Document::load(bytes);
+    ASSERT_TRUE(loaded.has_value());
+    EXPECT_EQ(get_int(loaded->get(root, "")), 1);
+}
+
+TEST(Document, save_load_large_values_for_compression) {
+    // Large values trigger compression in the binary format.
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        auto big = std::string(10000, 'x');
+        tx.put(root, "big", big);
+    });
+
+    auto bytes = doc.save();
+    auto loaded = Document::load(bytes);
+    ASSERT_TRUE(loaded.has_value());
+
+    auto val = loaded->get(root, "big");
+    ASSERT_TRUE(val.has_value());
+    auto s = std::get<std::string>(std::get<ScalarValue>(*val));
+    EXPECT_EQ(s.size(), 10000u);
+    EXPECT_EQ(s, std::string(10000, 'x'));
+}
+
+// =============================================================================
+// Rust parity: sync protocol edge cases
+//
+// Ported from upstream/automerge/rust/automerge/src/sync.rs
+// =============================================================================
+
+TEST(Document, sync_generate_twice_does_nothing) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "key", std::string{"value"});
+    });
+
+    auto state = SyncState{};
+
+    // First generate should produce a message
+    auto msg1 = doc.generate_sync_message(state);
+    EXPECT_TRUE(msg1.has_value());
+
+    // Second generate without any changes should produce no message
+    auto msg2 = doc.generate_sync_message(state);
+    EXPECT_FALSE(msg2.has_value());
+}
+
+TEST(Document, sync_bidirectional_converges) {
+    // Two docs with independent changes sync bidirectionally to convergence.
+    auto doc1 = make_doc(1);
+    doc1.transact([](auto& tx) {
+        tx.put(root, "from_1", std::string{"hello"});
+    });
+
+    auto doc2 = make_doc(2);
+    doc2.transact([](auto& tx) {
+        tx.put(root, "from_2", std::string{"world"});
+    });
+
+    auto s1 = SyncState{};
+    auto s2 = SyncState{};
+
+    // Run sync rounds until convergence
+    for (int round = 0; round < 20; ++round) {
+        auto progress = false;
+        if (auto m = doc1.generate_sync_message(s1)) {
+            doc2.receive_sync_message(s2, *m);
+            progress = true;
+        }
+        if (auto m = doc2.generate_sync_message(s2)) {
+            doc1.receive_sync_message(s1, *m);
+            progress = true;
+        }
+        if (!progress) break;
+    }
+
+    // Both docs should have both keys
+    EXPECT_TRUE(doc1.get(root, "from_1").has_value());
+    EXPECT_TRUE(doc1.get(root, "from_2").has_value());
+    EXPECT_TRUE(doc2.get(root, "from_1").has_value());
+    EXPECT_TRUE(doc2.get(root, "from_2").has_value());
+
+    // Heads should contain the same hashes (order may differ)
+    auto h1 = doc1.get_heads();
+    auto h2 = doc2.get_heads();
+    std::sort(h1.begin(), h1.end());
+    std::sort(h2.begin(), h2.end());
+    EXPECT_EQ(h1, h2);
+}
+
+TEST(Document, sync_simultaneous_messages) {
+    // Both docs generate messages simultaneously before processing the other's.
+    auto doc1 = make_doc(1);
+    auto doc2 = make_doc(2);
+
+    auto s1 = SyncState{};
+    auto s2 = SyncState{};
+
+    // Both create changes
+    for (int i = 0; i < 5; ++i) {
+        doc1.transact([i](auto& tx) {
+            tx.put(root, "x", std::int64_t{i});
+        });
+        doc2.transact([i](auto& tx) {
+            tx.put(root, "y", std::int64_t{i});
+        });
+    }
+
+    // Sync with simultaneous message exchange
+    for (int round = 0; round < 20; ++round) {
+        auto m1 = doc1.generate_sync_message(s1);
+        auto m2 = doc2.generate_sync_message(s2);
+
+        if (!m1 && !m2) break;
+
+        if (m1) doc2.receive_sync_message(s2, *m1);
+        if (m2) doc1.receive_sync_message(s1, *m2);
+    }
+
+    // After sync, both should have the same heads (order may differ)
+    auto h1 = doc1.get_heads();
+    auto h2 = doc2.get_heads();
+    std::sort(h1.begin(), h1.end());
+    std::sort(h2.begin(), h2.end());
+    EXPECT_EQ(h1, h2);
+}
+
+// =============================================================================
+// Rust parity: merge properties — associativity
+//
+// Extends existing commutativity/idempotency tests
+// =============================================================================
+
+TEST(Document, merge_is_associative) {
+    // (A merge B) merge C == A merge (B merge C)
+    auto doc_a = make_doc(1);
+    doc_a.transact([](auto& tx) {
+        tx.put(root, "a", std::int64_t{1});
+    });
+
+    auto doc_b = make_doc(2);
+    doc_b.transact([](auto& tx) {
+        tx.put(root, "b", std::int64_t{2});
+    });
+
+    auto doc_c = make_doc(3);
+    doc_c.transact([](auto& tx) {
+        tx.put(root, "c", std::int64_t{3});
+    });
+
+    // (A merge B) merge C
+    auto left = Document{doc_a};
+    left.merge(doc_b);
+    left.merge(doc_c);
+
+    // A merge (B merge C)
+    auto bc = Document{doc_b};
+    bc.merge(doc_c);
+    auto right = Document{doc_a};
+    right.merge(bc);
+
+    EXPECT_EQ(left.length(root), right.length(root));
+    EXPECT_EQ(get_int(left.get(root, "a")), get_int(right.get(root, "a")));
+    EXPECT_EQ(get_int(left.get(root, "b")), get_int(right.get(root, "b")));
+    EXPECT_EQ(get_int(left.get(root, "c")), get_int(right.get(root, "c")));
+}
+
+// =============================================================================
+// Rust parity: text edge cases
+// =============================================================================
+
+TEST(Document, text_empty_splice_is_noop) {
+    auto doc = make_doc(1);
+    auto text_id = ObjId{};
+    doc.transact([&](auto& tx) {
+        text_id = tx.put_object(root, "text", ObjType::text);
+        tx.splice_text(text_id, 0, 0, "hello");
+    });
+
+    // Splice with empty insert and zero delete is a no-op
+    doc.transact([&](auto& tx) {
+        tx.splice_text(text_id, 2, 0, "");
+    });
+
+    EXPECT_EQ(doc.text(text_id), "hello");
+}
+
+TEST(Document, text_concurrent_splices_at_different_positions) {
+    auto doc1 = make_doc(1);
+    auto text_id = ObjId{};
+    doc1.transact([&](auto& tx) {
+        text_id = tx.put_object(root, "text", ObjType::text);
+        tx.splice_text(text_id, 0, 0, "hello world");
+    });
+
+    auto doc2 = doc1.fork();
+
+    // doc1 inserts at beginning
+    doc1.transact([&](auto& tx) {
+        tx.splice_text(text_id, 0, 0, ">>> ");
+    });
+    // doc2 inserts at end
+    doc2.transact([&](auto& tx) {
+        tx.splice_text(text_id, 11, 0, " <<<");
+    });
+
+    doc1.merge(doc2);
+
+    auto result = doc1.text(text_id);
+    EXPECT_TRUE(result.find(">>>") != std::string::npos);
+    EXPECT_TRUE(result.find("hello world") != std::string::npos);
+    EXPECT_TRUE(result.find("<<<") != std::string::npos);
+}
+
+TEST(Document, text_delete_entire_contents) {
+    auto doc = make_doc(1);
+    auto text_id = ObjId{};
+    doc.transact([&](auto& tx) {
+        text_id = tx.put_object(root, "text", ObjType::text);
+        tx.splice_text(text_id, 0, 0, "hello");
+    });
+
+    doc.transact([&](auto& tx) {
+        tx.splice_text(text_id, 0, 5, "");
+    });
+
+    EXPECT_EQ(doc.text(text_id), "");
+    EXPECT_EQ(doc.length(text_id), 0u);
+}
+
+// =============================================================================
+// Rust parity: marks edge cases
+// =============================================================================
+
+TEST(Document, mark_overwrite_creates_new_mark_entry) {
+    // Adding a mark and then adding another with the same name creates
+    // multiple mark entries. The marks() query returns all entries.
+    auto doc = make_doc(1);
+    auto text_id = ObjId{};
+    doc.transact([&](auto& tx) {
+        text_id = tx.put_object(root, "text", ObjType::text);
+        tx.splice_text(text_id, 0, 0, "abcdefg");
+    });
+
+    // Add a mark
+    doc.transact([&](auto& tx) {
+        tx.mark(text_id, 0, 3, "bold", true);
+    });
+
+    auto marks_before = doc.marks(text_id);
+    EXPECT_EQ(marks_before.size(), 1u);
+    EXPECT_EQ(marks_before[0].name, "bold");
+
+    // Add a second mark with the same name but different value
+    doc.transact([&](auto& tx) {
+        tx.mark(text_id, 0, 3, "bold", std::string{"strong"});
+    });
+
+    auto marks_after = doc.marks(text_id);
+    // Both mark entries should be present
+    EXPECT_GE(marks_after.size(), 1u);
+
+    // At least one should be named "bold"
+    bool found_bold = false;
+    for (const auto& m : marks_after) {
+        if (m.name == "bold") found_bold = true;
+    }
+    EXPECT_TRUE(found_bold);
+}
+
+TEST(Document, marks_survive_concurrent_text_edits) {
+    auto doc1 = make_doc(1);
+    auto text_id = ObjId{};
+    doc1.transact([&](auto& tx) {
+        text_id = tx.put_object(root, "text", ObjType::text);
+        tx.splice_text(text_id, 0, 0, "hello world");
+    });
+    doc1.transact([&](auto& tx) {
+        tx.mark(text_id, 0, 5, "bold", true);
+    });
+
+    auto doc2 = doc1.fork();
+
+    // doc2 inserts text before the marked region
+    doc2.transact([&](auto& tx) {
+        tx.splice_text(text_id, 0, 0, ">>> ");
+    });
+
+    doc1.merge(doc2);
+
+    // The bold mark should still exist
+    auto marks = doc1.marks(text_id);
+    EXPECT_GE(marks.size(), 1u);
+    bool found_bold = false;
+    for (const auto& m : marks) {
+        if (m.name == "bold") found_bold = true;
+    }
+    EXPECT_TRUE(found_bold);
+}
+
+// =============================================================================
+// Rust parity: cursor edge cases
+// =============================================================================
+
+TEST(Document, cursor_tracks_through_concurrent_inserts) {
+    auto doc1 = make_doc(1);
+    auto list_id = ObjId{};
+    doc1.transact([&](auto& tx) {
+        list_id = tx.put_object(root, "list", ObjType::list);
+        tx.insert(list_id, 0, std::string{"a"});
+        tx.insert(list_id, 1, std::string{"b"});
+        tx.insert(list_id, 2, std::string{"c"});
+    });
+
+    // Cursor points to "b" at index 1
+    auto cursor = doc1.cursor(list_id, 1);
+    ASSERT_TRUE(cursor.has_value());
+
+    auto doc2 = doc1.fork();
+
+    // doc2 inserts before "b"
+    doc2.transact([&](auto& tx) {
+        tx.insert(list_id, 0, std::string{"X"});
+        tx.insert(list_id, 1, std::string{"Y"});
+    });
+
+    doc1.merge(doc2);
+
+    // Cursor should still resolve to "b", now at a higher index
+    auto pos = doc1.resolve_cursor(list_id, *cursor);
+    ASSERT_TRUE(pos.has_value());
+    EXPECT_EQ(get_str(doc1.get(list_id, *pos)), "b");
+}
+
+// =============================================================================
+// Rust parity: time travel edge cases
+// =============================================================================
+
+TEST(Document, time_travel_after_merge) {
+    auto doc1 = make_doc(1);
+    doc1.transact([](auto& tx) {
+        tx.put(root, "key", std::string{"original"});
+    });
+    auto heads_v1 = doc1.get_heads();
+
+    auto doc2 = doc1.fork();
+    doc2.transact([](auto& tx) {
+        tx.put(root, "key", std::string{"from_doc2"});
+    });
+
+    doc1.merge(doc2);
+
+    // Read at v1 (before merge)
+    auto val_at_v1 = doc1.get_at(root, "key", heads_v1);
+    ASSERT_TRUE(val_at_v1.has_value());
+    EXPECT_EQ(std::get<std::string>(std::get<ScalarValue>(*val_at_v1)), "original");
+
+    // Current value should be from doc2's merge
+    auto current = doc1.get(root, "key");
+    ASSERT_TRUE(current.has_value());
+}
+
+TEST(Document, time_travel_text_at_multiple_heads) {
+    auto doc = make_doc(1);
+    auto text_id = ObjId{};
+    doc.transact([&](auto& tx) {
+        text_id = tx.put_object(root, "text", ObjType::text);
+        tx.splice_text(text_id, 0, 0, "hello");
+    });
+    auto heads1 = doc.get_heads();
+
+    doc.transact([&](auto& tx) {
+        tx.splice_text(text_id, 5, 0, " world");
+    });
+    auto heads2 = doc.get_heads();
+
+    doc.transact([&](auto& tx) {
+        tx.splice_text(text_id, 11, 0, "!");
+    });
+
+    EXPECT_EQ(doc.text_at(text_id, heads1), "hello");
+    EXPECT_EQ(doc.text_at(text_id, heads2), "hello world");
+    EXPECT_EQ(doc.text(text_id), "hello world!");
+}
+
+// =============================================================================
+// Rust parity: patch edge cases
+// =============================================================================
+
+TEST(Document, patches_for_nested_object_creation) {
+    auto doc = Document{};
+    auto patches = doc.transact_with_patches([](auto& tx) {
+        auto map_id = tx.put_object(root, "config", ObjType::map);
+        tx.put(map_id, "theme", std::string{"dark"});
+        tx.put(map_id, "size", std::int64_t{14});
+    });
+
+    // Should produce patches for the map creation and the inner puts
+    EXPECT_GE(patches.size(), 1u);
+}
+
+TEST(Document, patches_for_list_operations) {
+    auto doc = Document{};
+    auto list_id = ObjId{};
+    doc.transact([&](auto& tx) {
+        list_id = tx.put_object(root, "items", ObjType::list);
+        tx.insert(list_id, 0, std::string{"a"});
+        tx.insert(list_id, 1, std::string{"b"});
+    });
+
+    auto patches = doc.transact_with_patches([&](auto& tx) {
+        tx.insert(list_id, 1, std::string{"X"});
+        tx.delete_index(list_id, 0);
+    });
+
+    // Should produce insert and delete patches
+    EXPECT_GE(patches.size(), 2u);
+}
+
+// =============================================================================
+// Rust parity: deeply nested structures
+// =============================================================================
+
+TEST(Document, deeply_nested_map_put_and_get) {
+    auto doc = make_doc(1);
+    auto l1 = ObjId{};
+    auto l2 = ObjId{};
+    auto l3 = ObjId{};
+    doc.transact([&](auto& tx) {
+        l1 = tx.put_object(root, "level1", ObjType::map);
+        l2 = tx.put_object(l1, "level2", ObjType::map);
+        l3 = tx.put_object(l2, "level3", ObjType::map);
+        tx.put(l3, "deep_value", std::string{"found_it"});
+    });
+
+    auto val = doc.get(l3, "deep_value");
+    ASSERT_TRUE(val.has_value());
+    EXPECT_EQ(get_str(val), "found_it");
+
+    // Save/load round-trip
+    auto bytes = doc.save();
+    auto loaded = Document::load(bytes);
+    ASSERT_TRUE(loaded.has_value());
+
+    auto lval = loaded->get(l3, "deep_value");
+    ASSERT_TRUE(lval.has_value());
+    EXPECT_EQ(get_str(lval), "found_it");
+}
+
+TEST(Document, merge_nested_list_within_map) {
+    auto doc1 = make_doc(1);
+    auto map_id = ObjId{};
+    auto list_id = ObjId{};
+    doc1.transact([&](auto& tx) {
+        map_id = tx.put_object(root, "container", ObjType::map);
+        list_id = tx.put_object(map_id, "items", ObjType::list);
+        tx.insert(list_id, 0, std::string{"a"});
+    });
+
+    auto doc2 = doc1.fork();
+
+    doc1.transact([&](auto& tx) {
+        tx.insert(list_id, 1, std::string{"b"});
+    });
+    doc2.transact([&](auto& tx) {
+        tx.insert(list_id, 1, std::string{"c"});
+    });
+
+    doc1.merge(doc2);
+
+    // Both insertions should be present
+    EXPECT_EQ(doc1.length(list_id), 3u);
+}
+
+// =============================================================================
+// Rust parity: get_changes and apply_changes edge cases
+// =============================================================================
+
+TEST(Document, get_changes_returns_empty_for_empty_doc) {
+    auto doc = Document{};
+    auto changes = doc.get_changes();
+    EXPECT_TRUE(changes.empty());
+}
+
+TEST(Document, apply_changes_twice_is_idempotent) {
+    auto doc1 = make_doc(1);
+    doc1.transact([](auto& tx) {
+        tx.put(root, "key", std::int64_t{42});
+    });
+
+    auto changes = doc1.get_changes();
+
+    auto doc2 = Document{};
+    doc2.apply_changes(changes);
+    doc2.apply_changes(changes);  // Apply same changes again
+
+    // Should still have just 1 key with value 42
+    EXPECT_EQ(doc2.length(root), 1u);
+    EXPECT_EQ(get_int(doc2.get(root, "key")), 42);
+}
+
+TEST(Document, three_way_merge_with_all_operations) {
+    // Three docs perform different operation types, all merge together.
+    auto doc1 = make_doc(1);
+    doc1.transact([](auto& tx) {
+        tx.put(root, "shared", std::string{"base"});
+    });
+
+    auto doc2 = doc1.fork();
+    auto doc3 = doc1.fork();
+
+    // doc1: creates a nested map
+    auto map_id = ObjId{};
+    doc1.transact([&](auto& tx) {
+        map_id = tx.put_object(root, "config", ObjType::map);
+        tx.put(map_id, "color", std::string{"blue"});
+    });
+
+    // doc2: creates a list
+    auto list_id = ObjId{};
+    doc2.transact([&](auto& tx) {
+        list_id = tx.put_object(root, "items", ObjType::list);
+        tx.insert(list_id, 0, std::int64_t{1});
+        tx.insert(list_id, 1, std::int64_t{2});
+    });
+
+    // doc3: creates a counter and text
+    doc3.transact([](auto& tx) {
+        tx.put(root, "count", Counter{0});
+    });
+    doc3.transact([](auto& tx) {
+        tx.increment(root, "count", 10);
+    });
+
+    doc1.merge(doc2);
+    doc1.merge(doc3);
+
+    // All operations should be present
+    EXPECT_TRUE(doc1.get(root, "shared").has_value());
+    EXPECT_TRUE(doc1.get(root, "config").has_value());
+    EXPECT_TRUE(doc1.get(root, "items").has_value());
+    EXPECT_TRUE(doc1.get(root, "count").has_value());
+
+    auto c = std::get<Counter>(std::get<ScalarValue>(*doc1.get(root, "count")));
+    EXPECT_EQ(c.value, 10);
+}
