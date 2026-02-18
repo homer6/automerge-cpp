@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.28)
 
 project(automerge-cpp
-    VERSION 0.1.0
+    VERSION 0.2.0
     DESCRIPTION "A modern C++23 implementation of Automerge"
     HOMEPAGE_URL "https://github.com/homer6/automerge-cpp"
     LANGUAGES CXX
