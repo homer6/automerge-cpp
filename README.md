@@ -81,6 +81,11 @@ int main() {
 - **Static analysis**: clang-tidy CI with `bugprone-*`, `performance-*`, and `clang-analyzer-*` checks
 - **Sanitizer CI**: Address Sanitizer + Undefined Behavior Sanitizer on all tests
 
+- **Thread safety**: `Document` is thread-safe via `std::shared_mutex` — N concurrent readers, exclusive writers
+- **Thread pool**: built-in work-stealing thread pool (Barak Shoshany's BS::thread_pool), shared across documents
+- **Lock-free reads**: `set_read_locking(false)` eliminates shared_mutex contention for read-heavy workloads (13.5x parallel scaling on 30 cores)
+- **Performance caching**: change hash cache (22x faster time travel), actor table cache (1.2x faster save)
+
 - **Doxygen documentation**: auto-generated API docs with GitHub Pages deployment
 
 ## Performance
@@ -177,6 +182,7 @@ automerge-cpp/
     cursor.hpp                #   Cursor (stable position)
     mark.hpp                  #   Mark (rich text annotation)
     error.hpp                 #   Error, ErrorKind
+    thread_pool.hpp           #   BS::thread_pool (header-only)
   src/                        # implementation
     document.cpp              #   Document methods
     transaction.cpp           #   Transaction methods
@@ -198,7 +204,7 @@ automerge-cpp/
 
 ## Examples
 
-Four example programs in `examples/`:
+Six example programs in `examples/`:
 
 | Example | Description |
 |---------|-------------|
@@ -206,12 +212,16 @@ Four example programs in `examples/`:
 | `collaborative_todo` | Two actors concurrently editing a shared todo list |
 | `text_editor` | Text editing with patches, cursors, and time travel |
 | `sync_demo` | Peer-to-peer sync with SyncState |
+| `thread_safe_demo` | Multi-threaded concurrent reads and writes on a single Document |
+| `parallel_perf_demo` | Monoid-powered fork/merge parallelism, parallel save/load/sync |
 
 ```bash
 ./build/examples/basic_usage
 ./build/examples/collaborative_todo
 ./build/examples/text_editor
 ./build/examples/sync_demo
+./build/examples/thread_safe_demo
+./build/examples/parallel_perf_demo
 ```
 
 ## Documentation

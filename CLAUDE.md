@@ -22,10 +22,10 @@ automerge-cpp/
 │   ├── patch.hpp                           #   Patch, PatchAction types
 │   ├── cursor.hpp                          #   Cursor (stable position)
 │   ├── mark.hpp                            #   Mark (rich text annotation)
-│   └── error.hpp                           #   Error, ErrorKind
+│   ├── error.hpp                           #   Error, ErrorKind
+│   └── thread_pool.hpp                     #   Barak Shoshany's BS::thread_pool (header-only)
 ├── src/                                    # IMPLEMENTATION
 │   ├── doc_state.hpp                       #   internal: DocState, ObjectState, MapEntry, ListElement, MarkEntry
-│   ├── thread_pool.hpp                     #   internal: Barak Shoshany's BS::thread_pool (header-only)
 │   ├── document.cpp                        #   Document methods (core, save/load, sync, patches, time travel, cursors, marks)
 │   ├── transaction.cpp                     #   Transaction methods
 │   ├── crypto/                             #   Cryptographic primitives
@@ -48,7 +48,7 @@ automerge-cpp/
 │   │       └── change_op_columns.hpp       #       op column encoding/decoding (14 parallel columns)
 │   └── sync/                               #   Sync protocol internals
 │       └── bloom_filter.hpp                #     bloom filter (10 bits/entry, 7 probes)
-├── tests/                                  # TESTS (Google Test) — 274 tests
+├── tests/                                  # TESTS (Google Test) — 281 tests
 │   ├── CMakeLists.txt
 │   ├── error_test.cpp
 │   ├── types_test.cpp
@@ -65,7 +65,12 @@ automerge-cpp/
 │   └── change_op_columns_test.cpp          #   op column encoding/decoding, all op types
 ├── examples/                               # EXAMPLES
 │   ├── CMakeLists.txt
-│   └── basic_usage.cpp
+│   ├── basic_usage.cpp
+│   ├── collaborative_todo.cpp
+│   ├── text_editor.cpp
+│   ├── sync_demo.cpp
+│   ├── thread_safe_demo.cpp
+│   └── parallel_perf_demo.cpp
 ├── benchmarks/                             # BENCHMARKS (Google Benchmark)
 │   ├── CMakeLists.txt
 │   └── placeholder_benchmark.cpp
@@ -82,8 +87,10 @@ automerge-cpp/
 │   ├── style.md                            #   coding style guide (Ben Deane)
 │   └── plans/
 │       ├── architecture.md                 #   design & module decomposition
-│       ├── roadmap.md                      #   phased implementation plan (Phases 0-10 complete)
-│       └── phase8-10-plan.md               #   Phase 8-10 detailed plan
+│       ├── roadmap.md                      #   phased implementation plan (Phases 0-11 in progress)
+│       ├── phase8-10-plan.md               #   Phase 8-10 detailed plan
+│       ├── v0.4.0-performance.md           #   Phase 11 performance release plan
+│       └── profiling-analysis.md           #   v0.3.0 bottleneck profiling and parallelization
 ├── .clang-tidy                             # clang-tidy configuration
 ├── .github/workflows/                      # CI
 │   ├── linux.yml                           #   GCC + Clang + ASan/UBSan + clang-tidy
@@ -202,6 +209,7 @@ See [docs/plans/architecture.md](docs/plans/architecture.md) for the full design
 | `Patch` | Incremental change notifications from transactions |
 | `Cursor` | Stable position tracking in lists/text |
 | `Mark` | Rich text range annotations (bold, italic, links) |
+| `thread_pool` | BS::thread_pool for internal parallelism (shared across documents) |
 
 ### Key Invariants
 
@@ -214,7 +222,7 @@ See [docs/plans/architecture.md](docs/plans/architecture.md) for the full design
 
 ## Testing
 
-274 tests across 13 test files. Uses Google Test (fetched via CMake FetchContent).
+281 tests across 13 test files. Uses Google Test (fetched via CMake FetchContent).
 
 | Test File | Count | Covers |
 |-----------|-------|--------|
@@ -223,7 +231,7 @@ See [docs/plans/architecture.md](docs/plans/architecture.md) for the full design
 | `value_test.cpp` | 14 | ScalarValue, Value, ObjType, Null, Counter, Timestamp |
 | `op_test.cpp` | 4 | Op, OpType |
 | `change_test.cpp` | 4 | Change |
-| `document_test.cpp` | 137 | Document core, merge, serialization, sync, patches, time travel, cursors, marks |
+| `document_test.cpp` | 139 | Document core, merge, serialization, sync, patches, time travel, cursors, marks, thread safety |
 | `leb128_test.cpp` | 22 | LEB128 encode/decode |
 | `rle_test.cpp` | 10 | RLE encoder/decoder round-trips |
 | `delta_encoder_test.cpp` | 11 | Delta encoder/decoder round-trips |
@@ -249,7 +257,7 @@ TEST(Document, put_and_get_round_trips) {
 
 ## Examples
 
-Four example programs in `examples/`:
+Six example programs in `examples/`:
 
 | Example | Description |
 |---------|-------------|
@@ -257,20 +265,25 @@ Four example programs in `examples/`:
 | `collaborative_todo` | Two actors concurrently editing a shared todo list |
 | `text_editor` | Text editing with patches, cursors, and time travel |
 | `sync_demo` | Peer-to-peer sync with SyncState |
+| `thread_safe_demo` | Multi-threaded concurrent reads and writes on a single Document |
+| `parallel_perf_demo` | Monoid-powered fork/merge parallelism, parallel save/load/sync |
 
 ## Benchmarks
 
-26 benchmarks in `benchmarks/placeholder_benchmark.cpp` using Google Benchmark.
+32 benchmarks in `benchmarks/placeholder_benchmark.cpp` using Google Benchmark.
 Run with: `./build-release/benchmarks/automerge_cpp_benchmarks`
 
-Key release-build results (Apple M3 Max):
+Key release-build results (Intel Xeon Platinum 8358, 30 cores, `-O3 -march=native`):
 
 | Operation | Throughput |
 |-----------|------------|
-| Map put | 3.3 M ops/s |
-| Map get | 29.3 M ops/s |
-| Merge | 305.8 K ops/s |
-| Cursor resolve | 6.1 M ops/s |
+| Map put (batched) | 4.3 M ops/s |
+| Map get | 19.8 M ops/s |
+| Sync round trip | 23.6 K ops/s |
+| Time travel get_at | 2.9 M ops/s |
+| Merge (10+10 puts) | 241 K ops/s |
+| Parallel get (30 cores, 100K keys) | 95.0 M ops/s (13.5x) |
+| Parallel put (30 cores, 100K keys) | 13.5 M ops/s (6.9x) |
 
 See [docs/benchmark-results.md](docs/benchmark-results.md) for full results.
 
