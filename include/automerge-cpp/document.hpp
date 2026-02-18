@@ -12,10 +12,13 @@
 #include <automerge-cpp/types.hpp>
 #include <automerge-cpp/value.hpp>
 
+#include <automerge-cpp/thread_pool.hpp>
+
 #include <cstddef>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <shared_mutex>
 #include <span>
 #include <string>
 #include <string_view>
@@ -23,7 +26,9 @@
 
 namespace automerge_cpp {
 
-namespace detail { struct DocState; }
+namespace detail {
+struct DocState;
+}  // namespace detail
 
 /// A CRDT document that supports concurrent editing and deterministic merge.
 ///
@@ -46,7 +51,19 @@ namespace detail { struct DocState; }
 class Document {
 public:
     /// Construct a new empty document with a random actor ID.
+    /// Creates an internal thread pool with hardware_concurrency() threads.
     Document();
+
+    /// Construct with an explicit thread count.
+    /// @param num_threads Number of threads for internal parallelism.
+    ///   0 = hardware_concurrency(), 1 = sequential (no pool).
+    explicit Document(unsigned int num_threads);
+
+    /// Construct with an externally-owned thread pool.
+    /// The pool is shared (via shared_ptr) and can be reused across documents.
+    /// @param pool The thread pool to use. nullptr = sequential (no pool).
+    explicit Document(std::shared_ptr<thread_pool> pool);
+
     ~Document();
 
     Document(Document&&) noexcept;
@@ -226,8 +243,42 @@ public:
     auto marks_at(const ObjId& obj,
                   const std::vector<ChangeHash>& heads) const -> std::vector<Mark>;
 
+    /// Get the thread pool (may be nullptr if sequential mode).
+    auto get_thread_pool() const -> std::shared_ptr<thread_pool>;
+
+    // -- Locking control ------------------------------------------------------
+
+    /// Enable or disable internal read locking.
+    ///
+    /// When enabled (default), every read method acquires a shared_lock
+    /// for safe concurrent access with writers. When disabled, read
+    /// methods skip the lock entirely — the caller must guarantee no
+    /// concurrent writes during reads. Disabling gives near-linear
+    /// read scaling across cores by eliminating cache-line contention
+    /// on the shared_mutex reader count.
+    void set_read_locking(bool enabled);
+
+    /// Check whether internal read locking is enabled.
+    auto read_locking() const -> bool;
+
 private:
+    /// RAII guard that conditionally acquires a shared_lock.
+    struct ReadGuard {
+        std::shared_lock<std::shared_mutex> lock_;
+        bool engaged_;
+
+        explicit ReadGuard(std::shared_mutex& mtx, bool engage)
+            : lock_{mtx, std::defer_lock}, engaged_{engage} {
+            if (engaged_) lock_.lock();
+        }
+    };
+
+    auto read_guard() const -> ReadGuard;
+
     std::unique_ptr<detail::DocState> state_;
+    std::shared_ptr<thread_pool> pool_;
+    mutable std::shared_mutex mutex_;
+    bool read_locking_ = true;
 };
 
 }  // namespace automerge_cpp

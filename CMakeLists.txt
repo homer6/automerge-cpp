@@ -20,6 +20,7 @@ option(AUTOMERGE_CPP_BUILD_FUZZ "Build fuzz targets (requires Clang)" OFF)
 
 # Dependencies
 find_package(ZLIB REQUIRED)
+find_package(Threads REQUIRED)
 
 # Library
 add_library(automerge-cpp)
@@ -38,7 +39,10 @@ target_sources(automerge-cpp PRIVATE
     src/transaction.cpp
 )
 
-target_link_libraries(automerge-cpp PRIVATE ZLIB::ZLIB)
+target_link_libraries(automerge-cpp
+    PUBLIC Threads::Threads
+    PRIVATE ZLIB::ZLIB
+)
 
 # Subdirectories
 if(AUTOMERGE_CPP_BUILD_TESTS)

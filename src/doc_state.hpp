@@ -17,6 +17,7 @@
 #include <ranges>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -57,14 +58,25 @@ struct ObjectState {
 struct DocState {
     ActorId actor;
     std::uint64_t next_counter = 1;
-    std::map<ObjId, ObjectState> objects;
-    std::vector<Op> op_log;
+    std::unordered_map<ObjId, ObjectState> objects;
 
     // Change tracking (Phase 3)
     std::vector<Change> change_history;
     std::vector<ChangeHash> heads;
     std::map<ActorId, std::uint64_t> clock;  // actor -> max seq seen
     std::uint64_t local_seq = 0;
+
+    // Cached change hash index (11A.3) — incrementally maintained.
+    // Only recomputes hashes for newly appended changes (append-only data).
+    mutable std::vector<ChangeHash> cached_hashes_;                        // parallel to change_history
+    mutable std::unordered_map<ChangeHash, std::size_t> cached_hash_index_; // hash → index
+
+    // Cached actor table (11A.3b) — incrementally maintained.
+    // Invalidated by tracking how many changes have been scanned.
+    mutable std::vector<ActorId> cached_actor_table_;
+    mutable std::unordered_set<ActorId> cached_actor_set_;
+    mutable std::size_t cached_actor_table_size_ = 0;  // changes scanned so far
+    mutable bool cached_actor_table_has_local_ = false;
 
     DocState() {
         objects[root] = ObjectState{.type = ObjType::map, .map_entries = {}, .list_elements = {}};
@@ -540,32 +552,65 @@ struct DocState {
         }
     }
 
+    // -- Cached actor table (11A.3b) --------------------------------------------
+
+    void ensure_actor_table() const {
+        // Ensure local actor is first
+        if (!cached_actor_table_has_local_) {
+            if (cached_actor_set_.insert(actor).second) {
+                cached_actor_table_.push_back(actor);
+            }
+            cached_actor_table_has_local_ = true;
+        }
+        // Scan only newly appended changes
+        for (auto i = cached_actor_table_size_; i < change_history.size(); ++i) {
+            const auto& change = change_history[i];
+            if (cached_actor_set_.insert(change.actor).second) {
+                cached_actor_table_.push_back(change.actor);
+            }
+            for (const auto& op : change.operations) {
+                if (cached_actor_set_.insert(op.id.actor).second) {
+                    cached_actor_table_.push_back(op.id.actor);
+                }
+            }
+        }
+        cached_actor_table_size_ = change_history.size();
+    }
+
+    auto actor_table() const -> const std::vector<ActorId>& {
+        ensure_actor_table();
+        return cached_actor_table_;
+    }
+
     // -- Sync helpers (Phase 5) -------------------------------------------------
 
-    // Build a map from change hash → index in change_history.
-    auto change_hash_index() const -> std::map<ChangeHash, std::size_t> {
-        auto index = std::map<ChangeHash, std::size_t>{};
-        for (std::size_t i = 0; i < change_history.size(); ++i) {
+    // Ensure the cached hash index is up to date. Only computes hashes for
+    // newly appended changes (changes are append-only).
+    void ensure_hash_index() const {
+        if (cached_hashes_.size() == change_history.size()) return;
+        for (auto i = cached_hashes_.size(); i < change_history.size(); ++i) {
             auto hash = compute_change_hash(change_history[i]);
-            index[hash] = i;
+            cached_hash_index_[hash] = i;
+            cached_hashes_.push_back(hash);
         }
-        return index;
     }
 
-    // Check if we have a change with the given hash.
+    // Get the cached hash index (read-only reference).
+    auto hash_index() const -> const std::unordered_map<ChangeHash, std::size_t>& {
+        ensure_hash_index();
+        return cached_hash_index_;
+    }
+
+    // Check if we have a change with the given hash. O(1) via cached index.
     auto has_change_hash(const ChangeHash& hash) const -> bool {
-        auto idx = change_hash_index();
-        return idx.contains(hash);
+        ensure_hash_index();
+        return cached_hash_index_.contains(hash);
     }
 
-    // Get all change hashes.
+    // Get all change hashes in change_history order (cached, no recomputation).
     auto all_change_hashes() const -> std::vector<ChangeHash> {
-        auto result = std::vector<ChangeHash>{};
-        result.reserve(change_history.size());
-        for (const auto& change : change_history) {
-            result.push_back(compute_change_hash(change));
-        }
-        return result;
+        ensure_hash_index();
+        return cached_hashes_;
     }
 
     // Get change hashes that are NOT ancestors of the given set of hashes.
@@ -574,14 +619,14 @@ struct DocState {
         -> std::vector<ChangeHash> {
         if (since_heads.empty()) return all_change_hashes();
 
-        auto all_hashes = all_change_hashes();
-        auto hash_idx = change_hash_index();
+        ensure_hash_index();
+        const auto& idx = cached_hash_index_;
 
         // BFS: find all ancestors of since_heads
         auto ancestors = std::unordered_set<ChangeHash>{};
         auto queue = std::vector<ChangeHash>{};
         for (const auto& h : since_heads) {
-            if (hash_idx.contains(h)) {
+            if (idx.contains(h)) {
                 ancestors.insert(h);
                 queue.push_back(h);
             }
@@ -590,8 +635,8 @@ struct DocState {
         while (!queue.empty()) {
             auto h = queue.back();
             queue.pop_back();
-            auto it = hash_idx.find(h);
-            if (it == hash_idx.end()) continue;
+            auto it = idx.find(h);
+            if (it == idx.end()) continue;
             for (const auto& dep : change_history[it->second].deps) {
                 if (ancestors.insert(dep).second) {
                     queue.push_back(dep);
@@ -599,11 +644,11 @@ struct DocState {
             }
         }
 
-        // Return hashes not in ancestors
+        // Return hashes not in ancestors, in change_history order
         auto result = std::vector<ChangeHash>{};
-        for (const auto& h : all_hashes) {
-            if (!ancestors.contains(h)) {
-                result.push_back(h);
+        for (const auto& hash : cached_hashes_) {
+            if (!ancestors.contains(hash)) {
+                result.push_back(hash);
             }
         }
         return result;
@@ -612,9 +657,10 @@ struct DocState {
     // Get changes we're missing that would be needed to know the given heads.
     auto get_missing_deps(const std::vector<ChangeHash>& their_heads) const
         -> std::vector<ChangeHash> {
+        ensure_hash_index();
         auto result = std::vector<ChangeHash>{};
         for (const auto& h : their_heads) {
-            if (!has_change_hash(h) &&
+            if (!cached_hash_index_.contains(h) &&
                 std::ranges::find(result, h) == result.end()) {
                 result.push_back(h);
             }
@@ -625,12 +671,12 @@ struct DocState {
     // Get changes by their hashes, in the order given.
     auto get_changes_by_hash(const std::vector<ChangeHash>& hashes) const
         -> std::vector<Change> {
-        auto idx = change_hash_index();
+        ensure_hash_index();
         auto result = std::vector<Change>{};
         result.reserve(hashes.size());
         for (const auto& h : hashes) {
-            auto it = idx.find(h);
-            if (it != idx.end()) {
+            auto it = cached_hash_index_.find(h);
+            if (it != cached_hash_index_.end()) {
                 result.push_back(change_history[it->second]);
             }
         }
@@ -642,12 +688,13 @@ struct DocState {
     // Find indices (into change_history) of all changes visible at given heads.
     auto changes_visible_at(const std::vector<ChangeHash>& target_heads) const
         -> std::vector<std::size_t> {
-        auto hash_idx = change_hash_index();
+        ensure_hash_index();
+        const auto& idx = cached_hash_index_;
         auto visited = std::set<ChangeHash>{};
         auto queue = std::vector<ChangeHash>{};
 
         for (const auto& h : target_heads) {
-            if (hash_idx.contains(h) && visited.insert(h).second) {
+            if (idx.contains(h) && visited.insert(h).second) {
                 queue.push_back(h);
             }
         }
@@ -655,8 +702,8 @@ struct DocState {
         while (!queue.empty()) {
             auto h = queue.back();
             queue.pop_back();
-            auto it = hash_idx.find(h);
-            if (it == hash_idx.end()) continue;
+            auto it = idx.find(h);
+            if (it == idx.end()) continue;
             for (const auto& dep : change_history[it->second].deps) {
                 if (visited.insert(dep).second) {
                     queue.push_back(dep);
@@ -666,8 +713,8 @@ struct DocState {
 
         auto indices = std::vector<std::size_t>{};
         for (const auto& h : visited) {
-            auto it = hash_idx.find(h);
-            if (it != hash_idx.end()) {
+            auto it = idx.find(h);
+            if (it != idx.end()) {
                 indices.push_back(it->second);
             }
         }
@@ -721,7 +768,9 @@ struct DocState {
 
     static auto compute_change_hash(const Change& change) -> ChangeHash {
         // Build a deterministic byte representation of the change
+        // Size: 16 (actor) + 8 (seq) + 8 (start_op) + 8 (ts) + 8 (num_ops) + deps*32
         auto input = std::vector<std::byte>{};
+        input.reserve(48 + change.deps.size() * 32);
 
         // Actor ID
         input.insert(input.end(), change.actor.bytes.begin(), change.actor.bytes.end());

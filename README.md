@@ -12,7 +12,7 @@ This is a **from-scratch** reimplementation, not a wrapper. It mirrors the upstr
 Automerge semantics while embracing idiomatic C++23: algebraic types, ranges pipelines,
 strong types, and APIs that make illegal states unrepresentable.
 
-**274 tests passing** across 8 implementation phases.
+**281 tests passing** across 8 implementation phases.
 
 ## Quick Example
 
@@ -81,23 +81,45 @@ int main() {
 - **Static analysis**: clang-tidy CI with `bugprone-*`, `performance-*`, and `clang-analyzer-*` checks
 - **Sanitizer CI**: Address Sanitizer + Undefined Behavior Sanitizer on all tests
 
+- **Thread safety**: `Document` is thread-safe via `std::shared_mutex` — N concurrent readers, exclusive writers
+- **Thread pool**: built-in work-stealing thread pool (Barak Shoshany's BS::thread_pool), shared across documents
+- **Lock-free reads**: `set_read_locking(false)` eliminates shared_mutex contention for read-heavy workloads (13.5x parallel scaling on 30 cores)
+- **Performance caching**: change hash cache (22x faster time travel), actor table cache (1.2x faster save)
+
 - **Doxygen documentation**: auto-generated API docs with GitHub Pages deployment
 
 ## Performance
 
-Release-build highlights (Apple M3 Max):
+Release-build highlights (Intel Xeon Platinum 8358, 30 cores, Linux, GCC 13.3, `-O3 -march=native`):
+
+### Single-Threaded
 
 | Operation | Throughput |
 |-----------|------------|
-| Map put (batched) | 3.4 M ops/s |
-| Map get | 28.5 M ops/s |
-| List get | 4.5 M ops/s |
-| Fork | 125.6 K ops/s |
-| Merge (10+10 puts) | 248.7 K ops/s |
-| Cursor resolve | 6.0 M ops/s |
-| Time travel text_at | 463.3 K ops/s |
+| Map put (batched) | 4.3 M ops/s |
+| Map get | 19.8 M ops/s |
+| Sync round trip | 23.6 K ops/s |
+| Time travel get_at | 2.9 M ops/s |
+| Merge (10+10 puts) | 241 K ops/s |
+| Cursor resolve | 1.8 M ops/s |
+| Save (100 keys) | 30.6 K ops/s |
 
-See [docs/benchmark-results.md](docs/benchmark-results.md) for full results.
+### Parallel Scaling (30 cores)
+
+| Operation | Sequential | Parallel | Speedup |
+|-----------|-----------|----------|---------|
+| Get (100K keys, lock-free) | 7.1 M ops/s | **95.0 M ops/s** | **13.5x** |
+| Get (1M keys, lock-free) | 5.7 M ops/s | **55.0 M ops/s** | **9.6x** |
+| Put (100K keys, sharded) | 2.0 M ops/s | **13.5 M ops/s** | **6.9x** |
+| Put (1M keys, sharded) | 1.7 M ops/s | **8.4 M ops/s** | **4.8x** |
+| Save 500 docs | 95 K docs/s | **806 K docs/s** | **8.4x** |
+| Load 500 docs | 48 K docs/s | **190 K docs/s** | **3.9x** |
+
+v0.4.0 optimizations: **22x** faster time travel, **5.6x** faster sync (hash/actor table caching),
+**13.5x** parallel read scaling (lock-free reads eliminate shared_mutex contention).
+
+See [docs/benchmark-results.md](docs/benchmark-results.md) for full results, platform comparison,
+and perf analysis.
 
 ## Design Philosophy
 
@@ -160,6 +182,7 @@ automerge-cpp/
     cursor.hpp                #   Cursor (stable position)
     mark.hpp                  #   Mark (rich text annotation)
     error.hpp                 #   Error, ErrorKind
+    thread_pool.hpp           #   BS::thread_pool (header-only)
   src/                        # implementation
     document.cpp              #   Document methods
     transaction.cpp           #   Transaction methods
@@ -181,7 +204,7 @@ automerge-cpp/
 
 ## Examples
 
-Four example programs in `examples/`:
+Six example programs in `examples/`:
 
 | Example | Description |
 |---------|-------------|
@@ -189,12 +212,16 @@ Four example programs in `examples/`:
 | `collaborative_todo` | Two actors concurrently editing a shared todo list |
 | `text_editor` | Text editing with patches, cursors, and time travel |
 | `sync_demo` | Peer-to-peer sync with SyncState |
+| `thread_safe_demo` | Multi-threaded concurrent reads and writes on a single Document |
+| `parallel_perf_demo` | Monoid-powered fork/merge parallelism, parallel save/load/sync |
 
 ```bash
 ./build/examples/basic_usage
 ./build/examples/collaborative_todo
 ./build/examples/text_editor
 ./build/examples/sync_demo
+./build/examples/thread_safe_demo
+./build/examples/parallel_perf_demo
 ```
 
 ## Documentation

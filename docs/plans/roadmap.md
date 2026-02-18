@@ -377,3 +377,39 @@ See [docs/benchmark-results.md](../benchmark-results.md) for full results.
 - `cursor.hpp` — Cursor
 - `mark.hpp` — Mark
 - `error.hpp` — Error, ErrorKind
+
+---
+
+## Phase 11: Performance and Parallelism (v0.4.0)
+**Status**: In progress — 281 tests passing, 32 benchmarks
+
+See [v0.4.0-performance.md](v0.4.0-performance.md) for the full plan.
+
+### Completed
+- [x] 11A.3 — Change hash cache (22x faster time travel, 5.6x faster sync)
+- [x] 11A.3b — Actor table cache (1.2x faster save_large)
+- [x] 11B.3 — Serialization buffer pre-sizing (1.1x faster save)
+- [x] 11B.4 — SHA-256 stack-allocated padding buffer (10-20% faster hashing)
+- [x] 11C.0 — Remove Taskflow dependency
+- [x] 11C.1 — Thread pool (Barak Shoshany's BS::thread_pool, header-only)
+- [x] 11C.2 — Thread-safe Document with `std::shared_mutex` (N readers, exclusive writers)
+- [x] 11C.2b — Lock-free reads via `set_read_locking(false)` (13.5x parallel read scaling on 30 cores)
+- [x] 11E — Benchmark expansion (32 benchmarks including parallel scaling, thread safety)
+- [x] 11E — Example programs: `thread_safe_demo`, `parallel_perf_demo`
+
+### Remaining
+- [ ] 11A.1 — Remove dead `op_log` field
+- [ ] 11A.2 — Replace `std::map` with `std::unordered_map` for objects
+- [ ] 11A.4 — Fenwick tree for O(log n) visible-index-to-real (7-25x list/text)
+- [ ] 11A.5 — OpId-to-position index for RGA merge
+- [ ] 11B.1 — Bloom filter stack-allocated probe array
+- [ ] 11B.2 — String copy elimination in Transaction
+- [ ] 11B.5 — Reserve-based pre-allocation throughout
+- [ ] 11B.6 — Object pool for Op and ListElement
+- [ ] 11C.3 — Parallel save (change serialization + compression)
+- [ ] 11C.4 — Parallel load (chunk parsing + decompression)
+- [ ] 11C.5 — Parallel SHA-256 hash computation
+- [ ] 11C.6 — Parallel bloom filter construction
+- [ ] 11C.7 — Fork/merge parallelism for batch mutations
+- [ ] 11D.1 — Hardware SHA-256 (ARM Crypto Extensions + x86 SHA-NI)
+- [ ] 11D.2 — Cache-line alignment for ObjectState

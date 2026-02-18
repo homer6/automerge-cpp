@@ -104,16 +104,30 @@ inline auto sha256(std::span<const std::byte> input) -> std::array<std::byte, 32
 
     // Pad to 64-byte blocks: need 1 byte (0x80) + enough zeros + 8 bytes length
     auto padded_len = ((msg_len + 1 + 8 + 63) / 64) * 64;
-    auto padded = std::vector<std::byte>(padded_len, std::byte{0});
-    std::memcpy(padded.data(), input.data(), msg_len);
+
+    // Stack buffer for small inputs (covers typical change hashing ~80-120 bytes).
+    // Falls back to heap for inputs requiring >256 bytes padded.
+    static constexpr std::size_t stack_buf_size = 256;
+    auto stack_buf = std::array<std::byte, stack_buf_size>{};
+    auto heap_buf = std::vector<std::byte>{};
+
+    std::byte* padded = nullptr;
+    if (padded_len <= stack_buf_size) {
+        stack_buf.fill(std::byte{0});
+        padded = stack_buf.data();
+    } else {
+        heap_buf.resize(padded_len, std::byte{0});
+        padded = heap_buf.data();
+    }
+    std::memcpy(padded, input.data(), msg_len);
     padded[msg_len] = std::byte{0x80};
-    detail::write_be64(padded.data() + padded_len - 8, bit_len);
+    detail::write_be64(padded + padded_len - 8, bit_len);
 
     // Process each 64-byte block
     auto w = std::array<std::uint32_t, 64>{};
 
     for (std::size_t block = 0; block < padded_len; block += 64) {
-        const auto* bp = padded.data() + block;
+        const auto* bp = padded + block;
 
         // Prepare message schedule
         for (int i = 0; i < 16; ++i) {

@@ -12,6 +12,7 @@
 #include <automerge-cpp/types.hpp>
 #include "../encoding/leb128.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -131,9 +132,11 @@ private:
     }
 
     // Extract probe positions using LFSR-based multi-hash.
-    auto get_probes(const ChangeHash& hash) const -> std::vector<std::uint32_t> {
+    // Returns a fixed-size stack-allocated array (no heap allocation).
+    auto get_probes(const ChangeHash& hash) const -> std::array<std::uint32_t, default_num_probes> {
+        auto probes = std::array<std::uint32_t, default_num_probes>{};
         auto m = modulo();
-        if (m == 0) return {};
+        if (m == 0) return probes;
 
         std::uint32_t x{}, y{}, z{};
         std::memcpy(&x, &hash.bytes[0], 4);
@@ -143,13 +146,11 @@ private:
         y %= m;
         z %= m;
 
-        auto probes = std::vector<std::uint32_t>{};
-        probes.reserve(num_probes_);
-        probes.push_back(x);
-        for (std::uint32_t i = 1; i < num_probes_; ++i) {
+        probes[0] = x;
+        for (std::uint32_t i = 1; i < default_num_probes; ++i) {
             x = (x + y) % m;
             y = (y + z) % m;
-            probes.push_back(x);
+            probes[i] = x;
         }
         return probes;
     }
