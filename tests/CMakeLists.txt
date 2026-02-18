@@ -8,7 +8,11 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(googletest)
 
 add_executable(automerge_cpp_tests
-    placeholder_test.cpp
+    error_test.cpp
+    types_test.cpp
+    value_test.cpp
+    op_test.cpp
+    change_test.cpp
 )
 
 target_link_libraries(automerge_cpp_tests

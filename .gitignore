@@ -51,5 +51,9 @@ CMakeUserPresets.json
 *.swp
 *~
 
-# compile_commands.json symlink
+# Clangd / language server caches
+.cache/
 compile_commands.json
+
+# macOS
+.DS_Store
