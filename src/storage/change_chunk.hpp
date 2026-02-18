@@ -35,6 +35,7 @@ inline auto serialize_change_body(const Change& change,
     -> std::vector<std::byte> {
 
     auto body = std::vector<std::byte>{};
+    body.reserve(64 + change.operations.size() * 32);
 
     // Find actor index
     auto actor_idx = std::uint64_t{0};

@@ -160,34 +160,13 @@ auto Document::get_heads() const -> std::vector<ChangeHash> {
 static constexpr std::uint8_t MAGIC[] = {0x85, 0x6F, 0x4A, 0x83};
 static constexpr std::uint8_t FORMAT_VERSION = 0x01;
 
-// Build a deduplicated actor table from all changes
-static auto build_actor_table(const detail::DocState& state) -> std::vector<ActorId> {
-    auto seen = std::unordered_set<ActorId>{};
-    auto table = std::vector<ActorId>{};
-
-    // Local actor first
-    if (seen.insert(state.actor).second) {
-        table.push_back(state.actor);
-    }
-
-    for (const auto& change : state.change_history) {
-        if (seen.insert(change.actor).second) {
-            table.push_back(change.actor);
-        }
-        for (const auto& op : change.operations) {
-            if (seen.insert(op.id.actor).second) {
-                table.push_back(op.id.actor);
-            }
-        }
-    }
-    return table;
-}
-
 auto Document::save() const -> std::vector<std::byte> {
-    auto actor_table = build_actor_table(*state_);
+    const auto& actor_table = state_->actor_table();
 
-    // Build document body
+    // Build document body (pre-size: actor table + heads + ~256 bytes per change)
     auto body = std::vector<std::byte>{};
+    body.reserve(128 + actor_table.size() * 20 + state_->heads.size() * 32
+                 + state_->change_history.size() * 256);
 
     // Actor table: count + length-prefixed actors
     encoding::encode_uleb128(actor_table.size(), body);
@@ -621,7 +600,7 @@ static auto get_hashes_to_send(
     auto hashes = state.get_changes_since(last_sync_heads);
 
     // Build dependency graph (hash → dependents)
-    auto hash_idx = state.change_hash_index();
+    const auto& hash_idx = state.hash_index();
     auto dependents = std::map<ChangeHash, std::vector<ChangeHash>>{};
     auto change_hashes_set = std::set<ChangeHash>(hashes.begin(), hashes.end());
 
@@ -774,7 +753,7 @@ void Document::receive_sync_message(SyncState& sync_state,
 
     // Trim sent_hashes: remove ancestors of their acknowledged heads
     if (!message.heads.empty()) {
-        auto hash_idx = state_->change_hash_index();
+        const auto& hash_idx = state_->hash_index();
         auto ancestors = std::set<ChangeHash>{};
         auto queue = std::vector<ChangeHash>{};
 
