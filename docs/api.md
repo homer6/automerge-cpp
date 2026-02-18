@@ -23,10 +23,14 @@ mutations through transactions.
 ### Construction
 
 ```cpp
-auto doc = Document{};                // empty document, zero actor ID
+auto doc = Document{};                                       // default: hardware_concurrency() threads
+auto doc = Document{8u};                                     // explicit 8-thread pool
+auto doc = Document{1u};                                     // single-threaded, no pool, zero overhead
+auto doc = Document{pool};                                   // shared pool (std::shared_ptr<thread_pool>)
 ```
 
 `Document` is copyable (deep copy — independent state) and movable.
+`fork()` shares the parent's thread pool.
 
 ### Identity
 
@@ -105,6 +109,59 @@ Document::load(std::span<const std::byte>)  -> std::optional<Document>        //
 ```cpp
 doc.generate_sync_message(SyncState&)       -> std::optional<SyncMessage>     // next message to send (nullopt = synced)
 doc.receive_sync_message(SyncState&, const SyncMessage&) -> void              // process received message
+```
+
+### Thread Pool
+
+```cpp
+doc.get_thread_pool()  -> std::shared_ptr<thread_pool>   // may be nullptr if sequential
+```
+
+### Locking Control
+
+`Document` is thread-safe by default — read methods acquire a shared lock,
+write methods acquire an exclusive lock.
+
+For maximum read throughput when no writers are active, disable read locking
+to eliminate `shared_mutex` cache-line contention across cores:
+
+```cpp
+doc.set_read_locking(bool enabled) -> void    // default: true
+doc.read_locking()                 -> bool
+```
+
+```cpp
+doc.set_read_locking(false);  // caller guarantees no concurrent writers
+// ... parallel reads via pool->parallelize_loop() ...
+doc.set_read_locking(true);   // re-enable before writes
+```
+
+---
+
+## thread_pool
+
+Barak Shoshany's BS::thread_pool — a header-only work-stealing thread pool.
+Documents use it internally and expose it for user-level parallelism.
+
+```cpp
+#include <automerge-cpp/thread_pool.hpp>
+```
+
+```cpp
+// Create a shared pool
+auto pool = std::make_shared<am::thread_pool>(std::thread::hardware_concurrency());
+pool->sleep_duration = 0;  // yield instead of 500us sleep for low latency
+
+pool->get_thread_count()  -> uint32_t
+
+// Parallel loop: partitions [first, last) into blocks across threads
+pool->parallelize_loop(first, last, [](auto start, auto end) {
+    for (auto i = start; i < end; ++i) { /* work */ }
+});
+
+// Async task submission
+auto future = pool->submit([]() { return 42; });
+auto result = future.get();  // 42
 ```
 
 ---
