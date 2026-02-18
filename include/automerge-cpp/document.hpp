@@ -2,6 +2,7 @@
 
 #include <automerge-cpp/change.hpp>
 #include <automerge-cpp/cursor.hpp>
+#include <automerge-cpp/mark.hpp>
 #include <automerge-cpp/patch.hpp>
 #include <automerge-cpp/sync_state.hpp>
 #include <automerge-cpp/transaction.hpp>
@@ -92,6 +93,11 @@ public:
     // Phase 6: Cursors — stable positions
     auto cursor(const ObjId& obj, std::size_t index) const -> std::optional<Cursor>;
     auto resolve_cursor(const ObjId& obj, const Cursor& cursor) const -> std::optional<std::size_t>;
+
+    // Rich text marks
+    auto marks(const ObjId& obj) const -> std::vector<Mark>;
+    auto marks_at(const ObjId& obj,
+                  const std::vector<ChangeHash>& heads) const -> std::vector<Mark>;
 
 private:
     std::unique_ptr<detail::DocState> state_;

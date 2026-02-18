@@ -7,6 +7,7 @@
 #include <automerge-cpp/cursor.hpp>
 #include <automerge-cpp/document.hpp>
 #include <automerge-cpp/error.hpp>
+#include <automerge-cpp/mark.hpp>
 #include <automerge-cpp/op.hpp>
 #include <automerge-cpp/patch.hpp>
 #include <automerge-cpp/sync_state.hpp>

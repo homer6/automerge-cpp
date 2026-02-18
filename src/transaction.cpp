@@ -193,6 +193,29 @@ void Transaction::increment(const ObjId& obj, std::string_view key, std::int64_t
     pending_ops_.push_back(std::move(op));
 }
 
+void Transaction::mark(const ObjId& obj, std::size_t start, std::size_t end,
+                       std::string_view name, ScalarValue value) {
+    // Resolve start and end to element OpIds
+    auto start_elem = state_.list_element_id_at(obj, start);
+    assert(start_elem);
+    auto end_elem = state_.list_element_id_at(obj, end > 0 ? end - 1 : 0);
+    assert(end_elem);
+
+    auto op_id = state_.next_op_id();
+    state_.mark_range(obj, op_id, *start_elem, *end_elem,
+                      std::string{name}, value);
+    auto op = Op{
+        .id = op_id,
+        .obj = obj,
+        .key = map_key(std::string{name}),
+        .action = OpType::mark,
+        .value = Value{value},
+        .pred = {*start_elem, *end_elem},
+    };
+    state_.op_log.push_back(op);
+    pending_ops_.push_back(std::move(op));
+}
+
 void Transaction::commit() {
     if (pending_ops_.empty()) return;
 

@@ -35,6 +35,10 @@ public:
     // Counter operations
     void increment(const ObjId& obj, std::string_view key, std::int64_t delta);
 
+    // Mark operations (rich text)
+    void mark(const ObjId& obj, std::size_t start, std::size_t end,
+              std::string_view name, ScalarValue value);
+
 private:
     void commit();
 

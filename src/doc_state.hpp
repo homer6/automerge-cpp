@@ -34,11 +34,21 @@ struct ListElement {
     bool visible = true;
 };
 
+// A rich-text mark anchored by element OpIds (survives edits and merges).
+struct MarkEntry {
+    OpId mark_id;       // the OpId of the mark operation itself
+    OpId start_elem;    // the OpId of the first element in the range
+    OpId end_elem;      // the OpId of the last element in the range (inclusive)
+    std::string name;
+    ScalarValue value;
+};
+
 // The state of a single CRDT object in the document tree.
 struct ObjectState {
     ObjType type;
     std::map<std::string, std::vector<MapEntry>> map_entries;  // map/table
     std::vector<ListElement> list_elements;                     // list/text
+    std::vector<MarkEntry> marks;                               // rich-text marks
 };
 
 // The complete internal state of a Document.
@@ -284,6 +294,46 @@ struct DocState {
         counter->value += delta;
     }
 
+    // -- Mark operations ------------------------------------------------------
+
+    void mark_range(const ObjId& obj, OpId mark_id, OpId start_elem, OpId end_elem,
+                    const std::string& name, ScalarValue value) {
+        auto* state = get_object(obj);
+        assert(state && (state->type == ObjType::list || state->type == ObjType::text));
+
+        // Remove any existing mark with the same name and mark_id actor
+        // (same actor overriding their own mark with the same name)
+        state->marks.push_back(MarkEntry{
+            .mark_id = mark_id,
+            .start_elem = start_elem,
+            .end_elem = end_elem,
+            .name = name,
+            .value = std::move(value),
+        });
+    }
+
+    // Resolve a MarkEntry to visible indices. Returns nullopt if either
+    // endpoint is no longer visible.
+    auto resolve_mark_indices(const ObjectState& state, const MarkEntry& entry) const
+        -> std::optional<std::pair<std::size_t, std::size_t>> {
+        auto start_idx = std::optional<std::size_t>{};
+        auto end_idx = std::optional<std::size_t>{};
+        auto visible_count = std::size_t{0};
+
+        for (const auto& elem : state.list_elements) {
+            if (elem.insert_id == entry.start_elem && elem.visible) {
+                start_idx = visible_count;
+            }
+            if (elem.insert_id == entry.end_elem && elem.visible) {
+                end_idx = visible_count;
+            }
+            if (elem.visible) ++visible_count;
+        }
+
+        if (!start_idx || !end_idx) return std::nullopt;
+        return std::pair{*start_idx, *end_idx + 1};  // end is exclusive
+    }
+
     // -- Generic queries ------------------------------------------------------
 
     auto object_type(const ObjId& obj) const -> std::optional<ObjType> {
@@ -471,8 +521,24 @@ struct DocState {
                 }
                 break;
             }
-            case OpType::mark:
+            case OpType::mark: {
+                // Mark ops use: key=mark name, value=mark value,
+                // pred[0]=start element, pred[1]=end element
+                if (!is_map) break;  // name is stored as string key
+                if (op.pred.size() < 2) break;
+                auto* obj_state = get_object(op.obj);
+                if (!obj_state) break;
+                obj_state->marks.push_back(MarkEntry{
+                    .mark_id = op.id,
+                    .start_elem = op.pred[0],
+                    .end_elem = op.pred[1],
+                    .name = *key_str,
+                    .value = std::get_if<ScalarValue>(&op.value)
+                        ? *std::get_if<ScalarValue>(&op.value)
+                        : ScalarValue{Null{}},
+                });
                 break;
+            }
         }
     }
 

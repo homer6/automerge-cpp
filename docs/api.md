@@ -187,6 +187,13 @@ tx.splice_text(ObjId, std::size_t pos, std::size_t del,
 tx.increment(ObjId, std::string_view key, std::int64_t delta)   -> void
 ```
 
+### Mark Operations (Rich Text)
+
+```cpp
+tx.mark(ObjId, std::size_t start, std::size_t end,
+        std::string_view name, ScalarValue value)               -> void
+```
+
 ---
 
 ## Types
@@ -565,6 +572,13 @@ doc_a.get(am::root, "from_b");  // 2
 doc_b.get(am::root, "from_a");  // 1
 ```
 
+### Rich Text Marks
+
+```cpp
+doc.marks(ObjId)                            -> std::vector<Mark>
+doc.marks_at(ObjId, std::vector<ChangeHash>) -> std::vector<Mark>
+```
+
 ### Patches — Mutation with Change Notifications
 
 ```cpp
@@ -612,6 +626,36 @@ auto idx = doc.resolve_cursor(list_id, *cur);
 // idx == 2 (cursor tracked the element, not the index)
 ```
 
+### Rich Text Marks
+
+```cpp
+am::ObjId text_id;
+doc.transact([&](auto& tx) {
+    text_id = tx.put_object(am::root, "content", am::ObjType::text);
+    tx.splice_text(text_id, 0, 0, "Hello World");
+});
+
+// Mark "Hello" as bold
+doc.transact([&](auto& tx) {
+    tx.mark(text_id, 0, 5, "bold", true);
+});
+
+// Mark "World" as a link
+doc.transact([&](auto& tx) {
+    tx.mark(text_id, 6, 11, "link", std::string{"https://example.com"});
+});
+
+auto marks = doc.marks(text_id);
+// marks[0]: {start=0, end=5, name="bold", value=true}
+// marks[1]: {start=6, end=11, name="link", value="https://example.com"}
+
+// Marks survive insertions — indices adjust automatically
+doc.transact([&](auto& tx) {
+    tx.splice_text(text_id, 0, 0, ">>> ");
+});
+// "bold" mark is now at {start=4, end=9}
+```
+
 ---
 
 ## Patch
@@ -652,3 +696,23 @@ struct Cursor {
 ```
 
 Supports: `==`, `<=>`.
+
+## Mark
+
+```cpp
+#include <automerge-cpp/mark.hpp>
+```
+
+```cpp
+struct Mark {
+    std::size_t start;      // start index (inclusive)
+    std::size_t end;        // end index (exclusive)
+    std::string name;       // e.g. "bold", "italic", "link"
+    ScalarValue value;      // e.g. true, "https://..."
+};
+```
+
+Marks are anchored to element OpIds internally, so they survive insertions,
+deletions, and merges — indices are resolved at read time.
+
+Supports: `==`.

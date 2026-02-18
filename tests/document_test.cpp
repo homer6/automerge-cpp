@@ -2229,3 +2229,319 @@ TEST(Document, cursor_survives_merge) {
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(std::get<std::string>(std::get<ScalarValue>(*val)), "b");
 }
+
+// =============================================================================
+// Phase 6: Rich Text Marks
+// =============================================================================
+
+TEST(Document, mark_basic_apply_and_query) {
+    auto doc = Document{};
+    ObjId text_id;
+    doc.transact([&](auto& tx) {
+        text_id = tx.put_object(root, "content", ObjType::text);
+        tx.splice_text(text_id, 0, 0, "Hello World");
+    });
+
+    // Mark "Hello" (indices 0..5) as bold
+    doc.transact([&](auto& tx) {
+        tx.mark(text_id, 0, 5, "bold", true);
+    });
+
+    auto marks = doc.marks(text_id);
+    ASSERT_EQ(marks.size(), 1u);
+    EXPECT_EQ(marks[0].start, 0u);
+    EXPECT_EQ(marks[0].end, 5u);
+    EXPECT_EQ(marks[0].name, "bold");
+    EXPECT_TRUE(std::get<bool>(marks[0].value));
+}
+
+TEST(Document, mark_multiple_non_overlapping) {
+    auto doc = Document{};
+    ObjId text_id;
+    doc.transact([&](auto& tx) {
+        text_id = tx.put_object(root, "content", ObjType::text);
+        tx.splice_text(text_id, 0, 0, "Hello World");
+    });
+
+    doc.transact([&](auto& tx) {
+        tx.mark(text_id, 0, 5, "bold", true);
+        tx.mark(text_id, 6, 11, "italic", true);
+    });
+
+    auto marks = doc.marks(text_id);
+    ASSERT_EQ(marks.size(), 2u);
+
+    // Sort by start to make assertions deterministic
+    std::ranges::sort(marks, {}, &Mark::start);
+
+    EXPECT_EQ(marks[0].start, 0u);
+    EXPECT_EQ(marks[0].end, 5u);
+    EXPECT_EQ(marks[0].name, "bold");
+
+    EXPECT_EQ(marks[1].start, 6u);
+    EXPECT_EQ(marks[1].end, 11u);
+    EXPECT_EQ(marks[1].name, "italic");
+}
+
+TEST(Document, mark_overlapping_ranges) {
+    auto doc = Document{};
+    ObjId text_id;
+    doc.transact([&](auto& tx) {
+        text_id = tx.put_object(root, "content", ObjType::text);
+        tx.splice_text(text_id, 0, 0, "Hello World");
+    });
+
+    doc.transact([&](auto& tx) {
+        tx.mark(text_id, 0, 8, "bold", true);
+        tx.mark(text_id, 3, 11, "italic", true);
+    });
+
+    auto marks = doc.marks(text_id);
+    ASSERT_EQ(marks.size(), 2u);
+
+    // Sort by name for determinism
+    std::ranges::sort(marks, {}, &Mark::name);
+
+    EXPECT_EQ(marks[0].name, "bold");
+    EXPECT_EQ(marks[0].start, 0u);
+    EXPECT_EQ(marks[0].end, 8u);
+
+    EXPECT_EQ(marks[1].name, "italic");
+    EXPECT_EQ(marks[1].start, 3u);
+    EXPECT_EQ(marks[1].end, 11u);
+}
+
+TEST(Document, mark_with_string_value) {
+    auto doc = Document{};
+    ObjId text_id;
+    doc.transact([&](auto& tx) {
+        text_id = tx.put_object(root, "content", ObjType::text);
+        tx.splice_text(text_id, 0, 0, "click here");
+    });
+
+    doc.transact([&](auto& tx) {
+        tx.mark(text_id, 0, 10, "link", std::string{"https://example.com"});
+    });
+
+    auto marks = doc.marks(text_id);
+    ASSERT_EQ(marks.size(), 1u);
+    EXPECT_EQ(marks[0].name, "link");
+    EXPECT_EQ(std::get<std::string>(marks[0].value), "https://example.com");
+}
+
+TEST(Document, mark_survives_insert_before_range) {
+    auto doc = Document{};
+    ObjId text_id;
+    doc.transact([&](auto& tx) {
+        text_id = tx.put_object(root, "content", ObjType::text);
+        tx.splice_text(text_id, 0, 0, "Hello");
+    });
+
+    // Mark all of "Hello" as bold
+    doc.transact([&](auto& tx) {
+        tx.mark(text_id, 0, 5, "bold", true);
+    });
+
+    // Insert ">>> " before "Hello"
+    doc.transact([&](auto& tx) {
+        tx.splice_text(text_id, 0, 0, ">>> ");
+    });
+
+    EXPECT_EQ(doc.text(text_id), ">>> Hello");
+
+    auto marks = doc.marks(text_id);
+    ASSERT_EQ(marks.size(), 1u);
+    // Mark should shift to cover indices 4..9
+    EXPECT_EQ(marks[0].start, 4u);
+    EXPECT_EQ(marks[0].end, 9u);
+    EXPECT_EQ(marks[0].name, "bold");
+}
+
+TEST(Document, mark_survives_insert_within_range) {
+    auto doc = Document{};
+    ObjId text_id;
+    doc.transact([&](auto& tx) {
+        text_id = tx.put_object(root, "content", ObjType::text);
+        tx.splice_text(text_id, 0, 0, "abcde");
+    });
+
+    // Mark all as bold (indices 0..5)
+    doc.transact([&](auto& tx) {
+        tx.mark(text_id, 0, 5, "bold", true);
+    });
+
+    // Insert "XY" after position 2 (between c and d)
+    doc.transact([&](auto& tx) {
+        tx.splice_text(text_id, 3, 0, "XY");
+    });
+
+    EXPECT_EQ(doc.text(text_id), "abcXYde");
+
+    auto marks = doc.marks(text_id);
+    ASSERT_EQ(marks.size(), 1u);
+    // Mark should expand: start element 'a' is at 0, end element 'e' is at 6
+    EXPECT_EQ(marks[0].start, 0u);
+    EXPECT_EQ(marks[0].end, 7u);
+    EXPECT_EQ(marks[0].name, "bold");
+}
+
+TEST(Document, mark_no_marks_returns_empty) {
+    auto doc = Document{};
+    ObjId text_id;
+    doc.transact([&](auto& tx) {
+        text_id = tx.put_object(root, "content", ObjType::text);
+        tx.splice_text(text_id, 0, 0, "plain text");
+    });
+
+    auto marks = doc.marks(text_id);
+    EXPECT_TRUE(marks.empty());
+}
+
+TEST(Document, mark_survives_merge) {
+    auto doc1 = Document{};
+    const std::uint8_t raw1[16] = {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+    doc1.set_actor_id(ActorId{raw1});
+
+    ObjId text_id;
+    doc1.transact([&](auto& tx) {
+        text_id = tx.put_object(root, "content", ObjType::text);
+        tx.splice_text(text_id, 0, 0, "Hello World");
+    });
+
+    auto doc2 = doc1.fork();
+
+    // doc1 marks "Hello" as bold
+    doc1.transact([&](auto& tx) {
+        tx.mark(text_id, 0, 5, "bold", true);
+    });
+
+    // doc2 marks "World" as italic
+    doc2.transact([&](auto& tx) {
+        tx.mark(text_id, 6, 11, "italic", true);
+    });
+
+    doc1.merge(doc2);
+
+    auto marks = doc1.marks(text_id);
+    ASSERT_EQ(marks.size(), 2u);
+
+    std::ranges::sort(marks, {}, &Mark::name);
+    EXPECT_EQ(marks[0].name, "bold");
+    EXPECT_EQ(marks[0].start, 0u);
+    EXPECT_EQ(marks[0].end, 5u);
+
+    EXPECT_EQ(marks[1].name, "italic");
+    EXPECT_EQ(marks[1].start, 6u);
+    EXPECT_EQ(marks[1].end, 11u);
+}
+
+TEST(Document, marks_at_historical_read) {
+    auto doc = Document{};
+    ObjId text_id;
+    doc.transact([&](auto& tx) {
+        text_id = tx.put_object(root, "content", ObjType::text);
+        tx.splice_text(text_id, 0, 0, "Hello World");
+    });
+
+    doc.transact([&](auto& tx) {
+        tx.mark(text_id, 0, 5, "bold", true);
+    });
+
+    auto heads_v1 = doc.get_heads();
+
+    // Add another mark after snapshot
+    doc.transact([&](auto& tx) {
+        tx.mark(text_id, 6, 11, "italic", true);
+    });
+
+    // Current state: 2 marks
+    EXPECT_EQ(doc.marks(text_id).size(), 2u);
+
+    // At v1: only 1 mark
+    auto past_marks = doc.marks_at(text_id, heads_v1);
+    ASSERT_EQ(past_marks.size(), 1u);
+    EXPECT_EQ(past_marks[0].name, "bold");
+    EXPECT_EQ(past_marks[0].start, 0u);
+    EXPECT_EQ(past_marks[0].end, 5u);
+}
+
+TEST(Document, mark_save_and_load_round_trip) {
+    auto doc = make_doc(1);
+    ObjId text_id;
+    doc.transact([&](auto& tx) {
+        text_id = tx.put_object(root, "content", ObjType::text);
+        tx.splice_text(text_id, 0, 0, "Hello World");
+    });
+
+    doc.transact([&](auto& tx) {
+        tx.mark(text_id, 0, 5, "bold", true);
+        tx.mark(text_id, 6, 11, "link", std::string{"https://example.com"});
+    });
+
+    auto loaded = Document::load(doc.save());
+    ASSERT_TRUE(loaded.has_value());
+
+    EXPECT_EQ(loaded->text(text_id), "Hello World");
+
+    auto marks = loaded->marks(text_id);
+    ASSERT_EQ(marks.size(), 2u);
+
+    std::ranges::sort(marks, {}, &Mark::name);
+    EXPECT_EQ(marks[0].name, "bold");
+    EXPECT_EQ(marks[0].start, 0u);
+    EXPECT_EQ(marks[0].end, 5u);
+    EXPECT_TRUE(std::get<bool>(marks[0].value));
+
+    EXPECT_EQ(marks[1].name, "link");
+    EXPECT_EQ(marks[1].start, 6u);
+    EXPECT_EQ(marks[1].end, 11u);
+    EXPECT_EQ(std::get<std::string>(marks[1].value), "https://example.com");
+}
+
+TEST(Document, mark_sync_round_trip) {
+    auto doc1 = make_doc(1);
+    ObjId text_id;
+    doc1.transact([&](auto& tx) {
+        text_id = tx.put_object(root, "content", ObjType::text);
+        tx.splice_text(text_id, 0, 0, "Hello World");
+    });
+
+    doc1.transact([&](auto& tx) {
+        tx.mark(text_id, 0, 5, "bold", true);
+    });
+
+    auto doc2 = make_doc(2);
+    sync_docs(doc1, doc2);
+
+    EXPECT_EQ(doc2.text(text_id), "Hello World");
+
+    auto marks = doc2.marks(text_id);
+    ASSERT_EQ(marks.size(), 1u);
+    EXPECT_EQ(marks[0].name, "bold");
+    EXPECT_EQ(marks[0].start, 0u);
+    EXPECT_EQ(marks[0].end, 5u);
+}
+
+TEST(Document, mark_transact_with_patches_mark_only_transaction) {
+    auto doc = Document{};
+    ObjId text_id;
+    doc.transact([&](auto& tx) {
+        text_id = tx.put_object(root, "content", ObjType::text);
+        tx.splice_text(text_id, 0, 0, "Hello");
+    });
+
+    // Mark-only transaction: marks are metadata that don't produce
+    // element-level patches (put/insert/delete). The mark is stored
+    // and queryable via marks() instead.
+    auto patches = doc.transact_with_patches([&](auto& tx) {
+        tx.mark(text_id, 0, 5, "bold", true);
+    });
+
+    // Marks don't produce element-level patches
+    EXPECT_TRUE(patches.empty());
+
+    // But the mark is queryable
+    auto marks = doc.marks(text_id);
+    ASSERT_EQ(marks.size(), 1u);
+    EXPECT_EQ(marks[0].name, "bold");
+}

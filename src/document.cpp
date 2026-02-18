@@ -1,5 +1,6 @@
 #include <automerge-cpp/document.hpp>
 #include <automerge-cpp/cursor.hpp>
+#include <automerge-cpp/mark.hpp>
 #include <automerge-cpp/patch.hpp>
 
 #include "doc_state.hpp"
@@ -920,6 +921,38 @@ auto Document::cursor(const ObjId& obj, std::size_t index) const
 auto Document::resolve_cursor(const ObjId& obj, const Cursor& cur) const
     -> std::optional<std::size_t> {
     return state_->find_element_visible_index(obj, cur.position);
+}
+
+// -- Rich text marks ----------------------------------------------------------
+
+static auto collect_marks(const detail::DocState& state, const ObjId& obj)
+    -> std::vector<Mark> {
+    const auto* obj_state = state.get_object(obj);
+    if (!obj_state) return {};
+
+    auto result = std::vector<Mark>{};
+    for (const auto& entry : obj_state->marks) {
+        auto indices = state.resolve_mark_indices(*obj_state, entry);
+        if (!indices) continue;
+        auto [start, end] = *indices;
+        result.push_back(Mark{
+            .start = start,
+            .end = end,
+            .name = entry.name,
+            .value = entry.value,
+        });
+    }
+    return result;
+}
+
+auto Document::marks(const ObjId& obj) const -> std::vector<Mark> {
+    return collect_marks(*state_, obj);
+}
+
+auto Document::marks_at(const ObjId& obj,
+                        const std::vector<ChangeHash>& heads) const -> std::vector<Mark> {
+    auto snapshot = state_->rebuild_state_at(heads);
+    return collect_marks(snapshot, obj);
 }
 
 }  // namespace automerge_cpp

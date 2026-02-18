@@ -21,10 +21,11 @@ automerge-cpp/
 │   ├── sync_state.hpp                      #   SyncState, SyncMessage, Have
 │   ├── patch.hpp                           #   Patch, PatchAction types
 │   ├── cursor.hpp                          #   Cursor (stable position)
+│   ├── mark.hpp                            #   Mark (rich text annotation)
 │   └── error.hpp                           #   Error, ErrorKind
 ├── src/                                    # IMPLEMENTATION
-│   ├── doc_state.hpp                       #   internal: DocState, ObjectState, MapEntry, ListElement
-│   ├── document.cpp                        #   Document methods (core, save/load, sync, patches, time travel, cursors)
+│   ├── doc_state.hpp                       #   internal: DocState, ObjectState, MapEntry, ListElement, MarkEntry
+│   ├── document.cpp                        #   Document methods (core, save/load, sync, patches, time travel, cursors, marks)
 │   ├── transaction.cpp                     #   Transaction methods
 │   ├── encoding/                           #   LEB128 variable-length integer codec
 │   │   └── leb128.hpp
@@ -33,14 +34,14 @@ automerge-cpp/
 │   │   └── deserializer.hpp                #     byte stream reader
 │   └── sync/                               #   Sync protocol internals
 │       └── bloom_filter.hpp                #     bloom filter (10 bits/entry, 7 probes)
-├── tests/                                  # TESTS (Google Test) — 195 tests
+├── tests/                                  # TESTS (Google Test) — 207 tests
 │   ├── CMakeLists.txt
 │   ├── error_test.cpp
 │   ├── types_test.cpp
 │   ├── value_test.cpp
 │   ├── op_test.cpp
 │   ├── change_test.cpp
-│   ├── document_test.cpp                   #   core, merge, serialization, sync, patches, time travel, cursors
+│   ├── document_test.cpp                   #   core, merge, serialization, sync, patches, time travel, cursors, marks
 │   └── leb128_test.cpp
 ├── examples/                               # EXAMPLES
 │   ├── CMakeLists.txt
@@ -138,6 +139,7 @@ See [docs/plans/architecture.md](docs/plans/architecture.md) for the full design
 | `storage/` (internal) | Binary serialization/deserialization (LEB128-based) |
 | `Patch` | Incremental change notifications from transactions |
 | `Cursor` | Stable position tracking in lists/text |
+| `Mark` | Rich text range annotations (bold, italic, links) |
 
 ### Key Invariants
 
@@ -146,10 +148,11 @@ See [docs/plans/architecture.md](docs/plans/architecture.md) for the full design
 - The change DAG is acyclic (enforced by hash-based dependencies).
 - Merge is commutative, associative, and idempotent.
 - Cursors track by element identity (OpId), not by index.
+- Marks are anchored to element OpIds for merge correctness.
 
 ## Testing
 
-195 tests across 7 test files. Uses Google Test (fetched via CMake FetchContent).
+207 tests across 7 test files. Uses Google Test (fetched via CMake FetchContent).
 
 | Test File | Count | Covers |
 |-----------|-------|--------|
@@ -158,7 +161,7 @@ See [docs/plans/architecture.md](docs/plans/architecture.md) for the full design
 | `value_test.cpp` | 14 | ScalarValue, Value, ObjType, Null, Counter, Timestamp |
 | `op_test.cpp` | 4 | Op, OpType |
 | `change_test.cpp` | 4 | Change |
-| `document_test.cpp` | 125 | Document core, merge, serialization, sync, patches, time travel, cursors |
+| `document_test.cpp` | 137 | Document core, merge, serialization, sync, patches, time travel, cursors, marks |
 | `leb128_test.cpp` | 22 | LEB128 encode/decode |
 
 - **Property tests**: verify CRDT algebraic properties (commutativity, associativity, idempotency)

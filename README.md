@@ -12,7 +12,7 @@ This is a **from-scratch** reimplementation, not a wrapper. It mirrors the upstr
 Automerge semantics while embracing idiomatic C++23: algebraic types, ranges pipelines,
 strong types, and APIs that make illegal states unrepresentable.
 
-**195 tests passing** across 6 implementation phases.
+**207 tests passing** across 7 implementation phases.
 
 ## Quick Example
 
@@ -68,12 +68,12 @@ int main() {
 - **Patches**: incremental change notifications via `transact_with_patches()`
 - **Time travel**: read document state at any historical point (`get_at()`, `text_at()`, etc.)
 - **Cursors**: stable positions in lists/text that survive edits and merges
+- **Rich text marks**: range annotations (bold, italic, links) anchored by identity, not index
 - **Strong types**: `ActorId`, `ObjId`, `ChangeHash`, `OpId` never implicitly convert
 - **Type-safe values**: `std::variant`-based `ScalarValue` and `Value` types
 
 ### Planned
 
-- Rich text marks (bold, italic, etc.)
 - Upstream Rust binary format interoperability
 - Columnar encoding and DEFLATE compression
 
@@ -152,6 +152,7 @@ automerge-cpp/
     sync_state.hpp            #   SyncState, SyncMessage
     patch.hpp                 #   Patch, PatchAction types
     cursor.hpp                #   Cursor (stable position)
+    mark.hpp                  #   Mark (rich text annotation)
     error.hpp                 #   Error, ErrorKind
   src/                        # implementation
     document.cpp              #   Document methods
