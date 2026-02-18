@@ -16,7 +16,7 @@ jobs:
       with:
         usesh: true
         prepare: |
-          pkg install -y cmake git zlib
+          pkg install -y cmake git
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release -DAUTOMERGE_CPP_BUILD_TESTS=ON -DAUTOMERGE_CPP_BUILD_EXAMPLES=ON -DAUTOMERGE_CPP_BUILD_BENCHMARKS=ON
           cmake --build build --config Release
