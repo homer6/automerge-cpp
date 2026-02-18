@@ -7,6 +7,8 @@
 #include <automerge-cpp/types.hpp>
 #include <automerge-cpp/value.hpp>
 
+#include "crypto/sha256.hpp"
+
 #include <algorithm>
 #include <cassert>
 #include <cstring>
@@ -719,35 +721,45 @@ struct DocState {
         return std::nullopt;
     }
 
-    // -- Change hash computation (Phase 3 simple hash, SHA-256 in Phase 4) ----
+    // -- Change hash computation (SHA-256 based) --------------------------------
 
     static auto compute_change_hash(const Change& change) -> ChangeHash {
-        auto hash = std::uint64_t{14695981039346656037ULL};
-        auto hash_byte = [&](std::byte b) {
-            hash ^= static_cast<std::uint64_t>(b);
-            hash *= std::uint64_t{1099511628211ULL};
-        };
-        auto hash_u64 = [&](std::uint64_t v) {
-            for (int i = 0; i < 8; ++i) {
-                hash_byte(static_cast<std::byte>(v >> (i * 8)));
-            }
-        };
+        // Build a deterministic byte representation of the change
+        auto input = std::vector<std::byte>{};
 
-        for (auto b : change.actor.bytes) hash_byte(b);
-        hash_u64(change.seq);
-        hash_u64(change.start_op);
-        hash_u64(static_cast<std::uint64_t>(change.timestamp));
-        hash_u64(change.operations.size());
+        // Actor ID
+        input.insert(input.end(), change.actor.bytes.begin(), change.actor.bytes.end());
 
+        // Seq (little-endian 8 bytes)
+        for (int i = 0; i < 8; ++i) {
+            input.push_back(static_cast<std::byte>(change.seq >> (i * 8)));
+        }
+
+        // Start op
+        for (int i = 0; i < 8; ++i) {
+            input.push_back(static_cast<std::byte>(change.start_op >> (i * 8)));
+        }
+
+        // Timestamp
+        auto ts = static_cast<std::uint64_t>(change.timestamp);
+        for (int i = 0; i < 8; ++i) {
+            input.push_back(static_cast<std::byte>(ts >> (i * 8)));
+        }
+
+        // Number of operations
+        auto num_ops = static_cast<std::uint64_t>(change.operations.size());
+        for (int i = 0; i < 8; ++i) {
+            input.push_back(static_cast<std::byte>(num_ops >> (i * 8)));
+        }
+
+        // Dependency hashes
+        for (const auto& dep : change.deps) {
+            input.insert(input.end(), dep.bytes.begin(), dep.bytes.end());
+        }
+
+        auto digest = crypto::sha256(input);
         ChangeHash result{};
-        auto h1 = hash;
-        auto h2 = hash * 6364136223846793005ULL + 1442695040888963407ULL;
-        auto h3 = h2 * 6364136223846793005ULL + 1442695040888963407ULL;
-        auto h4 = h3 * 6364136223846793005ULL + 1442695040888963407ULL;
-        std::memcpy(&result.bytes[0], &h1, 8);
-        std::memcpy(&result.bytes[8], &h2, 8);
-        std::memcpy(&result.bytes[16], &h3, 8);
-        std::memcpy(&result.bytes[24], &h4, 8);
+        std::memcpy(result.bytes.data(), digest.data(), 32);
         return result;
     }
 };

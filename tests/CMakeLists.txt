@@ -15,12 +15,19 @@ add_executable(automerge_cpp_tests
     change_test.cpp
     document_test.cpp
     leb128_test.cpp
+    rle_test.cpp
+    delta_encoder_test.cpp
+    sha256_test.cpp
+    column_spec_test.cpp
+    chunk_test.cpp
+    change_op_columns_test.cpp
 )
 
 target_link_libraries(automerge_cpp_tests
     PRIVATE
         automerge-cpp::automerge-cpp
         GTest::gtest_main
+        ZLIB::ZLIB
 )
 
 include(GoogleTest)
