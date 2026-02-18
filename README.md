@@ -85,19 +85,22 @@ int main() {
 
 ## Performance
 
-Release-build highlights (Apple M3 Max):
+Release-build highlights (Intel Xeon Platinum 8358, Linux, GCC 13.3):
 
 | Operation | Throughput |
 |-----------|------------|
-| Map put (batched) | 3.4 M ops/s |
-| Map get | 28.5 M ops/s |
-| List get | 4.5 M ops/s |
-| Fork | 125.6 K ops/s |
-| Merge (10+10 puts) | 248.7 K ops/s |
-| Cursor resolve | 6.0 M ops/s |
-| Time travel text_at | 463.3 K ops/s |
+| Map put (batched) | 4.1 M ops/s |
+| Map get | 27.2 M ops/s |
+| Sync round trip | 26.4 K ops/s |
+| Time travel get_at | 2.88 M ops/s |
+| Merge (10+10 puts) | 260 K ops/s |
+| Cursor resolve | 2.9 M ops/s |
+| Save (100 keys) | 31.8 K ops/s |
 
-See [docs/benchmark-results.md](docs/benchmark-results.md) for full results.
+Key optimizations in v0.4.0 delivered **22x** faster time travel and **5.6x** faster sync
+via hash caching, actor table caching, and allocation reduction.
+
+See [docs/benchmark-results.md](docs/benchmark-results.md) for full results and platform comparison.
 
 ## Design Philosophy
 

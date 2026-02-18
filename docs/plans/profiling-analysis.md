@@ -284,6 +284,126 @@ include x86 SHA-NI alongside ARM Crypto Extensions.
 
 ---
 
+## Post-Optimization Results (Linux)
+
+Optimizations implemented: **11A.3** (hash cache), **11A.3b** (actor table cache),
+**11B.3** (buffer pre-sizing), **11B.4** (SHA-256 stack buffer).
+
+### Before/After Benchmark Comparison
+
+| Benchmark | Before (ns) | After (ns) | Speedup | Primary Cause |
+|-----------|-------------|------------|---------|---------------|
+| **bm_get_at** | 7,660 | 347 | **22.1x** | Hash cache eliminates redundant SHA-256 |
+| **bm_sync_full_round_trip** | 212,600 | 37,880 | **5.6x** | Hash cache (4-6 calls to change_hash_index → 0) |
+| **bm_sync_generate_message** | 669 | 241 | **2.8x** | Hash cache + bloom filter uses cached hashes |
+| **bm_text_at** | 2,355 | 1,185 | **2.0x** | Hash cache in changes_visible_at() |
+| **bm_cursor_resolve** | 489 | 345 | **1.4x** | Hash cache in time-travel path |
+| **bm_cursor_create** | 402 | 361 | **1.1x** | Minor hash cache benefit |
+| **bm_save_large** | 130,660 | 106,550 | **1.2x** | Actor table cache (15.6% → 0%) |
+| **bm_save** | 34,760 | 31,490 | **1.1x** | Actor table cache + buffer pre-sizing |
+| bm_map_put | 1,143 | 1,086 | 1.05x | Minor (within noise) |
+| bm_merge | 3,881 | 3,843 | 1.01x | Unchanged (expected) |
+| bm_text_splice_bulk | 10,763,000 | 10,330,000 | 1.04x | Unchanged (bottleneck is visible_index_to_real) |
+| bm_load | 36,235 | 36,080 | 1.00x | Unchanged (expected) |
+
+No regressions observed.
+
+### Post-Optimization Profile: sync_full_round_trip (37.9µs/iter, was 213µs)
+
+| Function | % Cycles | Before % | Notes |
+|----------|----------|----------|-------|
+| `Hashtable::find` (ChangeHash) | **12.56%** | — | Hash lookups now visible (was hidden under SHA-256) |
+| `_int_malloc` | 7.07% | 1.83% | Allocator now larger fraction of smaller total |
+| `_int_free` | 5.73% | 4.04% | |
+| `crypto::sha256` | **5.57%** | **56.66%** | Down 10x — only called for new changes, not cached |
+| `__memcmp_evex_movbe` | 5.35% | 3.59% | Hash comparisons |
+| `malloc` | 5.20% | 5.94% | |
+| `Document::generate_sync_message` | 4.23% | 1.10% | Now a visible fraction |
+| `DocState::get_changes_since` | 3.80% | — | Hash index lookup instead of rebuild |
+| `cfree` | 3.31% | 2.10% | |
+| `malloc_consolidate` | 3.07% | — | |
+| `Transaction::put` | 2.56% | — | Actual work now visible |
+| `Hashtable::_M_insert_unique` (ChangeHash) | 2.14% | — | Cache population |
+
+**Analysis:** SHA-256 dropped from **56.66% → 5.57%** (10x reduction in share). The workload
+shifted from compute-bound SHA-256 to memory-bound hash table operations and allocator overhead.
+malloc/free is now **~24%** of total cycles — the next optimization frontier for sync.
+
+### Post-Optimization Profile: save_large (106.6µs/iter, was 131µs)
+
+| Function | % Cycles | Before % | Notes |
+|----------|----------|----------|-------|
+| `encode_change_ops` | **24.20%** | **20.79%** | Now dominant (larger share of smaller total) |
+| `crypto::sha256` | 6.89% | 5.40% | Chunk checksum (unavoidable) |
+| `encode_sleb128` | 6.01% | 4.80% | |
+| `encode_uleb128` | 5.23% | 4.65% | |
+| `RleEncoder<string>::flush_run` | 4.74% | 4.52% | |
+| zlib deflate | ~5.96% | ~6.10% | |
+| `RleEncoder<long>::append` | 3.43% | 2.85% | |
+| `RleEncoder<unsigned long>::append` | 3.32% | 2.69% | |
+| `__memset_evex_unaligned_erms` | 2.45% | 2.15% | |
+| `Hashtable::_M_insert_unique` (ActorId) | **0%** | **15.58%** | Completely eliminated by actor table cache |
+
+**Analysis:** Actor table hash insertion dropped from **15.58% → 0%** (fully cached). Column
+encoding (`encode_change_ops` + RLE + LEB128) is now ~45% of total — the dominant cost is
+inherently sequential encoding work. Further speedup requires parallel change serialization
+(when multiple changes exist) or hardware acceleration.
+
+### Post-Optimization Profile: get_at (347ns/iter, was 7.66µs)
+
+| Function | % Cycles | Before % | Notes |
+|----------|----------|----------|-------|
+| `Hashtable::find` (ChangeHash) | **24.06%** | — | Hash index lookup (O(1) per hash) |
+| `_int_free` | 8.09% | 2.77% | DocState copy teardown |
+| `cfree` | 7.10% | 1.49% | |
+| `malloc` | 5.81% | 3.96% | DocState copy construction |
+| `_Prime_rehash_policy::_M_need_rehash` | 5.10% | — | Hash table rebuild in DocState copy |
+| `ObjectState::operator[]` (ObjId) | 4.83% | — | Object lookup |
+| `_Prime_rehash_policy::_M_next_bkt` | 4.53% | — | |
+| `DocState::DocState()` | 4.22% | — | Copy constructor for time travel |
+| `DocState::changes_visible_at` | 3.41% | — | DAG traversal (now visible) |
+| `DocState::apply_op` | 3.40% | — | Op replay |
+| `crypto::sha256` | **0%** | **73.24%** | Completely eliminated by hash cache |
+
+**Analysis:** SHA-256 dropped from **73.24% → 0%** — the hash cache completely eliminated
+all redundant hashing. The bottleneck shifted to hash table operations (~34%), allocator
+overhead (~21%), and DocState copy construction (~8%). The 22.1x speedup comes entirely from
+avoiding recomputation of all change hashes on every `get_at()` call. Further optimization
+of `get_at` would require avoiding the full DocState copy (e.g., persistent/immutable data
+structures or snapshot-based time travel).
+
+### Post-Optimization Hardware Counters
+
+| Benchmark | IPC (before → after) | L1d Misses | Cache Misses | Branch Misses |
+|-----------|---------------------|------------|--------------|---------------|
+| text_splice_bulk | 1.13 → **1.30** | 5.1B → 5.1B | 2.7M → 3.1M | 464K → 527K |
+| sync_full_round_trip | 3.68 → **2.13** | 31M → 132M | 154K → 649K | 30.6M → 47.2M |
+| save_large | 3.67 → **3.59** | 442M → 385M | 119K → 243K | 6.5M → 6.4M |
+| get_at | — → **2.97** | — → 1.4M | — → 87K | — → 3.0M |
+
+**Key observations:**
+- **sync IPC dropped from 3.68 → 2.13** — expected. SHA-256 is compute-dense (high IPC);
+  hash table lookups and malloc/free are memory-bound (lower IPC). Despite lower IPC, the
+  benchmark is 5.6x faster because vastly less total work is done.
+- **sync L1d misses increased 4x** (31M → 132M) — the hash table random-access pattern causes
+  more L1 misses than SHA-256's sequential block processing, but across far fewer total cycles.
+- **text_splice_bulk unchanged** — expected, no optimization targeted `visible_index_to_real()`.
+  Still IPC 1.30, still 5.1B L1d misses. Fenwick tree (11A.4) is needed.
+- **save_large IPC stable at 3.59** — column encoding remains compute-bound.
+- **get_at IPC 2.97** — a mix of hash lookups (memory-bound) and op replay (compute-bound).
+
+### Remaining Bottlenecks After Optimization
+
+| Benchmark | Primary Bottleneck | % of Time | Next Optimization |
+|-----------|-------------------|-----------|-------------------|
+| text_splice_bulk | `visible_index_to_real` O(n) scan | 98% | **11A.4 Fenwick tree** (7-25x) |
+| sync_full_round_trip | malloc/free (~24%) + hash lookups (13%) | 37% | Arena allocator or pool; hardware SHA-NI for remaining hashes |
+| save_large | `encode_change_ops` + RLE/LEB128 | 45% | **Parallel change serialization** (when N>1 changes) |
+| get_at | Hash table ops (~34%) + allocator (~21%) | 55% | Persistent data structures (avoid DocState copy) |
+| save | zlib (~12%) + column encoding (~10%) | 22% | **Parallel DEFLATE**; hardware SHA-NI |
+
+---
+
 ## Summary: The Three Dominant Costs
 
 ### 1. `visible_index_to_real()` — O(n) linear scan (98% of list/text operations)
@@ -409,18 +529,18 @@ benchmarks with 100-1000 changes to show meaningful speedups.
 
 ## Optimization Priority (by measured impact)
 
-| Priority | Optimization | macOS Bottleneck | Linux Bottleneck | Expected Speedup | Effort |
+| Priority | Optimization | macOS Bottleneck | Linux Bottleneck | Expected Speedup | Status |
 |----------|-------------|-----------------|-----------------|-------------------|--------|
-| **P0** | Fenwick tree for visible_index_to_real | 98% of list/text | 98% of list/text | 7-25x | 2 hr |
-| **P0** | Cache change hash index | 87-94% of sync/time-travel | 57-73% of sync/time-travel | 5-10x | 30 min |
-| **P1** | Hardware SHA-256 (ARM Crypto + x86 SHA-NI) | 56-94% of save/sync | 7-73% of save/sync | 3-10x per hash | 2 hr |
-| **P1** | SHA-256 stack buffer | (included above) | 14% malloc/free in sync | 10-20% per hash | 30 min |
-| **P1** | Cache actor table | <1% (hidden by SHA-256) | **15.6% of save_large** | 1.2-1.5x save | 30 min |
-| **P2** | Parallel change serialization (Taskflow) | 40% of save_large | 21% of save_large | min(N,cores)x | 45 min |
-| **P2** | Parallel chunk parsing (Taskflow) | load hot path | load hot path | min(N,cores)x | 45 min |
-| **P2** | Parallel hash computation (Taskflow) | hash cache rebuild | hash cache rebuild | min(N,cores)x | 30 min |
-| **P3** | Buffer pre-sizing (reserve) | RLE encoder allocs | RLE encoder allocs | 1.5x save | 15 min |
-| **P3** | Parallel DEFLATE compress/decompress | 0.5% of save | ~12% of save | 2-4x per change | 30 min |
+| **P0** | Fenwick tree for visible_index_to_real | 98% of list/text | 98% of list/text | 7-25x | **TODO** |
+| ~~P0~~ | ~~Cache change hash index~~ | ~~87-94% of sync/time-travel~~ | ~~57-73% of sync/time-travel~~ | ~~5-10x~~ | **DONE** — 22.1x get_at, 5.6x sync |
+| **P1** | Hardware SHA-256 (ARM Crypto + x86 SHA-NI) | 56-94% of save/sync | 5.6-6.9% of save/sync (post-cache) | 3-10x per hash | **TODO** |
+| ~~P1~~ | ~~SHA-256 stack buffer~~ | ~~(included above)~~ | ~~14% malloc/free in sync~~ | ~~10-20% per hash~~ | **DONE** — stack alloc for <256B |
+| ~~P1~~ | ~~Cache actor table~~ | ~~<1%~~ | ~~**15.6% of save_large**~~ | ~~1.2-1.5x save~~ | **DONE** — 1.2x save_large |
+| **P2** | Parallel change serialization (Taskflow) | 40% of save_large | 24% of save_large (post-opt) | min(N,cores)x | **TODO** |
+| **P2** | Parallel chunk parsing (Taskflow) | load hot path | load hot path | min(N,cores)x | **TODO** |
+| **P2** | Parallel hash computation (Taskflow) | hash cache rebuild | hash cache rebuild | min(N,cores)x | **TODO** |
+| ~~P3~~ | ~~Buffer pre-sizing (reserve)~~ | ~~RLE encoder allocs~~ | ~~RLE encoder allocs~~ | ~~1.5x save~~ | **DONE** — reserve in save/serialize/hash |
+| **P3** | Parallel DEFLATE compress/decompress | 0.5% of save | ~6% of save (post-opt) | 2-4x per change | **TODO** |
 
 ## Reproducing This Analysis
 
