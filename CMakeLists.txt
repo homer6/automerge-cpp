@@ -29,9 +29,9 @@ target_include_directories(automerge-cpp
 
 target_compile_features(automerge-cpp PUBLIC cxx_std_23)
 
-# Sources will be added as they are implemented
 target_sources(automerge-cpp PRIVATE
-    src/placeholder.cpp
+    src/document.cpp
+    src/transaction.cpp
 )
 
 # Subdirectories

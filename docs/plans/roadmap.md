@@ -44,25 +44,41 @@
 ---
 
 ## Phase 2: Operation Set and Document Core
-**Goal**: A `Document` that supports basic map/list/text mutations and reads.
+**Status**: Complete — 87 tests passing (53 Phase 1 + 34 Phase 2)
 
 ### Deliverables
-- `OpSet` (internal) — columnar storage of operations
-- `Document` — construction, `transact()`, basic read API
-- `Transaction` — `put`, `put_object`, `insert`, `delete_key`, `delete_index`
-- Ranges-based read API: `keys()`, `values()`, `length()`, `get()`, `text()`
+- [x] `src/doc_state.hpp` — internal document state (ObjectState, MapEntry, ListElement)
+- [x] `document.hpp` / `document.cpp` — Document class with pimpl
+- [x] `transaction.hpp` / `transaction.cpp` — Transaction class
+- [x] `transact()` via `std::function<void(Transaction&)>`
+- [x] Map operations: `put`, `put_object`, `delete_key`, `get`, `get_all`, `keys`, `values`
+- [x] List operations: `insert`, `insert_object`, `set`, `delete_index`, `get(index)`, `length`
+- [x] Text operations: `splice_text`, `text()`
+- [x] Counter operations: `increment`
+- [x] Nested objects: `put_object` / `insert_object` return `ObjId`
+- [x] Copy semantics: `Document` is copyable (deep copy, independent state)
 
-### Key Algorithms
-- Operation insertion with causal ordering
-- Conflict resolution (last-writer-wins for maps, positional for lists)
-- Counter increment merge semantics
+### Design Decisions (implemented)
+- `Document` uses pimpl (`std::unique_ptr<detail::DocState>`) to hide internals
+- `Transaction` holds a reference to `DocState`, created only by `Document::transact`
+- Maps use `std::map<string, vector<MapEntry>>` — sorted keys, conflict-ready
+- Lists use `std::vector<ListElement>` with visibility flags for soft-delete
+- Text stored as list of single-character strings (correct for future merge)
+- All operations logged to `op_log` for future Phase 3 merge support
 
-### Tests
-- Create doc, put values, read them back
-- Nested objects (map within map, list within map, etc.)
-- Counter increment and read
-- Text splice and read
-- Conflict detection: two ops on same key, `get_all()` returns both
+### Tests (34 new)
+- [x] Construction, actor_id, root is map, root starts empty
+- [x] Map put/get for all scalar types (int, string, bool, double, null)
+- [x] Put overwrites, get missing returns nullopt, delete removes
+- [x] keys() sorted, values() in key order, length()
+- [x] Nested maps (2 levels deep), nested lists, lists in maps
+- [x] List insert/get/set/delete, insert at beginning, out-of-bounds
+- [x] insert_object into list
+- [x] Text splice: insert, append, delete, replace
+- [x] Counter put + increment, multiple increments
+- [x] Copy creates independent document
+- [x] Multiple transactions accumulate
+- [x] get_all returns values (single actor = 1), missing = empty
 
 ---
 

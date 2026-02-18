@@ -101,6 +101,7 @@ struct ObjId {
         return std::holds_alternative<Root>(inner);
     }
 
+    auto operator<=>(const ObjId&) const = default;
     auto operator==(const ObjId&) const -> bool = default;
 };
 
@@ -152,5 +153,19 @@ struct std::hash<automerge_cpp::OpId> {
         auto h1 = std::hash<std::uint64_t>{}(id.counter);
         auto h2 = std::hash<automerge_cpp::ActorId>{}(id.actor);
         return h1 ^ (h2 << 1);
+    }
+};
+
+template <>
+struct std::hash<automerge_cpp::ObjId> {
+    auto operator()(const automerge_cpp::ObjId& id) const noexcept -> std::size_t {
+        return std::visit([](const auto& v) -> std::size_t {
+            using T = std::decay_t<decltype(v)>;
+            if constexpr (std::is_same_v<T, automerge_cpp::Root>) {
+                return 0;
+            } else {
+                return std::hash<automerge_cpp::OpId>{}(v);
+            }
+        }, id.inner);
     }
 };
