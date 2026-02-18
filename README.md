@@ -128,6 +128,7 @@ automerge-cpp/
 
 ## Documentation
 
+- [Style Guide](docs/style.md) — coding style and conventions (Ben Deane's modern C++ principles)
 - [Architecture Plan](docs/plans/architecture.md) — design principles, core types, module layout
 - [Implementation Roadmap](docs/plans/roadmap.md) — phased development plan
 

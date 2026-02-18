@@ -29,82 +29,41 @@ ctest --test-dir build --output-on-failure
 
 ## Code Style
 
-### C++23 — Ben Deane Style
+**All code must follow [docs/style.md](docs/style.md)** — the project's comprehensive
+style guide based on Ben Deane's modern C++ principles. Read it before writing any code.
 
-This project follows Ben Deane's modern C++ principles rigorously:
+Key rules (see style guide for full details, examples, and rationale):
 
-1. **No raw loops** in library code. Use `std::ranges`, algorithms, or folds.
-   ```cpp
-   // Bad
-   for (int i = 0; i < vec.size(); ++i) { ... }
+1. **No raw loops** in library code — use `std::ranges`, algorithms, or folds
+2. **Algebraic types** — `std::variant` for sum types, structs for product types
+3. **Make illegal states unrepresentable** — types model the domain precisely
+4. **`std::expected` for errors** — no exceptions for expected failure paths
+5. **Strong types** — `ActorId`, `ObjId`, `ChangeHash` never implicitly convert
+6. **Value semantics** — `const` by default, mutations through transactions
+7. **Composition over inheritance** — no deep class hierarchies, use concepts
+8. **Immutability by default** — use `const` everywhere, IIFE for complex init
 
-   // Good
-   auto result = vec | std::views::filter(pred) | std::views::transform(fn);
-   ```
+### Naming (quick reference)
 
-2. **Algebraic types** for all domain modeling. Use `std::variant` (sum types)
-   and structs (product types). Never use type tags + unions.
-   ```cpp
-   // Bad
-   struct Value { int type; int64_t i; string s; };
+| Entity | Style | Examples |
+|--------|-------|---------|
+| Namespace | `snake_case` | `automerge_cpp` |
+| Type | `PascalCase` | `Document`, `ActorId` |
+| Function/method | `snake_case` | `put_object`, `get_changes` |
+| Constant | `snake_case` | `root` |
+| Enum value | `snake_case` | `ObjType::map` |
+| File | `snake_case` | `document.hpp` |
 
-   // Good
-   using Value = std::variant<int64_t, std::string>;
-   ```
+### File Layout
 
-3. **Make illegal states unrepresentable.** If a field is only valid in one
-   state, it belongs in that state's type, not in a shared base.
-
-4. **`std::expected` for errors**, not exceptions. Exceptions are reserved for
-   truly exceptional, unrecoverable situations (OOM, logic errors).
-
-5. **Strong types** for identifiers. `ActorId`, `ObjId`, `ChangeHash` are
-   distinct types that do not implicitly convert.
-
-6. **Value semantics.** Prefer value types. Use `const` aggressively. Mutations
-   go through explicit transaction boundaries.
-
-7. **Composition over inheritance.** Small, independent components that compose.
-
-8. **Immutability by default.** Use `const` everywhere. Mutability is explicit.
-
-### Naming Conventions
-
-- **Namespace**: `automerge_cpp`
-- **Types**: `PascalCase` — `Document`, `ActorId`, `ScalarValue`
-- **Functions/methods**: `snake_case` — `put_object`, `splice_text`, `get_changes`
-- **Constants**: `snake_case` — `root` (the root object ID)
-- **Enums**: `snake_case` values — `ObjType::map`, `OpType::put`
-- **Files**: `snake_case` — `document.hpp`, `op_set.cpp`
-- **Macros**: `SCREAMING_SNAKE_CASE` (avoid macros when possible)
-
-### File Organization
-
-- **Public headers**: `include/automerge-cpp/*.hpp`
-- **Implementation**: `src/*.cpp` and `src/**/*.cpp`
-- **Internal headers**: `src/*.hpp` (not installed)
-- **Tests**: `tests/*.cpp`
-- **Examples**: `examples/*.cpp`
-- **Benchmarks**: `benchmarks/*.cpp`
-
-### Header Style
-
-```cpp
-#pragma once
-
-#include <automerge-cpp/types.hpp>  // project headers first
-
-#include <cstdint>                   // C++ standard headers
-#include <expected>
-#include <string>
-#include <variant>
-
-namespace automerge_cpp {
-
-// ... declarations ...
-
-}  // namespace automerge_cpp
-```
+| Location | Contents |
+|----------|----------|
+| `include/automerge-cpp/*.hpp` | Public headers |
+| `src/*.cpp`, `src/**/*.cpp` | Implementation |
+| `src/*.hpp` | Internal headers (not installed) |
+| `tests/*.cpp` | Tests |
+| `examples/*.cpp` | Examples |
+| `benchmarks/*.cpp` | Benchmarks |
 
 ## Architecture
 
