@@ -308,6 +308,15 @@ See [docs/benchmark-results.md](docs/benchmark-results.md) for full results.
 - **Crypto**: SHA-256 (vendored or system)
 - **Compression**: zlib (raw DEFLATE, no header)
 
+## Version Bump Checklist
+
+When bumping the project version, update **all** of these locations:
+
+| File | Field |
+|------|-------|
+| `CMakeLists.txt` | `VERSION x.y.z` in the `project()` call |
+| `docs/Doxyfile` | `PROJECT_NUMBER` |
+
 ## Upstream Reference
 
 The upstream Rust implementation is available as a git submodule at
