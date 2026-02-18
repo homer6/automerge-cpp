@@ -37,8 +37,11 @@ public:
     }
 
     void append_null() {
-        flush_run();
-        flush_literals();
+        // Only flush pending run/literals — don't prematurely flush nulls
+        if (run_value_ || !literal_buffer_.empty()) {
+            flush_run();
+            flush_literals();
+        }
         ++null_count_;
     }
 
@@ -191,7 +194,9 @@ private:
             pos_ += len_r->bytes_read;
             auto len = static_cast<std::size_t>(len_r->value);
             if (pos_ + len > data_.size()) return std::nullopt;
-            auto str = std::string{reinterpret_cast<const char*>(&data_[pos_]), len};
+            auto str = len > 0
+                ? std::string{reinterpret_cast<const char*>(&data_[pos_]), len}
+                : std::string{};
             pos_ += len;
             return str;
         } else {

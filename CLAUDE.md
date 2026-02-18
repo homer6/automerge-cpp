@@ -48,7 +48,7 @@ automerge-cpp/
 │   │       └── change_op_columns.hpp       #       op column encoding/decoding (14 parallel columns)
 │   └── sync/                               #   Sync protocol internals
 │       └── bloom_filter.hpp                #     bloom filter (10 bits/entry, 7 probes)
-├── tests/                                  # TESTS (Google Test) — 281 tests
+├── tests/                                  # TESTS (Google Test) — 347 tests
 │   ├── CMakeLists.txt
 │   ├── error_test.cpp
 │   ├── types_test.cpp
@@ -222,7 +222,7 @@ See [docs/plans/architecture.md](docs/plans/architecture.md) for the full design
 
 ## Testing
 
-281 tests across 13 test files. Uses Google Test (fetched via CMake FetchContent).
+347 tests across 13 test files. Uses Google Test (fetched via CMake FetchContent).
 
 | Test File | Count | Covers |
 |-----------|-------|--------|
@@ -231,7 +231,7 @@ See [docs/plans/architecture.md](docs/plans/architecture.md) for the full design
 | `value_test.cpp` | 14 | ScalarValue, Value, ObjType, Null, Counter, Timestamp |
 | `op_test.cpp` | 4 | Op, OpType |
 | `change_test.cpp` | 4 | Change |
-| `document_test.cpp` | 139 | Document core, merge, serialization, sync, patches, time travel, cursors, marks, thread safety |
+| `document_test.cpp` | 205 | Document core, merge, serialization, sync, patches, time travel, cursors, marks, thread safety, conflict resolution, list concurrency, counters, save/load edge cases, large data stress, text/marks, sync protocol |
 | `leb128_test.cpp` | 22 | LEB128 encode/decode |
 | `rle_test.cpp` | 10 | RLE encoder/decoder round-trips |
 | `delta_encoder_test.cpp` | 11 | Delta encoder/decoder round-trips |

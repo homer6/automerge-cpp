@@ -25,13 +25,19 @@ struct RawColumn {
 };
 
 // Parse column headers from a byte stream.
-// Format: repeated (ULEB128 spec, ULEB128 length) pairs until a spec
-// with column_id less than the previous (or end of data).
+// Format: ULEB128 column_count + repeated (ULEB128 spec, ULEB128 length) pairs.
 // After the headers, the column data follows sequentially.
 inline auto parse_raw_columns(std::span<const std::byte> input, std::size_t& pos)
     -> std::vector<RawColumn> {
 
     auto columns = std::vector<RawColumn>{};
+
+    // Read column count
+    if (pos >= input.size()) return columns;
+    auto count_result = encoding::decode_uleb128(input.subspan(pos));
+    if (!count_result) return columns;
+    pos += count_result->bytes_read;
+    auto num_columns = static_cast<std::size_t>(count_result->value);
 
     // First pass: read all (spec, length) pairs
     struct ColHeader {
@@ -39,27 +45,23 @@ inline auto parse_raw_columns(std::span<const std::byte> input, std::size_t& pos
         std::uint64_t length;
     };
     auto headers = std::vector<ColHeader>{};
+    headers.reserve(num_columns);
 
-    auto prev_spec_u32 = std::uint32_t{0};
-
-    while (pos < input.size()) {
+    for (std::size_t i = 0; i < num_columns; ++i) {
+        if (pos >= input.size()) break;
         auto spec_result = encoding::decode_uleb128(input.subspan(pos));
         if (!spec_result) break;
+        pos += spec_result->bytes_read;
 
         auto spec_u32 = static_cast<std::uint32_t>(spec_result->value);
         auto spec = ColumnSpec::from_u32(spec_u32);
 
-        // Column specs must be in ascending order; if not, we've hit the end
-        if (!headers.empty() && spec_u32 <= prev_spec_u32) break;
-
-        pos += spec_result->bytes_read;
-
+        if (pos >= input.size()) break;
         auto len_result = encoding::decode_uleb128(input.subspan(pos));
         if (!len_result) break;
         pos += len_result->bytes_read;
 
         headers.push_back(ColHeader{.spec = spec, .length = len_result->value});
-        prev_spec_u32 = spec_u32;
     }
 
     // Second pass: extract column data
@@ -83,6 +85,9 @@ inline auto parse_raw_columns(std::span<const std::byte> input, std::size_t& pos
 // Write column headers and data to output.
 inline void write_raw_columns(const std::vector<RawColumn>& columns,
                                std::vector<std::byte>& output) {
+    // Column count
+    encoding::encode_uleb128(columns.size(), output);
+
     // Write (spec, length) pairs
     for (const auto& col : columns) {
         encoding::encode_uleb128(col.spec.to_u32(), output);

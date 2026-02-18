@@ -572,6 +572,22 @@ struct DocState {
                 if (cached_actor_set_.insert(op.id.actor).second) {
                     cached_actor_table_.push_back(op.id.actor);
                 }
+                if (!op.obj.is_root()) {
+                    const auto& obj_op = std::get<OpId>(op.obj.inner);
+                    if (cached_actor_set_.insert(obj_op.actor).second) {
+                        cached_actor_table_.push_back(obj_op.actor);
+                    }
+                }
+                if (op.insert_after) {
+                    if (cached_actor_set_.insert(op.insert_after->actor).second) {
+                        cached_actor_table_.push_back(op.insert_after->actor);
+                    }
+                }
+                for (const auto& p : op.pred) {
+                    if (cached_actor_set_.insert(p.actor).second) {
+                        cached_actor_table_.push_back(p.actor);
+                    }
+                }
             }
         }
         cached_actor_table_size_ = change_history.size();

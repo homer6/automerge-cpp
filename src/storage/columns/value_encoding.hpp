@@ -158,13 +158,16 @@ inline auto decode_value_from_columns(
             return Value{ScalarValue{v}};
         }
         case ValueTag::utf8_tag: {
-            auto s = std::string{reinterpret_cast<const char*>(&raw_data[raw_pos]), raw_len};
+            auto s = raw_len > 0
+                ? std::string{reinterpret_cast<const char*>(raw_span.data()), raw_len}
+                : std::string{};
             raw_pos += raw_len;
             return Value{ScalarValue{std::move(s)}};
         }
         case ValueTag::bytes_tag: {
-            auto b = Bytes{raw_data.begin() + static_cast<std::ptrdiff_t>(raw_pos),
-                           raw_data.begin() + static_cast<std::ptrdiff_t>(raw_pos + raw_len)};
+            auto b = raw_len > 0
+                ? Bytes{raw_span.begin(), raw_span.end()}
+                : Bytes{};
             raw_pos += raw_len;
             return Value{ScalarValue{std::move(b)}};
         }
