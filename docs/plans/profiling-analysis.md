@@ -456,7 +456,7 @@ call and is itself called multiple times per sync round trip and time travel ope
    (< 247 bytes, which covers typical change hashing). Especially impactful on Linux where
    malloc/free is 14% of sync.
 4. **Parallel hash computation** — when rebuilding hash cache on load, hash all changes
-   across cores via Taskflow. Expected min(N_changes, cores)x.
+   across cores via internal thread pool. Expected min(N_changes, cores)x.
 
 **Affected benchmarks:** sync_full_round_trip (5x from cache alone), get_at (10x),
 save (2x from ARM intrinsics), save_large (1.3x).
@@ -536,9 +536,9 @@ benchmarks with 100-1000 changes to show meaningful speedups.
 | **P1** | Hardware SHA-256 (ARM Crypto + x86 SHA-NI) | 56-94% of save/sync | 5.6-6.9% of save/sync (post-cache) | 3-10x per hash | **TODO** |
 | ~~P1~~ | ~~SHA-256 stack buffer~~ | ~~(included above)~~ | ~~14% malloc/free in sync~~ | ~~10-20% per hash~~ | **DONE** — stack alloc for <256B |
 | ~~P1~~ | ~~Cache actor table~~ | ~~<1%~~ | ~~**15.6% of save_large**~~ | ~~1.2-1.5x save~~ | **DONE** — 1.2x save_large |
-| **P2** | Parallel change serialization (Taskflow) | 40% of save_large | 24% of save_large (post-opt) | min(N,cores)x | **TODO** |
-| **P2** | Parallel chunk parsing (Taskflow) | load hot path | load hot path | min(N,cores)x | **TODO** |
-| **P2** | Parallel hash computation (Taskflow) | hash cache rebuild | hash cache rebuild | min(N,cores)x | **TODO** |
+| **P2** | Parallel change serialization (thread pool) | 40% of save_large | 24% of save_large (post-opt) | min(N,cores)x | **TODO** |
+| **P2** | Parallel chunk parsing (thread pool) | load hot path | load hot path | min(N,cores)x | **TODO** |
+| **P2** | Parallel hash computation (thread pool) | hash cache rebuild | hash cache rebuild | min(N,cores)x | **TODO** |
 | ~~P3~~ | ~~Buffer pre-sizing (reserve)~~ | ~~RLE encoder allocs~~ | ~~RLE encoder allocs~~ | ~~1.5x save~~ | **DONE** — reserve in save/serialize/hash |
 | **P3** | Parallel DEFLATE compress/decompress | 0.5% of save | ~6% of save (post-opt) | 2-4x per change | **TODO** |
 

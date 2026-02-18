@@ -25,6 +25,7 @@ automerge-cpp/
 │   └── error.hpp                           #   Error, ErrorKind
 ├── src/                                    # IMPLEMENTATION
 │   ├── doc_state.hpp                       #   internal: DocState, ObjectState, MapEntry, ListElement, MarkEntry
+│   ├── thread_pool.hpp                     #   internal: ThreadPool (std::jthread-based parallel_for)
 │   ├── document.cpp                        #   Document methods (core, save/load, sync, patches, time travel, cursors, marks)
 │   ├── transaction.cpp                     #   Transaction methods
 │   ├── crypto/                             #   Cryptographic primitives
@@ -283,14 +284,14 @@ See [docs/benchmark-results.md](docs/benchmark-results.md) for full results.
 | Architecture | [docs/plans/architecture.md](docs/plans/architecture.md) | Design, types, modules, data model |
 | Roadmap | [docs/plans/roadmap.md](docs/plans/roadmap.md) | Phased implementation plan (Phases 0-9 complete) |
 | Profiling Analysis | [docs/plans/profiling-analysis.md](docs/plans/profiling-analysis.md) | v0.3.0 bottleneck profiling (sample/perf), parallelization opportunities |
-| v0.4.0 Performance Plan | [docs/plans/v0.4.0-performance.md](docs/plans/v0.4.0-performance.md) | Phase 11 performance release plan (Fenwick tree, hash cache, Taskflow, ARM SHA-256) |
+| v0.4.0 Performance Plan | [docs/plans/v0.4.0-performance.md](docs/plans/v0.4.0-performance.md) | Phase 11 performance release plan (Fenwick tree, hash cache, thread pool, ARM SHA-256) |
 
 ## Dependencies
 
 - **Build**: CMake 3.28+, C++23 compiler
 - **Test**: Google Test (fetched via CMake FetchContent)
 - **Bench**: Google Benchmark (fetched via CMake FetchContent)
-- **Parallelism**: Taskflow v4.0.0 (fetched via CMake FetchContent) — work-stealing thread pool
+- **Parallelism**: Internal `std::jthread`-based thread pool (C++20, no external dependencies)
 - **Crypto**: SHA-256 (vendored or system)
 - **Compression**: zlib (raw DEFLATE, no header)
 
