@@ -1,0 +1,176 @@
+# Plan: Columnar Format, Upstream Interop, Fuzz Testing, Doxygen
+
+## Context
+
+All 7 implementation phases of automerge-cpp are complete (207 tests). The remaining work is:
+1. **Columnar encoding** — replace row-based binary format with upstream columnar format
+2. **DEFLATE compression** — compress columns > 256 bytes
+3. **Upstream Rust interop** — produce/consume bytes compatible with `automerge-rs`
+4. **Fuzz testing** — libFuzzer targets for deserialization paths
+5. **Doxygen API docs** — generated docs from annotated headers
+
+This is structured as Phases 8-10, each independently testable.
+
+---
+
+## Phase 8: Upstream Binary Format Interoperability
+
+The biggest piece. Five sub-phases, each buildable and testable independently.
+
+### 8a: Foundational Codecs + SHA-256
+
+**New files:**
+
+| File | Purpose |
+|------|---------|
+| `src/encoding/rle.hpp` | `RleEncoder<T>` / `RleDecoder<T>` — general-purpose RLE (positive=run, negative=literal, zero=null) |
+| `src/encoding/boolean_encoder.hpp` | `BooleanEncoder` / `BooleanDecoder` — alternating run-length counts; `MaybeBooleanEncoder` variant |
+| `src/encoding/delta_encoder.hpp` | `DeltaEncoder` / `DeltaDecoder` — wraps RLE on deltas between consecutive values |
+| `src/crypto/sha256.hpp` | Vendored header-only SHA-256 (~200 lines). Interface: `sha256(span<const byte>) -> array<byte,32>` |
+| `tests/rle_test.cpp` | Round-trip: empty, single value, runs, literal runs, null runs, mixed |
+| `tests/delta_encoder_test.cpp` | Monotonic sequences, negative deltas, nulls |
+| `tests/sha256_test.cpp` | NIST test vectors (empty, "abc", etc.) |
+
+**Reuse:** LEB128 primitives from `src/encoding/leb128.hpp` (already has `encode_uleb128`, `decode_uleb128`, `encode_sleb128`, `decode_sleb128`).
+
+### 8b: Column Specification + Compression
+
+**New files:**
+
+| File | Purpose |
+|------|---------|
+| `src/storage/columns/column_spec.hpp` | `ColumnType` enum (8 variants), `ColumnSpec` u32 bitfield: `(id << 4) \| (deflate << 3) \| type` |
+| `src/storage/columns/raw_column.hpp` | `RawColumn` (spec + byte range), `RawColumns` (parse/write column headers) |
+| `src/storage/columns/compression.hpp` | `deflate_compress()` / `deflate_decompress()` wrapping zlib; threshold constant 256 bytes |
+| `tests/column_spec_test.cpp` | Verify u32 encoding matches upstream test vectors (e.g., `ColumnId(7), Group = 112`) |
+
+**Modified:** `CMakeLists.txt` — add `find_package(ZLIB REQUIRED)`, link `ZLIB::ZLIB`.
+
+### 8c: Chunk Envelope + SHA-256 Change Hashes
+
+**New files:**
+
+| File | Purpose |
+|------|---------|
+| `src/storage/chunk.hpp` | `ChunkType` enum (document=0, change=1, compressed=2), `ChunkHeader` (magic + checksum + type + length), `compute_chunk_hash()` |
+| `tests/chunk_test.cpp` | Header round-trip, checksum validation, tampered data detection |
+
+**Modified:** `src/doc_state.hpp` — replace `compute_change_hash` FNV-1a with SHA-256 over serialized change-chunk body. When loading old v1 format, recompute all hashes with SHA-256.
+
+### 8d: Op Column Encoding/Decoding
+
+**New files:**
+
+| File | Purpose |
+|------|---------|
+| `src/storage/columns/change_op_columns.hpp` | Op column layout for changes. Column IDs: OBJ(0), KEY(1), INSERT(3), ACTION(4), VAL(5), PRED(7), EXPAND(9), MARK_NAME(10). `encode_change_ops()` / `decode_change_ops()` |
+| `src/storage/columns/value_encoding.hpp` | Value metadata: `(type_tag << 4) \| length` as ULEB128. Tags: null=0, false=1, true=2, uint=3, int=4, f64=5, utf8=6, bytes=7, counter=8, timestamp=9 |
+| `src/storage/columns/obj_id_encoding.hpp` | ObjId composite: actor RLE + counter RLE. Root = null actor + counter 0 |
+| `src/storage/columns/key_encoding.hpp` | Key composite: actor RLE + counter Delta + string RLE |
+| `src/storage/columns/op_id_list_encoding.hpp` | Pred list: group count RLE + actor RLE + counter Delta |
+| `tests/change_op_columns_test.cpp` | Encode ops, decode, verify round-trip. All op types. |
+
+**OpType to upstream action code mapping:**
+- `make_object` (map/table) → 0, `put` → 1, `make_object` (list/text) → 2, `del` → 3, `increment` → 4, `mark` → 5
+
+### 8e: Document Save/Load Integration + Interop Tests
+
+**Modified:** `src/document.cpp`
+
+- `save()` produces upstream document chunk: magic + SHA-256[:4] checksum + ChunkType::document + LEB128(len) + actor table + heads + change metadata columns + op columns + head indices
+- `load()` detects format: after 4 magic bytes, if byte[4] == `0x01` → old v1 loader; otherwise → new chunk-based loader
+- Old v1 format remains loadable (backward compat)
+
+**New files:**
+
+| File | Purpose |
+|------|---------|
+| `src/storage/change_chunk.hpp` | `serialize_change_body()` / `parse_change_chunk()` |
+| `tests/interop_test.cpp` | New-format round-trip, old format still loads, format detection, upstream fixture loading, checksum validation, all value types, nested objects |
+| `tests/fixtures/*.automerge` | Binary test fixtures generated by upstream Rust (simple map, text edit, concurrent edits) |
+
+**ActorId compatibility:** Current `ActorId` is fixed 16 bytes. Upstream uses length-prefixed variable-size. Strategy: write as `LEB128(16) + 16 bytes`; read length-prefixed, error if != 16. Variable-length ActorId deferred to future.
+
+---
+
+## Phase 9: Fuzz Testing
+
+**New files:**
+
+| File | Purpose |
+|------|---------|
+| `fuzz/CMakeLists.txt` | libFuzzer targets, `-fsanitize=fuzzer,address,undefined` |
+| `fuzz/fuzz_load.cpp` | `LLVMFuzzerTestOneInput` targeting `Document::load()` |
+| `fuzz/fuzz_leb128.cpp` | Fuzz LEB128 decode (overflow, truncation) |
+| `fuzz/fuzz_deserializer.cpp` | Fuzz the deserializer with random bytes |
+| `fuzz/corpus/` | Seed corpus from upstream crash files (`upstream/automerge/rust/automerge/tests/fuzz-crashers/`) |
+
+**Modified:** `CMakeLists.txt` — add `option(AUTOMERGE_CPP_BUILD_FUZZ)` + `add_subdirectory(fuzz)`.
+
+**Crash regression:** Copy upstream's 8 known crash files as seed corpus.
+
+---
+
+## Phase 10: Doxygen
+
+**New files:**
+
+| File | Purpose |
+|------|---------|
+| `docs/Doxyfile` | Doxygen config: input = `include/automerge-cpp/`, output = `docs/html/`, project name, C++23 |
+
+**Modified:** All public headers in `include/automerge-cpp/` — add `///` doc comments to classes, methods, structs, enums. No functional changes.
+
+**Modified:** `README.md`, `CLAUDE.md` — link to generated docs, update feature lists.
+
+**.gitignore:** Add `docs/html/`.
+
+---
+
+## Implementation Order
+
+```
+Phase 8a (codecs + SHA-256)
+    ↓
+Phase 8b (column spec + compression)
+    ↓
+Phase 8c (chunk envelope + hash migration)
+    ↓
+Phase 8d (op column encoding)
+    ↓
+Phase 8e (save/load integration + interop tests)
+    ↓
+Phase 9 (fuzz testing)
+    ↓
+Phase 10 (Doxygen)
+```
+
+## Verification
+
+After each sub-phase:
+1. `cmake --build build` — must compile
+2. `ctest --test-dir build --output-on-failure` — all existing + new tests pass
+3. No regressions in existing 207 tests
+
+After Phase 8e:
+- Save a document in C++, verify the bytes can be inspected with `automerge` CLI tools
+- Load upstream `.automerge` fixture files, verify document content matches expectations
+
+After Phase 9:
+- `./build/fuzz/fuzz_load corpus/ -max_total_time=60` — 60 seconds of fuzzing with no crashes
+
+After Phase 10:
+- `doxygen docs/Doxyfile` — generates HTML with no warnings
+
+## Estimated Scope
+
+| Phase | New files | Lines (impl) | Lines (tests) |
+|-------|-----------|-------------|--------------|
+| 8a | 7 | ~600 | ~400 |
+| 8b | 4 | ~400 | ~200 |
+| 8c | 3 | ~500 | ~300 |
+| 8d | 6 | ~800 | ~400 |
+| 8e | 4 | ~700 | ~500 |
+| 9 | 5 | ~200 | — |
+| 10 | 1 | ~300 (comments) | — |
+| **Total** | **~30** | **~3,500** | **~1,800** |
