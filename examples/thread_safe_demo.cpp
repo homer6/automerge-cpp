@@ -1,7 +1,7 @@
 // thread_safe_demo — one document, many threads
 //
 // Demonstrates: Document is thread-safe (shared_mutex internally).
-// 120 threads can read and write the same document simultaneously.
+// Multiple threads can read and write the same document simultaneously.
 // No wrapper class. No manual locking.
 //
 // Build: cmake --build build
@@ -9,12 +9,10 @@
 
 #include <automerge-cpp/automerge.hpp>
 
-#include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
-#include <execution>
-#include <numeric>
 #include <string>
 #include <thread>
 #include <vector>
@@ -25,9 +23,9 @@ int main() {
     std::printf("Hardware threads: %u\n", std::thread::hardware_concurrency());
 
     // =========================================================================
-    // Scenario 1: Concurrent reads — std::execution::par + Document::get
+    // Scenario 1: Concurrent reads — many threads calling get()
     // =========================================================================
-    std::printf("\n=== Scenario 1: Parallel reads with std::execution::par ===\n");
+    std::printf("\n=== Scenario 1: Concurrent reads ===\n");
 
     auto doc = am::Document{};
 
@@ -38,46 +36,48 @@ int main() {
         }
     });
 
-    // Read 1000 keys in parallel using standard algorithms.
+    // Read 1000 keys across 8 threads.
     // Document::get() acquires a shared lock — N readers run concurrently.
-    auto indices = std::vector<int>(1000);
-    std::iota(indices.begin(), indices.end(), 0);
-
-    auto values = std::vector<std::optional<am::Value>>(1000);
-    std::transform(std::execution::par, indices.begin(), indices.end(), values.begin(),
-        [&doc](int i) {
-            return doc.get(am::root, "key_" + std::to_string(i));
+    {
+        auto found = std::atomic<int>{0};
+        auto threads = std::vector<std::jthread>{};
+        for (int t = 0; t < 8; ++t) {
+            threads.emplace_back([&doc, &found, t]() {
+                for (int i = t * 125; i < (t + 1) * 125; ++i) {
+                    auto v = doc.get(am::root, "key_" + std::to_string(i));
+                    if (v.has_value()) found.fetch_add(1, std::memory_order_relaxed);
+                }
+            });
         }
-    );
-
-    auto found = std::ranges::count_if(values, [](const auto& v) { return v.has_value(); });
-    std::printf("Parallel get of 1000 keys: %lld found\n", static_cast<long long>(found));
+        threads.clear();  // join all
+        std::printf("8 threads, 1000 concurrent gets: %d found\n", found.load());
+    }
 
     // =========================================================================
-    // Scenario 2: Concurrent writes from 120 threads
+    // Scenario 2: Concurrent writes from many threads
     // =========================================================================
-    std::printf("\n=== Scenario 2: 120 concurrent writers ===\n");
+    std::printf("\n=== Scenario 2: Concurrent writers ===\n");
 
-    // Each thread runs its own transaction. Document serializes writes
-    // (exclusive lock), but the caller doesn't manage synchronization.
-    auto thread_ids = std::vector<int>(120);
-    std::iota(thread_ids.begin(), thread_ids.end(), 0);
-
-    std::for_each(std::execution::par, thread_ids.begin(), thread_ids.end(),
-        [&doc](int t) {
-            for (int i = 0; i < 10; ++i) {
-                doc.transact([t, i](auto& tx) {
-                    auto key = "t" + std::to_string(t) + "_" + std::to_string(i);
-                    tx.put(am::root, key, std::int64_t{t * 1000 + i});
-                });
-            }
+    {
+        constexpr int num_writers = 30;
+        auto threads = std::vector<std::jthread>{};
+        for (int t = 0; t < num_writers; ++t) {
+            threads.emplace_back([&doc, t]() {
+                for (int i = 0; i < 10; ++i) {
+                    doc.transact([t, i](auto& tx) {
+                        auto key = "t" + std::to_string(t) + "_" + std::to_string(i);
+                        tx.put(am::root, key, std::int64_t{t * 1000 + i});
+                    });
+                }
+            });
         }
-    );
-
-    std::printf("120 threads x 10 writes = %zu total keys\n", doc.length(am::root));
+        threads.clear();
+        std::printf("%d threads x 10 writes = %zu total keys\n",
+                    num_writers, doc.length(am::root));
+    }
 
     // =========================================================================
-    // Scenario 3: Parallel reads + concurrent writer thread
+    // Scenario 3: Readers + writer simultaneously
     // =========================================================================
     std::printf("\n=== Scenario 3: Readers + writer simultaneously ===\n");
 
@@ -93,8 +93,8 @@ int main() {
     // Writer thread appends text
     auto writer = std::jthread{[&doc, &text_id, &stop]() {
         for (int i = 0; i < 200 && !stop.load(std::memory_order_relaxed); ++i) {
-            doc.transact([&text_id](auto& tx) {
-                auto len = doc.length(text_id);
+            auto len = doc.length(text_id);
+            doc.transact([&text_id, len](auto& tx) {
                 tx.splice_text(text_id, len, 0, ".");
             });
         }
@@ -102,69 +102,65 @@ int main() {
     }};
 
     // Reader threads read concurrently with the writer
-    auto reader_ids = std::vector<int>(60);
-    std::iota(reader_ids.begin(), reader_ids.end(), 0);
-
-    std::for_each(std::execution::par, reader_ids.begin(), reader_ids.end(),
-        [&](int) {
-            while (!stop.load(std::memory_order_relaxed)) {
-                auto txt = doc.text(text_id);
-                reads_done.fetch_add(1, std::memory_order_relaxed);
-                (void)txt;
-            }
+    {
+        auto readers = std::vector<std::jthread>{};
+        for (int t = 0; t < 8; ++t) {
+            readers.emplace_back([&doc, &text_id, &stop, &reads_done]() {
+                while (!stop.load(std::memory_order_relaxed)) {
+                    auto txt = doc.text(text_id);
+                    reads_done.fetch_add(1, std::memory_order_relaxed);
+                    (void)txt;
+                }
+            });
         }
-    );
+        // readers join when writer sets stop
+    }
 
     writer.join();
     std::printf("Writer done. %d concurrent reads completed.\n", reads_done.load());
     std::printf("Text length: %zu\n", doc.length(text_id));
 
     // =========================================================================
-    // Scenario 4: Parallel saves — save() is a read (shared lock)
+    // Scenario 4: Concurrent saves — save() is a read (shared lock)
     // =========================================================================
     std::printf("\n=== Scenario 4: 10 concurrent saves ===\n");
 
-    auto save_ids = std::vector<int>(10);
-    std::iota(save_ids.begin(), save_ids.end(), 0);
     auto saved = std::vector<std::vector<std::byte>>(10);
-
-    std::transform(std::execution::par, save_ids.begin(), save_ids.end(), saved.begin(),
-        [&doc](int) {
-            return doc.save();
+    {
+        auto threads = std::vector<std::jthread>{};
+        for (int t = 0; t < 10; ++t) {
+            threads.emplace_back([&doc, &saved, t]() {
+                saved[t] = doc.save();
+            });
         }
-    );
+        threads.clear();
+    }
 
-    auto all_same = std::ranges::all_of(saved, [&](const auto& s) { return s == saved[0]; });
+    auto all_same = true;
+    for (int i = 1; i < 10; ++i) {
+        if (saved[i] != saved[0]) { all_same = false; break; }
+    }
     std::printf("10 concurrent saves: %zu bytes each, deterministic=%s\n",
                 saved[0].size(), all_same ? "yes" : "NO");
 
     // =========================================================================
-    // Scenario 5: read()/write() scoped accessors for multi-step operations
+    // Scenario 5: Shared thread pool across documents
     // =========================================================================
-    std::printf("\n=== Scenario 5: Scoped read()/write() ===\n");
+    std::printf("\n=== Scenario 5: Shared thread pool ===\n");
 
-    // read() holds the shared lock for the entire lambda.
-    // Guarantees a consistent snapshot across multiple reads.
-    auto snapshot = doc.read([&text_id](const am::Document& d) {
-        return std::pair{d.length(text_id), d.text(text_id)};
+    auto pool = doc.thread_pool();
+    auto doc2 = am::Document{pool};
+    auto doc3 = am::Document{pool};
+
+    doc2.transact([](auto& tx) {
+        tx.put(am::root, "source", std::string{"doc2"});
     });
-    std::printf("Snapshot: len=%zu text=\"%.30s%s\"\n",
-                snapshot.first, snapshot.second.c_str(),
-                snapshot.second.size() > 30 ? "..." : "");
-
-    // write() holds the exclusive lock for the entire lambda.
-    // Multiple mutations appear atomic to readers.
-    doc.write([&text_id](am::Document& d) {
-        d.transact([&text_id](auto& tx) {
-            tx.splice_text(text_id, 0, 0, "[");
-        });
-        d.transact([&text_id](auto& tx) {
-            auto len = d.length(text_id);
-            tx.splice_text(text_id, len, 0, "]");
-        });
+    doc3.transact([](auto& tx) {
+        tx.put(am::root, "source", std::string{"doc3"});
     });
 
-    std::printf("After write(): \"%.*s\"\n", 40, doc.text(text_id).c_str());
+    std::printf("doc2 and doc3 share pool: pool=%s\n",
+                (doc2.thread_pool() == doc3.thread_pool()) ? "shared" : "different");
 
     std::printf("\nDone.\n");
     return 0;

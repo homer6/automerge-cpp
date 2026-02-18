@@ -10,9 +10,8 @@ target_link_libraries(text_editor PRIVATE automerge-cpp::automerge-cpp)
 add_executable(sync_demo sync_demo.cpp)
 target_link_libraries(sync_demo PRIVATE automerge-cpp::automerge-cpp)
 
-# v0.4.0 examples — require thread-safe Document (not yet implemented)
-# add_executable(thread_safe_demo thread_safe_demo.cpp)
-# target_link_libraries(thread_safe_demo PRIVATE automerge-cpp::automerge-cpp)
-#
-# add_executable(parallel_perf_demo parallel_perf_demo.cpp)
-# target_link_libraries(parallel_perf_demo PRIVATE automerge-cpp::automerge-cpp)
+add_executable(thread_safe_demo thread_safe_demo.cpp)
+target_link_libraries(thread_safe_demo PRIVATE automerge-cpp::automerge-cpp)
+
+add_executable(parallel_perf_demo parallel_perf_demo.cpp)
+target_link_libraries(parallel_perf_demo PRIVATE automerge-cpp::automerge-cpp)

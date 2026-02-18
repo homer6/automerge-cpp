@@ -1,24 +1,20 @@
 // parallel_perf_demo — monoid-powered parallelism across documents
 //
 // Demonstrates: CRDT merge is a monoid (associative, commutative,
-// idempotent with an empty Document as identity). This means
-// std::reduce(std::execution::par, ...) parallelizes merge for free.
+// idempotent with an empty Document as identity). This means we can
+// fork N copies, mutate in parallel, and merge back — getting the
+// same result as sequential execution.
 //
-// All parallelism uses standard C++ execution policies — no custom
-// thread pool, no wrapper class. The compiler and runtime handle the
-// thread pool (TBB on Linux, GCD on macOS, ConcRT on Windows).
+// All parallelism uses std::jthread — no external dependencies.
 //
 // Build: cmake --build build -DCMAKE_BUILD_TYPE=Release
 // Run:   ./build/examples/parallel_perf_demo
 
 #include <automerge-cpp/automerge.hpp>
 
-#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
-#include <execution>
-#include <numeric>
 #include <string>
 #include <thread>
 #include <vector>
@@ -35,217 +31,275 @@ struct Timer {
 };
 
 int main() {
-    std::printf("Hardware threads: %u\n", std::thread::hardware_concurrency());
+    auto hw = std::thread::hardware_concurrency();
+    std::printf("Hardware threads: %u\n", hw);
 
     // =========================================================================
-    // Create 1000 documents
+    // Fork/merge batch put — the core parallelism pattern
+    //
+    // Because merge is a monoid, fork N → mutate in parallel → merge back
+    // produces the same result as sequential execution.
     // =========================================================================
-    std::printf("\n=== Creating 1000 documents ===\n");
+    std::printf("\n=== Fork/merge batch put ===\n");
 
-    constexpr int doc_count = 1000;
+    auto doc = am::Document{};
+    doc.transact([](auto& tx) {
+        tx.put(am::root, "base", std::string{"exists"});
+    });
 
-    // Even creation can be parallel: generate indices, transform to documents
-    auto indices = std::vector<int>(doc_count);
-    std::iota(indices.begin(), indices.end(), 0);
+    constexpr int num_forks = 8;
+    constexpr int keys_per_fork = 500;
 
-    std::vector<am::Document> docs;
+    // Sequential baseline
+    {
+        auto seq_doc = am::Document{};
+        auto t = Timer{};
+        seq_doc.transact([](auto& tx) {
+            for (int i = 0; i < num_forks * keys_per_fork; ++i) {
+                tx.put(am::root, "k" + std::to_string(i), std::int64_t{i});
+            }
+        });
+        std::printf("Sequential %d puts: %.1f ms\n",
+                    num_forks * keys_per_fork, t.elapsed_ms());
+    }
+
+    // Parallel: fork, mutate on threads, merge back
     {
         auto t = Timer{};
-        docs.resize(doc_count);
-        std::transform(std::execution::par, indices.begin(), indices.end(), docs.begin(),
-            [](int i) {
-                auto doc = am::Document{};
-                doc.transact([i](auto& tx) {
-                    tx.put(am::root, "id", std::int64_t{i});
-                    tx.put(am::root, "name", std::string{"doc_" + std::to_string(i)});
-                    for (int k = 0; k < 50; ++k) {
-                        tx.put(am::root, "field_" + std::to_string(k),
-                               std::int64_t{i * 1000 + k});
+        auto forks = std::vector<am::Document>{};
+        forks.reserve(num_forks);
+        for (int f = 0; f < num_forks; ++f) {
+            forks.push_back(doc.fork());
+        }
+
+        auto threads = std::vector<std::jthread>{};
+        for (int f = 0; f < num_forks; ++f) {
+            threads.emplace_back([&forks, f]() {
+                forks[f].transact([f](auto& tx) {
+                    for (int i = 0; i < keys_per_fork; ++i) {
+                        auto key = "k" + std::to_string(f * keys_per_fork + i);
+                        tx.put(am::root, key, std::int64_t{f * keys_per_fork + i});
                     }
                 });
-                return doc;
-            }
-        );
-        std::printf("parallel create(%d docs): %.1f ms\n", doc_count, t.elapsed_ms());
+            });
+        }
+        threads.clear();  // join all
+
+        for (auto& f : forks) {
+            doc.merge(f);
+        }
+
+        std::printf("Parallel fork/merge %d puts (%d forks x %d): %.1f ms, %zu keys\n",
+                    num_forks * keys_per_fork, num_forks, keys_per_fork,
+                    t.elapsed_ms(), doc.length(am::root));
     }
 
     // =========================================================================
-    // Parallel save — std::transform(par)
+    // Parallel document creation and save
     // =========================================================================
-    std::printf("\n=== parallel save: 1000 documents ===\n");
+    std::printf("\n=== Parallel create + save: 1000 documents ===\n");
 
-    std::vector<std::vector<std::byte>> saved(doc_count);
+    constexpr int doc_count = 1000;
+    auto docs = std::vector<am::Document>(doc_count);
+
+    // Create documents in parallel
     {
         auto t = Timer{};
-        std::transform(std::execution::par, docs.begin(), docs.end(), saved.begin(),
-            [](const am::Document& doc) { return doc.save(); }
-        );
-        std::printf("std::transform(par) save(%d docs): %.1f ms\n", doc_count, t.elapsed_ms());
+        auto threads = std::vector<std::jthread>{};
+        auto chunk = doc_count / static_cast<int>(hw);
+        for (unsigned int w = 0; w < hw; ++w) {
+            auto begin = static_cast<int>(w) * chunk;
+            auto end = (w == hw - 1) ? doc_count : begin + chunk;
+            threads.emplace_back([&docs, begin, end]() {
+                for (int i = begin; i < end; ++i) {
+                    docs[i] = am::Document{1u};  // sequential per-doc
+                    docs[i].transact([i](auto& tx) {
+                        tx.put(am::root, "id", std::int64_t{i});
+                        for (int k = 0; k < 50; ++k) {
+                            tx.put(am::root, "field_" + std::to_string(k),
+                                   std::int64_t{i * 1000 + k});
+                        }
+                    });
+                }
+            });
+        }
+        threads.clear();
+        std::printf("Parallel create(%d docs, %u threads): %.1f ms\n",
+                    doc_count, hw, t.elapsed_ms());
     }
 
-    // Compare with sequential
+    // Save in parallel
+    auto saved = std::vector<std::vector<std::byte>>(doc_count);
     {
         auto t = Timer{};
-        std::transform(std::execution::seq, docs.begin(), docs.end(), saved.begin(),
-            [](const am::Document& doc) { return doc.save(); }
-        );
-        std::printf("std::transform(seq) save(%d docs): %.1f ms\n", doc_count, t.elapsed_ms());
+        auto threads = std::vector<std::jthread>{};
+        auto chunk = doc_count / static_cast<int>(hw);
+        for (unsigned int w = 0; w < hw; ++w) {
+            auto begin = static_cast<int>(w) * chunk;
+            auto end = (w == hw - 1) ? doc_count : begin + chunk;
+            threads.emplace_back([&docs, &saved, begin, end]() {
+                for (int i = begin; i < end; ++i) {
+                    saved[i] = docs[i].save();
+                }
+            });
+        }
+        threads.clear();
+        auto total_bytes = std::size_t{0};
+        for (const auto& s : saved) total_bytes += s.size();
+        std::printf("Parallel save(%d docs, %u threads): %.1f ms, %.1f KB total\n",
+                    doc_count, hw, t.elapsed_ms(),
+                    static_cast<double>(total_bytes) / 1024.0);
     }
 
-    auto total_bytes = std::transform_reduce(std::execution::par,
-        saved.begin(), saved.end(), std::size_t{0}, std::plus<>{},
-        [](const auto& s) { return s.size(); }
-    );
-    std::printf("Total: %.1f KB\n", static_cast<double>(total_bytes) / 1024.0);
+    // Sequential save for comparison
+    {
+        auto t = Timer{};
+        for (int i = 0; i < doc_count; ++i) {
+            saved[i] = docs[i].save();
+        }
+        std::printf("Sequential save(%d docs): %.1f ms\n", doc_count, t.elapsed_ms());
+    }
 
     // =========================================================================
-    // Parallel load — std::transform(par)
+    // Parallel load
     // =========================================================================
-    std::printf("\n=== parallel load: 1000 documents ===\n");
+    std::printf("\n=== Parallel load: 1000 documents ===\n");
 
     auto loaded = std::vector<std::optional<am::Document>>(doc_count);
     {
         auto t = Timer{};
-        std::transform(std::execution::par, saved.begin(), saved.end(), loaded.begin(),
-            [](const std::vector<std::byte>& bytes) { return am::Document::load(bytes); }
-        );
-        std::printf("std::transform(par) load(%d docs): %.1f ms\n", doc_count, t.elapsed_ms());
-    }
-
-    // Compare with sequential
-    {
-        auto t = Timer{};
-        std::transform(std::execution::seq, saved.begin(), saved.end(), loaded.begin(),
-            [](const std::vector<std::byte>& bytes) { return am::Document::load(bytes); }
-        );
-        std::printf("std::transform(seq) load(%d docs): %.1f ms\n", doc_count, t.elapsed_ms());
-    }
-
-    auto ok = std::ranges::count_if(loaded, [](const auto& d) { return d.has_value(); });
-    std::printf("Loaded: %lld/%d succeeded\n", static_cast<long long>(ok), doc_count);
-
-    // =========================================================================
-    // Parallel mutate — std::for_each(par)
-    // =========================================================================
-    std::printf("\n=== parallel mutate: 1000 documents ===\n");
-
-    {
-        auto t = Timer{};
-        std::for_each(std::execution::par, docs.begin(), docs.end(),
-            [](am::Document& doc) {
-                doc.transact([](auto& tx) {
-                    tx.put(am::root, "updated", std::int64_t{1});
-                    tx.put(am::root, "version", std::int64_t{2});
-                });
-            }
-        );
-        std::printf("std::for_each(par) transact(%d docs): %.1f ms\n",
-                    doc_count, t.elapsed_ms());
+        auto threads = std::vector<std::jthread>{};
+        auto chunk = doc_count / static_cast<int>(hw);
+        for (unsigned int w = 0; w < hw; ++w) {
+            auto begin = static_cast<int>(w) * chunk;
+            auto end = (w == hw - 1) ? doc_count : begin + chunk;
+            threads.emplace_back([&saved, &loaded, begin, end]() {
+                for (int i = begin; i < end; ++i) {
+                    loaded[i] = am::Document::load(saved[i]);
+                }
+            });
+        }
+        threads.clear();
+        auto ok = 0;
+        for (const auto& d : loaded) { if (d.has_value()) ++ok; }
+        std::printf("Parallel load(%d docs, %u threads): %.1f ms, %d/%d ok\n",
+                    doc_count, hw, t.elapsed_ms(), ok, doc_count);
     }
 
     // =========================================================================
-    // Parallel merge — THE MONOID
+    // Monoid reduce — merge 100 peer documents
     //
     // CRDT merge is a monoid:
     //   - Binary op:  merge(a, b)
-    //   - Identity:   empty Document
+    //   - Identity:   empty Document{}
     //   - Associative: merge(merge(a, b), c) == merge(a, merge(b, c))
     //   - Commutative: merge(a, b) == merge(b, a)
     //   - Idempotent:  merge(a, a) == a
-    //
-    // Therefore std::reduce(par, ...) parallelizes merge for free.
     // =========================================================================
-    std::printf("\n=== parallel merge: monoid reduce ===\n");
+    std::printf("\n=== Monoid reduce: merge 100 peers ===\n");
 
-    // Create 100 peer documents, each with unique data
     constexpr int peer_count = 100;
     auto peers = std::vector<am::Document>(peer_count);
+
+    // Create peers in parallel
     {
-        auto peer_indices = std::vector<int>(peer_count);
-        std::iota(peer_indices.begin(), peer_indices.end(), 0);
-        std::transform(std::execution::par,
-            peer_indices.begin(), peer_indices.end(), peers.begin(),
-            [](int p) {
-                auto doc = am::Document{};
-                doc.transact([p](auto& tx) {
+        auto threads = std::vector<std::jthread>{};
+        for (int p = 0; p < peer_count; ++p) {
+            threads.emplace_back([&peers, p]() {
+                peers[p] = am::Document{1u};
+                peers[p].transact([p](auto& tx) {
                     for (int k = 0; k < 10; ++k) {
-                        tx.put(am::root, "peer" + std::to_string(p) + "_k" + std::to_string(k),
+                        tx.put(am::root,
+                               "peer" + std::to_string(p) + "_k" + std::to_string(k),
                                std::int64_t{p * 100 + k});
                     }
                 });
-                return doc;
-            }
-        );
+            });
+        }
+        threads.clear();
     }
 
-    // Parallel reduce: merge all 100 peers into one document.
-    // std::reduce splits the work across cores, merges sub-results,
-    // and produces the final merged document.
+    // Sequential reduce
     {
         auto t = Timer{};
-        auto merged = std::reduce(std::execution::par,
-            peers.begin(), peers.end(),
-            am::Document{},  // monoid identity
-            [](am::Document acc, const am::Document& peer) {
-                acc.merge(peer);
-                return acc;
-            }
-        );
-        std::printf("std::reduce(par) merge(%d peers): %.1f ms, %zu keys\n",
+        auto merged = am::Document{1u};
+        for (const auto& peer : peers) {
+            merged.merge(peer);
+        }
+        std::printf("Sequential merge(%d peers): %.1f ms, %zu keys\n",
                     peer_count, t.elapsed_ms(), merged.length(am::root));
     }
 
-    // Compare with sequential reduce
+    // Parallel tree reduce: merge pairs in parallel, then pairs of pairs, etc.
     {
         auto t = Timer{};
-        auto merged = std::reduce(std::execution::seq,
-            peers.begin(), peers.end(),
-            am::Document{},
-            [](am::Document acc, const am::Document& peer) {
-                acc.merge(peer);
-                return acc;
+
+        // Copy peers into work vector
+        auto work = std::vector<am::Document>{};
+        work.reserve(peer_count);
+        for (const auto& p : peers) {
+            auto copy = am::Document{1u};
+            copy.merge(p);
+            work.push_back(std::move(copy));
+        }
+
+        // Tree reduce
+        while (work.size() > 1) {
+            auto next = std::vector<am::Document>{};
+            auto threads = std::vector<std::jthread>{};
+            auto pairs = work.size() / 2;
+            next.resize(pairs + (work.size() % 2));
+
+            for (std::size_t i = 0; i < pairs; ++i) {
+                threads.emplace_back([&work, &next, i]() {
+                    work[i * 2].merge(work[i * 2 + 1]);
+                    next[i] = std::move(work[i * 2]);
+                });
             }
-        );
-        std::printf("std::reduce(seq) merge(%d peers): %.1f ms, %zu keys\n",
-                    peer_count, t.elapsed_ms(), merged.length(am::root));
+            if (work.size() % 2 == 1) {
+                next[pairs] = std::move(work.back());
+            }
+            threads.clear();
+            work = std::move(next);
+        }
+
+        std::printf("Parallel tree merge(%d peers): %.1f ms, %zu keys\n",
+                    peer_count, t.elapsed_ms(), work[0].length(am::root));
     }
 
     // =========================================================================
-    // Parallel sync — std::for_each(par) on indexed pairs
+    // Parallel sync — each pair syncs independently
     // =========================================================================
-    std::printf("\n=== parallel sync: 100 pairs ===\n");
+    std::printf("\n=== Parallel sync: 100 pairs ===\n");
 
     constexpr int sync_pairs = 100;
     auto sources = std::vector<am::Document>(sync_pairs);
     auto targets = std::vector<am::Document>(sync_pairs);
 
-    // Set up source documents
+    // Set up source documents in parallel
     {
-        auto pair_indices = std::vector<int>(sync_pairs);
-        std::iota(pair_indices.begin(), pair_indices.end(), 0);
-        std::transform(std::execution::par,
-            pair_indices.begin(), pair_indices.end(), sources.begin(),
-            [](int i) {
-                auto src = am::Document{};
-                src.transact([i](auto& tx) {
+        auto threads = std::vector<std::jthread>{};
+        for (int i = 0; i < sync_pairs; ++i) {
+            threads.emplace_back([&sources, i]() {
+                sources[i] = am::Document{1u};
+                sources[i].transact([i](auto& tx) {
                     for (int k = 0; k < 20; ++k) {
                         tx.put(am::root, "k_" + std::to_string(k),
                                std::int64_t{i * 100 + k});
                     }
                 });
-                return src;
-            }
-        );
+            });
+        }
+        threads.clear();
     }
 
     // Sync all pairs in parallel
     {
-        auto pair_indices = std::vector<int>(sync_pairs);
-        std::iota(pair_indices.begin(), pair_indices.end(), 0);
         auto t = Timer{};
-        std::for_each(std::execution::par,
-            pair_indices.begin(), pair_indices.end(),
-            [&sources, &targets](int i) {
+        auto threads = std::vector<std::jthread>{};
+        for (int i = 0; i < sync_pairs; ++i) {
+            threads.emplace_back([&sources, &targets, i]() {
+                targets[i] = am::Document{1u};
                 auto state_src = am::SyncState{};
                 auto state_tgt = am::SyncState{};
                 for (int round = 0; round < 10; ++round) {
@@ -260,67 +314,17 @@ int main() {
                     }
                     if (!progress) break;
                 }
-            }
-        );
-        std::printf("std::for_each(par) sync(%d pairs): %.1f ms\n",
-                    sync_pairs, t.elapsed_ms());
-    }
-
-    auto sync_ok = std::ranges::all_of(
-        std::views::iota(0, sync_pairs),
-        [&targets](int i) { return targets[i].length(am::root) == 20; }
-    );
-    std::printf("All syncs correct: %s\n", sync_ok ? "yes" : "NO");
-
-    // =========================================================================
-    // Parallel transform_reduce — total bytes across all documents
-    // =========================================================================
-    std::printf("\n=== parallel transform_reduce: aggregate stats ===\n");
-
-    {
-        auto t = Timer{};
-        auto total_keys = std::transform_reduce(std::execution::par,
-            docs.begin(), docs.end(),
-            std::size_t{0}, std::plus<>{},
-            [](const am::Document& doc) { return doc.length(am::root); }
-        );
-        std::printf("std::transform_reduce(par) total keys across %d docs: %zu (%.1f ms)\n",
-                    doc_count, total_keys, t.elapsed_ms());
-    }
-
-    // =========================================================================
-    // Large single document — internal parallelism is transparent
-    // =========================================================================
-    std::printf("\n=== Large document: internal parallelism ===\n");
-
-    auto big = am::Document{};
-    constexpr int big_changes = 500;
-
-    {
-        auto t = Timer{};
-        for (int i = 0; i < big_changes; ++i) {
-            big.transact([i](auto& tx) {
-                tx.put(am::root, "k_" + std::to_string(i), std::int64_t{i});
             });
         }
-        std::printf("Built %d-change document: %.1f ms\n", big_changes, t.elapsed_ms());
+        threads.clear();
+        std::printf("Parallel sync(%d pairs): %.1f ms\n", sync_pairs, t.elapsed_ms());
     }
 
-    // save() internally uses std::execution::par to serialize change chunks
-    {
-        auto t = Timer{};
-        auto bytes = big.save();
-        std::printf("save(): %zu bytes in %.1f ms\n", bytes.size(), t.elapsed_ms());
+    auto sync_ok = true;
+    for (int i = 0; i < sync_pairs; ++i) {
+        if (targets[i].length(am::root) != 20) { sync_ok = false; break; }
     }
-
-    // load() internally uses std::execution::par to parse/decompress chunks
-    {
-        auto bytes = big.save();
-        auto t = Timer{};
-        auto reloaded = am::Document::load(bytes);
-        std::printf("load(): %.1f ms, ok=%s\n", t.elapsed_ms(),
-                    reloaded ? "yes" : "no");
-    }
+    std::printf("All syncs correct: %s\n", sync_ok ? "yes" : "NO");
 
     std::printf("\nDone.\n");
     return 0;
