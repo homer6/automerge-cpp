@@ -1,5 +1,6 @@
 #pragma once
 
+#include <automerge-cpp/change.hpp>
 #include <automerge-cpp/transaction.hpp>
 #include <automerge-cpp/types.hpp>
 #include <automerge-cpp/value.hpp>
@@ -51,6 +52,13 @@ public:
 
     // Object type query
     auto object_type(const ObjId& obj) const -> std::optional<ObjType>;
+
+    // Phase 3: Fork and Merge
+    auto fork() const -> Document;
+    void merge(const Document& other);
+    auto get_changes() const -> std::vector<Change>;
+    void apply_changes(const std::vector<Change>& changes);
+    auto get_heads() const -> std::vector<ChangeHash>;
 
 private:
     std::unique_ptr<detail::DocState> state_;

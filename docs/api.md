@@ -83,6 +83,16 @@ doc.text(ObjId)       -> std::string                 // concatenated text conten
 doc.object_type(ObjId) -> std::optional<ObjType>     // map, list, text, table
 ```
 
+### Fork and Merge
+
+```cpp
+doc.fork()                                  -> Document              // deep copy with unique actor
+doc.merge(const Document&)                  -> void                  // apply unseen changes from other
+doc.get_changes()                           -> std::vector<Change>   // full change history
+doc.apply_changes(std::vector<Change>)      -> void                  // apply remote changes
+doc.get_heads()                             -> std::vector<ChangeHash>  // current DAG leaf hashes
+```
+
 ---
 
 ## Transaction
@@ -406,4 +416,32 @@ doc.transact([](auto& tx) {
     tx.increment(am::root, "views", 1);
 });
 // Counter value is now 1
+```
+
+### Fork and Merge
+
+```cpp
+namespace am = automerge_cpp;
+
+auto doc1 = am::Document{};
+doc1.transact([](auto& tx) {
+    tx.put(am::root, "x", std::int64_t{1});
+});
+
+auto doc2 = doc1.fork();  // independent copy, unique actor
+
+// Concurrent edits
+doc1.transact([](auto& tx) {
+    tx.put(am::root, "a", std::string{"from doc1"});
+});
+doc2.transact([](auto& tx) {
+    tx.put(am::root, "b", std::string{"from doc2"});
+});
+
+doc1.merge(doc2);
+// doc1 now has keys: "a", "b", "x"
+
+// Conflict detection
+auto all = doc1.get_all(am::root, "x");
+// all.size() == 1 (no conflict — same value from before fork)
 ```

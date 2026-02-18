@@ -2,6 +2,9 @@
 
 #include "doc_state.hpp"
 
+#include <algorithm>
+#include <ranges>
+
 namespace automerge_cpp {
 
 Document::Document()
@@ -77,6 +80,67 @@ auto Document::text(const ObjId& obj) const -> std::string {
 
 auto Document::object_type(const ObjId& obj) const -> std::optional<ObjType> {
     return state_->object_type(obj);
+}
+
+// -- Phase 3: Fork and Merge --------------------------------------------------
+
+auto Document::fork() const -> Document {
+    auto forked = Document{*this};
+    // Create a unique actor by incrementing the last byte
+    auto new_actor = state_->actor;
+    new_actor.bytes[15] = static_cast<std::byte>(
+        static_cast<std::uint8_t>(new_actor.bytes[15]) + 1);
+    forked.set_actor_id(new_actor);
+    return forked;
+}
+
+void Document::merge(const Document& other) {
+    // Find changes from other that we haven't seen
+    auto missing = std::vector<Change>{};
+    for (const auto& change : other.state_->change_history) {
+        auto it = state_->clock.find(change.actor);
+        if (it == state_->clock.end() || it->second < change.seq) {
+            missing.push_back(change);
+        }
+    }
+    // Sort by start_op for causal ordering
+    std::ranges::sort(missing, [](const Change& a, const Change& b) {
+        return a.start_op < b.start_op;
+    });
+    apply_changes(missing);
+}
+
+auto Document::get_changes() const -> std::vector<Change> {
+    return state_->change_history;
+}
+
+void Document::apply_changes(const std::vector<Change>& changes) {
+    for (const auto& change : changes) {
+        // Apply each operation
+        for (const auto& op : change.operations) {
+            state_->apply_op(op);
+            state_->op_log.push_back(op);
+        }
+
+        // Update clock
+        auto& seq = state_->clock[change.actor];
+        seq = std::max(seq, change.seq);
+
+        // Update heads
+        auto hash = detail::DocState::compute_change_hash(change);
+        // Remove deps from heads
+        for (const auto& dep : change.deps) {
+            std::erase(state_->heads, dep);
+        }
+        state_->heads.push_back(hash);
+
+        // Store change
+        state_->change_history.push_back(change);
+    }
+}
+
+auto Document::get_heads() const -> std::vector<ChangeHash> {
+    return state_->heads;
 }
 
 }  // namespace automerge_cpp

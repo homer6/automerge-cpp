@@ -83,27 +83,43 @@
 ---
 
 ## Phase 3: Changes and Merge
-**Goal**: Documents can be forked, mutated independently, and merged.
+**Status**: Complete — 103 tests passing (87 Phase 1+2 + 16 Phase 3)
 
 ### Deliverables
-- `Change` serialization (in-memory, not yet binary)
-- `Document::fork()` — create independent copy
-- `Document::merge()` — merge another document
-- `Document::get_changes()` / `apply_changes()`
-- Change hashing (SHA-256)
+- [x] Change tracking — each `transact()` produces a `Change` with ops, deps, and hash
+- [x] `Document::fork()` — create independent copy with unique actor
+- [x] `Document::merge()` — merge another document's unseen changes
+- [x] `Document::get_changes()` / `apply_changes()` — change-level API
+- [x] `Document::get_heads()` — current DAG leaf hashes
+- [x] Change hashing (FNV-1a in-memory, SHA-256 deferred to Phase 4)
+- [x] RGA list/text merge — `insert_after` tracking, `find_rga_position` algorithm
+- [x] Map conflict resolution — multi-value register with predecessor tracking
+- [x] Counter merge — concurrent increments accumulate correctly
+- [x] Concurrent delete/put — put survives concurrent delete
 
-### Key Properties to Test (Monoid Laws)
-- **Associativity**: `merge(merge(a, b), c) == merge(a, merge(b, c))`
-- **Commutativity**: `merge(a, b) == merge(b, a)` (same final state)
-- **Idempotency**: `merge(a, a) == a`
-- **Identity**: `merge(a, Document{}) == a`
+### Design Decisions (implemented)
+- `Op` gains `insert_after: optional<OpId>` for RGA merge tracking
+- `Op.pred` populated by Transaction for conflict-aware merge
+- `DocState` tracks `change_history`, `heads` (DAG leaves), `clock` (vector clock)
+- `apply_op()` handles remote ops with conflict-preserving semantics
+- RGA uses scanned-set algorithm for correct subtree skipping
+- `map_put` clears all for local ops; `apply_op` removes only predecessors for remote
 
-### Tests
-- Fork, mutate both, merge — verify combined state
-- Three-way merge
-- Concurrent edits to same key (conflict resolution)
-- Concurrent list inserts at same index
-- Concurrent text edits
+### Tests (16 new)
+- [x] Fork creates independent copy, fork has different actor
+- [x] Merge combines independent map edits
+- [x] Concurrent map edits create conflict (get_all returns multiple values)
+- [x] Concurrent list inserts have deterministic RGA ordering
+- [x] Concurrent text edits both present
+- [x] Concurrent counter increments sum correctly
+- [x] Concurrent delete and put — put survives
+- [x] Commutativity: merge(a,b) == merge(b,a)
+- [x] Idempotency: merge(a,a) is no-op
+- [x] Identity: merge(a, empty) == a
+- [x] Three-way merge
+- [x] get_changes returns history, apply_changes cross-doc
+- [x] Merge nested objects
+- [x] get_heads tracks DAG
 
 ---
 

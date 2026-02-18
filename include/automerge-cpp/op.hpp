@@ -4,6 +4,7 @@
 #include <automerge-cpp/value.hpp>
 
 #include <cstdint>
+#include <optional>
 #include <string_view>
 #include <vector>
 
@@ -44,7 +45,8 @@ struct Op {
     Prop key;
     OpType action;
     Value value;
-    std::vector<OpId> pred;  // predecessor ops (for conflict tracking)
+    std::vector<OpId> pred;              // predecessor ops (for conflict tracking)
+    std::optional<OpId> insert_after{};  // for insert/splice: the element inserted after
 
     auto operator==(const Op&) const -> bool = default;
 };

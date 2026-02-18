@@ -1,10 +1,12 @@
 #pragma once
 
+#include <automerge-cpp/op.hpp>
 #include <automerge-cpp/types.hpp>
 #include <automerge-cpp/value.hpp>
 
 #include <cstddef>
 #include <string_view>
+#include <vector>
 
 namespace automerge_cpp {
 
@@ -37,6 +39,8 @@ private:
     void commit();
 
     detail::DocState& state_;
+    std::vector<Op> pending_ops_;
+    std::uint64_t start_op_{0};
 };
 
 }  // namespace automerge_cpp
