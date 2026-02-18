@@ -14,6 +14,7 @@
 
 #include <automerge-cpp/thread_pool.hpp>
 
+#include <concepts>
 #include <cstddef>
 #include <functional>
 #include <memory>
@@ -22,6 +23,8 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace automerge_cpp {
@@ -92,6 +95,25 @@ public:
     /// @param fn A function that receives a Transaction reference.
     void transact(const std::function<void(Transaction&)>& fn);
 
+    /// Execute a function within a transaction and return its result.
+    ///
+    /// @code
+    /// auto list_id = doc.transact([](Transaction& tx) {
+    ///     return tx.put_object(root, "items", ObjType::list);
+    /// });
+    /// @endcode
+    template <typename Fn>
+        requires std::invocable<Fn, Transaction&> &&
+                 (!std::is_void_v<std::invoke_result_t<Fn, Transaction&>>)
+    auto transact(Fn&& fn) -> std::invoke_result_t<Fn, Transaction&>;
+
+    /// Execute a void function within a transaction (template overload).
+    template <typename Fn>
+        requires std::invocable<Fn, Transaction&> &&
+                 std::is_void_v<std::invoke_result_t<Fn, Transaction&>> &&
+                 (!std::convertible_to<Fn, std::function<void(Transaction&)>>)
+    void transact(Fn&& fn);
+
     // -- Reading: map operations ----------------------------------------------
 
     /// Get the winning value at a map key.
@@ -129,6 +151,51 @@ public:
 
     /// Get the text content of a text object as a string.
     auto text(const ObjId& obj) const -> std::string;
+
+    // -- Typed getters --------------------------------------------------------
+
+    /// Get a typed scalar value from a map key.
+    ///
+    /// Follows the nlohmann/json `get<T>()` pattern.
+    /// @code
+    /// auto name = doc.get<std::string>(root, "name");
+    /// auto age  = doc.get<std::int64_t>(root, "age");
+    /// @endcode
+    template <typename T>
+    auto get(const ObjId& obj, std::string_view key) const -> std::optional<T> {
+        return get_scalar<T>(get(obj, key));
+    }
+
+    /// Get a typed scalar value from a list index.
+    /// @code
+    /// auto item = doc.get<std::string>(list_id, std::size_t{0});
+    /// @endcode
+    template <typename T>
+    auto get(const ObjId& obj, std::size_t index) const -> std::optional<T> {
+        return get_scalar<T>(get(obj, index));
+    }
+
+    // -- Convenience: root access ---------------------------------------------
+
+    /// Get a value from the root map by key.
+    /// @code
+    /// auto name = doc["name"];
+    /// @endcode
+    auto operator[](std::string_view key) const -> std::optional<Value> {
+        return get(root, key);
+    }
+
+    // -- Path-based access ----------------------------------------------------
+
+    /// Get a value at a nested path from root.
+    /// Each argument is either a string (map key) or size_t (list index).
+    /// @code
+    /// auto port = doc.get_path("config", "database", "port");
+    /// auto item = doc.get_path("todos", std::size_t{0}, "title");
+    /// @endcode
+    template <typename... Props>
+        requires (sizeof...(Props) > 0)
+    auto get_path(Props&&... props) const -> std::optional<Value>;
 
     // -- Object type query ----------------------------------------------------
 
@@ -190,6 +257,18 @@ public:
     /// @param fn A function that receives a Transaction reference.
     /// @return The patches produced by the transaction.
     auto transact_with_patches(const std::function<void(Transaction&)>& fn) -> std::vector<Patch>;
+
+    /// Execute a transaction, return both the function result and patches.
+    /// @code
+    /// auto [list_id, patches] = doc.transact_with_patches([](Transaction& tx) {
+    ///     return tx.put_object(root, "items", ObjType::list);
+    /// });
+    /// @endcode
+    template <typename Fn>
+        requires std::invocable<Fn, Transaction&> &&
+                 (!std::is_void_v<std::invoke_result_t<Fn, Transaction&>>)
+    auto transact_with_patches(Fn&& fn)
+        -> std::pair<std::invoke_result_t<Fn, Transaction&>, std::vector<Patch>>;
 
     // -- Historical reads (time travel) ---------------------------------------
 
@@ -275,10 +354,69 @@ private:
 
     auto read_guard() const -> ReadGuard;
 
+    /// Internal: convert pending ops to patches.
+    static auto ops_to_patches_internal(const std::vector<Op>& ops) -> std::vector<Patch>;
+
+    /// Internal: walk a path of Props to resolve a nested value.
+    auto get_path_impl(std::span<const Prop> path) const -> std::optional<Value>;
+
     std::unique_ptr<detail::DocState> state_;
     std::shared_ptr<thread_pool> pool_;
     mutable std::shared_mutex mutex_;
     bool read_locking_ = true;
 };
+
+// -- Template implementations (must be in header) ----------------------------
+
+template <typename Fn>
+    requires std::invocable<Fn, Transaction&> &&
+             (!std::is_void_v<std::invoke_result_t<Fn, Transaction&>>)
+auto Document::transact(Fn&& fn) -> std::invoke_result_t<Fn, Transaction&> {
+    auto lock = std::unique_lock{mutex_};
+    auto tx = Transaction{*state_};
+    auto result = fn(tx);
+    tx.commit();
+    return result;
+}
+
+template <typename Fn>
+    requires std::invocable<Fn, Transaction&> &&
+             std::is_void_v<std::invoke_result_t<Fn, Transaction&>> &&
+             (!std::convertible_to<Fn, std::function<void(Transaction&)>>)
+void Document::transact(Fn&& fn) {
+    auto lock = std::unique_lock{mutex_};
+    auto tx = Transaction{*state_};
+    fn(tx);
+    tx.commit();
+}
+
+template <typename Fn>
+    requires std::invocable<Fn, Transaction&> &&
+             (!std::is_void_v<std::invoke_result_t<Fn, Transaction&>>)
+auto Document::transact_with_patches(Fn&& fn)
+    -> std::pair<std::invoke_result_t<Fn, Transaction&>, std::vector<Patch>> {
+    auto lock = std::unique_lock{mutex_};
+    auto tx = Transaction{*state_};
+    auto result = fn(tx);
+    auto ops = tx.pending_ops_;
+    tx.commit();
+    return {std::move(result), ops_to_patches_internal(ops)};
+}
+
+template <typename... Props>
+    requires (sizeof...(Props) > 0)
+auto Document::get_path(Props&&... props) const -> std::optional<Value> {
+    auto path = std::vector<Prop>{};
+    path.reserve(sizeof...(Props));
+    auto to_prop = overload{
+        [](std::string_view s) -> Prop { return std::string{s}; },
+        [](const char* s) -> Prop { return std::string{s}; },
+        [](const std::string& s) -> Prop { return s; },
+        [](std::size_t i) -> Prop { return i; },
+        [](int i) -> Prop { return static_cast<std::size_t>(i); },
+    };
+    (path.push_back(to_prop(std::forward<Props>(props))), ...);
+    return get_path_impl(path);
+}
 
 }  // namespace automerge_cpp

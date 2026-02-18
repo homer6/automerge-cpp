@@ -43,9 +43,6 @@ int main() {
 
     // =========================================================================
     // 1. Fork/merge batch put — the core parallelism pattern
-    //
-    //    fork N → mutate in parallel → merge back
-    //    Same result as sequential because merge is a monoid.
     // =========================================================================
     std::printf("\n=== Fork/merge batch put ===\n");
 
@@ -137,9 +134,6 @@ int main() {
 
     // =========================================================================
     // 3. Lock-free parallel reads
-    //
-    //    set_read_locking(false) eliminates shared_mutex contention.
-    //    pool->parallelize_loop fans reads across all cores.
     // =========================================================================
     std::printf("\n=== Lock-free parallel reads ===\n");
     {
@@ -155,7 +149,7 @@ int main() {
         {
             auto t = Timer{};
             for (int i = 0; i < num_keys; ++i) {
-                auto v = doc.get(am::root, "k" + std::to_string(i));
+                auto v = doc.get<std::int64_t>(am::root, "k" + std::to_string(i));
                 (void)v;
             }
             std::printf("  Sequential %d gets: %.1f ms\n", num_keys, t.ms());
@@ -167,7 +161,7 @@ int main() {
             auto t = Timer{};
             pool->parallelize_loop(0, num_keys, [&](int start, int end) {
                 for (int i = start; i < end; ++i) {
-                    auto v = doc.get(am::root, "k" + std::to_string(i));
+                    auto v = doc.get<std::int64_t>(am::root, "k" + std::to_string(i));
                     (void)v;
                 }
             });
@@ -178,9 +172,6 @@ int main() {
 
     // =========================================================================
     // 4. Tree reduce — parallel merge of 100 peers
-    //
-    //    Merge is associative, so we can merge pairs in parallel at each
-    //    level of the tree: O(log N) rounds instead of O(N) sequential.
     // =========================================================================
     std::printf("\n=== Tree reduce: merge 100 peers ===\n");
 

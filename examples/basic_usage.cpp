@@ -15,34 +15,41 @@ int main() {
     // Create a document
     auto doc = am::Document{};
 
-    // All mutations go through transact()
-    am::ObjId list_id;
-    doc.transact([&](auto& tx) {
-        tx.put(am::root, "title", std::string{"Shopping List"});
-        tx.put(am::root, "created_by", std::string{"Alice"});
+    // All mutations go through transact().
+    // The lambda can return a value — here we capture the list ObjId.
+    auto list_id = doc.transact([](am::Transaction& tx) {
+        tx.put(am::root, "title", "Shopping List");
+        tx.put(am::root, "created_by", "Alice");
 
-        // Create a nested list
-        list_id = tx.put_object(am::root, "items", am::ObjType::list);
-        tx.insert(list_id, 0, std::string{"Milk"});
-        tx.insert(list_id, 1, std::string{"Eggs"});
-        tx.insert(list_id, 2, std::string{"Bread"});
+        // Create a nested list and return its id
+        auto items = tx.put_object(am::root, "items", am::ObjType::list);
+        tx.insert(items, 0, "Milk");
+        tx.insert(items, 1, "Eggs");
+        tx.insert(items, 2, "Bread");
+        return items;
     });
 
-    // Read values
-    auto title = doc.get(am::root, "title");
-    if (title) {
-        auto& sv = std::get<am::ScalarValue>(*title);
-        std::printf("Title: %s\n", std::get<std::string>(sv).c_str());
+    // Typed get<T>() — no manual variant unwrapping
+    if (auto title = doc.get<std::string>(am::root, "title")) {
+        std::printf("Title: %s\n", title->c_str());
     }
 
-    // Read list
+    // operator[] for quick root access
+    if (auto author = doc["created_by"]) {
+        if (auto s = am::get_scalar<std::string>(*author)) {
+            std::printf("Created by: %s\n", s->c_str());
+        }
+    }
+
+    // Read list values
     std::printf("Items (%zu):\n", doc.length(list_id));
     for (auto& val : doc.values(list_id)) {
-        auto& sv = std::get<am::ScalarValue>(val);
-        std::printf("  - %s\n", std::get<std::string>(sv).c_str());
+        if (auto s = am::get_scalar<std::string>(val)) {
+            std::printf("  - %s\n", s->c_str());
+        }
     }
 
-    // Counters
+    // Counters — put a Counter, then increment it
     doc.transact([](auto& tx) {
         tx.put(am::root, "views", am::Counter{0});
     });
@@ -52,22 +59,25 @@ int main() {
         tx.increment(am::root, "views", 1);
     });
 
-    auto views = doc.get(am::root, "views");
-    if (views) {
-        auto& sv = std::get<am::ScalarValue>(*views);
-        std::printf("Views: %lld\n", std::get<am::Counter>(sv).value);
+    if (auto views = doc.get<am::Counter>(am::root, "views")) {
+        std::printf("Views: %lld\n", views->value);
     }
 
-    // Save to binary
+    // Save to binary and load back
     auto bytes = doc.save();
     std::printf("Saved document: %zu bytes\n", bytes.size());
 
-    // Load from binary
-    auto loaded = am::Document::load(bytes);
-    if (loaded) {
-        auto t = loaded->get(am::root, "title");
-        auto& sv = std::get<am::ScalarValue>(*t);
-        std::printf("Loaded title: %s\n", std::get<std::string>(sv).c_str());
+    if (auto loaded = am::Document::load(bytes)) {
+        if (auto title = loaded->get<std::string>(am::root, "title")) {
+            std::printf("Loaded title: %s\n", title->c_str());
+        }
+    }
+
+    // Path-based access — navigate nested objects in one call
+    if (auto first_item = doc.get_path("items", std::size_t{0})) {
+        if (auto s = am::get_scalar<std::string>(*first_item)) {
+            std::printf("First item: %s\n", s->c_str());
+        }
     }
 
     std::printf("Done.\n");

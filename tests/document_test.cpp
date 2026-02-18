@@ -498,12 +498,12 @@ auto make_doc(std::uint8_t actor_byte) -> Document {
     return doc;
 }
 
-// Helper: extract int64 from a Value
-auto get_int(const std::optional<Value>& val) -> std::int64_t {
+// Helper: extract int64 from a Value (unwraps optional, asserts presence)
+auto get_int_val(const std::optional<Value>& val) -> std::int64_t {
     return std::get<std::int64_t>(std::get<ScalarValue>(*val));
 }
 
-// Helper: extract string from a Value
+// Helper: extract string from a Value (unwraps optional, asserts presence)
 auto get_str(const std::optional<Value>& val) -> std::string {
     return std::get<std::string>(std::get<ScalarValue>(*val));
 }
@@ -517,15 +517,15 @@ TEST(Document, fork_creates_independent_copy) {
     auto forked = doc.fork();
 
     // Forked has the same value
-    EXPECT_EQ(get_int(forked.get(root, "x")), 10);
+    EXPECT_EQ(get_int_val(forked.get(root, "x")), 10);
 
     // Mutations are independent
     forked.transact([](auto& tx) {
         tx.put(root, "x", std::int64_t{20});
     });
 
-    EXPECT_EQ(get_int(doc.get(root, "x")), 10);
-    EXPECT_EQ(get_int(forked.get(root, "x")), 20);
+    EXPECT_EQ(get_int_val(doc.get(root, "x")), 10);
+    EXPECT_EQ(get_int_val(forked.get(root, "x")), 20);
 }
 
 TEST(Document, fork_has_different_actor_id) {
@@ -548,8 +548,8 @@ TEST(Document, merge_combines_independent_map_edits) {
     doc1.merge(doc2);
 
     // doc1 has both keys
-    EXPECT_EQ(get_int(doc1.get(root, "x")), 1);
-    EXPECT_EQ(get_int(doc1.get(root, "y")), 2);
+    EXPECT_EQ(get_int_val(doc1.get(root, "x")), 1);
+    EXPECT_EQ(get_int_val(doc1.get(root, "y")), 2);
     EXPECT_EQ(doc1.length(root), 2u);
 }
 
@@ -575,7 +575,7 @@ TEST(Document, merge_concurrent_map_edits_creates_conflict) {
     auto winner = doc1.get(root, "x");
     ASSERT_TRUE(winner.has_value());
     // The winner should be one of the two values
-    auto winner_int = get_int(winner);
+    auto winner_int = get_int_val(winner);
     EXPECT_TRUE(winner_int == 10 || winner_int == 20);
 }
 
@@ -705,7 +705,7 @@ TEST(Document, merge_concurrent_delete_and_put) {
     // independently — the delete only removes what it saw)
     auto val = doc1.get(root, "x");
     ASSERT_TRUE(val.has_value());
-    EXPECT_EQ(get_int(val), 2);
+    EXPECT_EQ(get_int_val(val), 2);
 }
 
 TEST(Document, merge_is_commutative) {
@@ -808,10 +808,10 @@ TEST(Document, three_way_merge) {
     doc1.merge(doc3);
 
     EXPECT_EQ(doc1.length(root), 4u);  // base, a, b, c
-    EXPECT_EQ(get_int(doc1.get(root, "base")), 0);
-    EXPECT_EQ(get_int(doc1.get(root, "a")), 1);
-    EXPECT_EQ(get_int(doc1.get(root, "b")), 2);
-    EXPECT_EQ(get_int(doc1.get(root, "c")), 3);
+    EXPECT_EQ(get_int_val(doc1.get(root, "base")), 0);
+    EXPECT_EQ(get_int_val(doc1.get(root, "a")), 1);
+    EXPECT_EQ(get_int_val(doc1.get(root, "b")), 2);
+    EXPECT_EQ(get_int_val(doc1.get(root, "c")), 3);
 }
 
 TEST(Document, get_changes_returns_history) {
@@ -841,7 +841,7 @@ TEST(Document, apply_changes_from_another_doc) {
 
     auto val = doc2.get(root, "x");
     ASSERT_TRUE(val.has_value());
-    EXPECT_EQ(get_int(val), 42);
+    EXPECT_EQ(get_int_val(val), 42);
 }
 
 TEST(Document, merge_nested_objects) {
@@ -1044,7 +1044,7 @@ TEST(Document, save_and_load_multiple_keys) {
     auto loaded = Document::load(doc.save());
     ASSERT_TRUE(loaded.has_value());
     EXPECT_EQ(loaded->length(root), 4u);
-    EXPECT_EQ(get_int(loaded->get(root, "a")), 1);
+    EXPECT_EQ(get_int_val(loaded->get(root, "a")), 1);
     EXPECT_EQ(get_str(loaded->get(root, "b")), "hello");
     EXPECT_TRUE(std::get<bool>(std::get<ScalarValue>(*loaded->get(root, "c"))));
     EXPECT_DOUBLE_EQ(std::get<double>(std::get<ScalarValue>(*loaded->get(root, "d"))), 2.5);
@@ -1068,7 +1068,7 @@ TEST(Document, save_and_load_nested_map) {
 
     // Access nested values
     EXPECT_EQ(loaded->length(nested_id), 2u);
-    EXPECT_EQ(get_int(loaded->get(nested_id, "version")), 3);
+    EXPECT_EQ(get_int_val(loaded->get(nested_id, "version")), 3);
     EXPECT_EQ(get_str(loaded->get(nested_id, "name")), "test");
 }
 
@@ -1120,8 +1120,8 @@ TEST(Document, save_and_load_multiple_transactions) {
 
     auto loaded = Document::load(doc.save());
     ASSERT_TRUE(loaded.has_value());
-    EXPECT_EQ(get_int(loaded->get(root, "x")), 2);
-    EXPECT_EQ(get_int(loaded->get(root, "y")), 3);
+    EXPECT_EQ(get_int_val(loaded->get(root, "x")), 2);
+    EXPECT_EQ(get_int_val(loaded->get(root, "y")), 3);
 
     auto changes = loaded->get_changes();
     EXPECT_EQ(changes.size(), 3u);
@@ -1196,8 +1196,8 @@ TEST(Document, save_and_load_after_merge) {
     auto loaded = Document::load(doc1.save());
     ASSERT_TRUE(loaded.has_value());
     EXPECT_EQ(loaded->length(root), 2u);
-    EXPECT_EQ(get_int(loaded->get(root, "x")), 1);
-    EXPECT_EQ(get_int(loaded->get(root, "y")), 2);
+    EXPECT_EQ(get_int_val(loaded->get(root, "x")), 1);
+    EXPECT_EQ(get_int_val(loaded->get(root, "y")), 2);
 }
 
 TEST(Document, save_and_load_can_continue_editing) {
@@ -1215,8 +1215,8 @@ TEST(Document, save_and_load_can_continue_editing) {
     });
 
     EXPECT_EQ(loaded->length(root), 2u);
-    EXPECT_EQ(get_int(loaded->get(root, "x")), 1);
-    EXPECT_EQ(get_int(loaded->get(root, "y")), 2);
+    EXPECT_EQ(get_int_val(loaded->get(root, "x")), 1);
+    EXPECT_EQ(get_int_val(loaded->get(root, "y")), 2);
 }
 
 TEST(Document, save_and_load_can_merge_after_load) {
@@ -1237,8 +1237,8 @@ TEST(Document, save_and_load_can_merge_after_load) {
 
     loaded->merge(doc2);
     EXPECT_EQ(loaded->length(root), 2u);
-    EXPECT_EQ(get_int(loaded->get(root, "x")), 1);
-    EXPECT_EQ(get_int(loaded->get(root, "y")), 2);
+    EXPECT_EQ(get_int_val(loaded->get(root, "x")), 1);
+    EXPECT_EQ(get_int_val(loaded->get(root, "y")), 2);
 }
 
 TEST(Document, save_and_load_deeply_nested) {
@@ -1253,7 +1253,7 @@ TEST(Document, save_and_load_deeply_nested) {
 
     auto loaded = Document::load(doc.save());
     ASSERT_TRUE(loaded.has_value());
-    EXPECT_EQ(get_int(loaded->get(level2, "deep")), 42);
+    EXPECT_EQ(get_int_val(loaded->get(level2, "deep")), 42);
 }
 
 TEST(Document, save_and_load_with_delete) {
@@ -1281,7 +1281,7 @@ TEST(Document, save_and_load_negative_int) {
 
     auto loaded = Document::load(doc.save());
     ASSERT_TRUE(loaded.has_value());
-    EXPECT_EQ(get_int(loaded->get(root, "neg")), -999);
+    EXPECT_EQ(get_int_val(loaded->get(root, "neg")), -999);
 }
 
 // -- Corrupt data handling ----------------------------------------------------
@@ -1331,7 +1331,7 @@ TEST(Document, double_save_load_round_trip) {
     auto loaded2 = Document::load(loaded1->save());
     ASSERT_TRUE(loaded2.has_value());
 
-    EXPECT_EQ(get_int(loaded2->get(root, "x")), 42);
+    EXPECT_EQ(get_int_val(loaded2->get(root, "x")), 42);
     EXPECT_EQ(get_str(loaded2->get(root, "s")), "hello");
 }
 
@@ -1382,10 +1382,10 @@ TEST(Document, sync_two_fresh_documents) {
     // Both should have both keys
     EXPECT_EQ(doc1.length(root), 2u);
     EXPECT_EQ(doc2.length(root), 2u);
-    EXPECT_EQ(get_int(doc1.get(root, "x")), 1);
-    EXPECT_EQ(get_int(doc1.get(root, "y")), 2);
-    EXPECT_EQ(get_int(doc2.get(root, "x")), 1);
-    EXPECT_EQ(get_int(doc2.get(root, "y")), 2);
+    EXPECT_EQ(get_int_val(doc1.get(root, "x")), 1);
+    EXPECT_EQ(get_int_val(doc1.get(root, "y")), 2);
+    EXPECT_EQ(get_int_val(doc2.get(root, "x")), 1);
+    EXPECT_EQ(get_int_val(doc2.get(root, "y")), 2);
 }
 
 TEST(Document, sync_one_empty_one_populated) {
@@ -1400,7 +1400,7 @@ TEST(Document, sync_one_empty_one_populated) {
     sync_docs(doc1, doc2);
 
     EXPECT_EQ(doc2.length(root), 2u);
-    EXPECT_EQ(get_int(doc2.get(root, "a")), 10);
+    EXPECT_EQ(get_int_val(doc2.get(root, "a")), 10);
     EXPECT_EQ(get_str(doc2.get(root, "b")), "hello");
 }
 
@@ -1453,12 +1453,12 @@ TEST(Document, sync_after_concurrent_edits) {
     // Both should have all three keys
     EXPECT_EQ(doc1.length(root), 3u);
     EXPECT_EQ(doc2.length(root), 3u);
-    EXPECT_EQ(get_int(doc1.get(root, "base")), 0);
-    EXPECT_EQ(get_int(doc1.get(root, "from_1")), 1);
-    EXPECT_EQ(get_int(doc1.get(root, "from_2")), 2);
-    EXPECT_EQ(get_int(doc2.get(root, "base")), 0);
-    EXPECT_EQ(get_int(doc2.get(root, "from_1")), 1);
-    EXPECT_EQ(get_int(doc2.get(root, "from_2")), 2);
+    EXPECT_EQ(get_int_val(doc1.get(root, "base")), 0);
+    EXPECT_EQ(get_int_val(doc1.get(root, "from_1")), 1);
+    EXPECT_EQ(get_int_val(doc1.get(root, "from_2")), 2);
+    EXPECT_EQ(get_int_val(doc2.get(root, "base")), 0);
+    EXPECT_EQ(get_int_val(doc2.get(root, "from_1")), 1);
+    EXPECT_EQ(get_int_val(doc2.get(root, "from_2")), 2);
 }
 
 TEST(Document, sync_with_list_operations) {
@@ -1508,8 +1508,8 @@ TEST(Document, sync_multiple_transactions) {
 
     sync_docs(doc1, doc2);
 
-    EXPECT_EQ(get_int(doc2.get(root, "x")), 2);
-    EXPECT_EQ(get_int(doc2.get(root, "y")), 3);
+    EXPECT_EQ(get_int_val(doc2.get(root, "x")), 2);
+    EXPECT_EQ(get_int_val(doc2.get(root, "y")), 3);
     EXPECT_EQ(doc2.get_changes().size(), 3u);
 }
 
@@ -1539,9 +1539,9 @@ TEST(Document, sync_three_peers) {
     // All three should have all keys
     for (auto* doc : {&doc1, &doc2, &doc3}) {
         EXPECT_EQ(doc->length(root), 3u);
-        EXPECT_EQ(get_int(doc->get(root, "a")), 1);
-        EXPECT_EQ(get_int(doc->get(root, "b")), 2);
-        EXPECT_EQ(get_int(doc->get(root, "c")), 3);
+        EXPECT_EQ(get_int_val(doc->get(root, "a")), 1);
+        EXPECT_EQ(get_int_val(doc->get(root, "b")), 2);
+        EXPECT_EQ(get_int_val(doc->get(root, "c")), 3);
     }
 }
 
@@ -1554,21 +1554,21 @@ TEST(Document, sync_incremental_changes) {
         tx.put(root, "v", std::int64_t{1});
     });
     sync_docs(doc1, doc2);
-    EXPECT_EQ(get_int(doc2.get(root, "v")), 1);
+    EXPECT_EQ(get_int_val(doc2.get(root, "v")), 1);
 
     // Second sync: incremental update
     doc1.transact([](auto& tx) {
         tx.put(root, "v", std::int64_t{2});
     });
     sync_docs(doc1, doc2);
-    EXPECT_EQ(get_int(doc2.get(root, "v")), 2);
+    EXPECT_EQ(get_int_val(doc2.get(root, "v")), 2);
 
     // Third sync: update from other direction
     doc2.transact([](auto& tx) {
         tx.put(root, "w", std::int64_t{99});
     });
     sync_docs(doc1, doc2);
-    EXPECT_EQ(get_int(doc1.get(root, "w")), 99);
+    EXPECT_EQ(get_int_val(doc1.get(root, "w")), 99);
 }
 
 TEST(Document, sync_with_counter_increments) {
@@ -1615,7 +1615,7 @@ TEST(Document, sync_with_nested_objects) {
     auto debug = doc2.get(nested, "debug");
     ASSERT_TRUE(debug.has_value());
     EXPECT_TRUE(std::get<bool>(std::get<ScalarValue>(*debug)));
-    EXPECT_EQ(get_int(doc2.get(nested, "version")), 3);
+    EXPECT_EQ(get_int_val(doc2.get(nested, "version")), 3);
 }
 
 TEST(Document, sync_generates_first_message_from_empty) {
@@ -2763,7 +2763,7 @@ TEST(Document, no_conflict_on_repeated_assignment) {
     });
     auto all = doc.get_all(root, "key");
     EXPECT_EQ(all.size(), 1u);
-    EXPECT_EQ(get_int(doc.get(root, "key")), 3);
+    EXPECT_EQ(get_int_val(doc.get(root, "key")), 3);
 }
 
 TEST(Document, repeated_map_assignment_resolves_conflict) {
@@ -2788,7 +2788,7 @@ TEST(Document, repeated_map_assignment_resolves_conflict) {
     });
     auto all = doc1.get_all(root, "key");
     EXPECT_EQ(all.size(), 1u);
-    EXPECT_EQ(get_int(doc1.get(root, "key")), 99);
+    EXPECT_EQ(get_int_val(doc1.get(root, "key")), 99);
 }
 
 TEST(Document, assignment_conflicts_of_different_types) {
@@ -3158,8 +3158,8 @@ TEST(Document, insertion_consistent_with_causality) {
 
     // List should be [4, 3, 2, 1, 0] (reversed)
     EXPECT_EQ(doc1.length(list_id), 5u);
-    EXPECT_EQ(get_int(doc1.get(list_id, 0)), 4);
-    EXPECT_EQ(get_int(doc1.get(list_id, 4)), 0);
+    EXPECT_EQ(get_int_val(doc1.get(list_id, 0)), 4);
+    EXPECT_EQ(get_int_val(doc1.get(list_id, 4)), 0);
 }
 
 TEST(Document, concurrent_assignment_and_deletion_of_list_entry) {
@@ -3335,8 +3335,8 @@ TEST(Document, save_and_load_after_repeated_out_of_order_changes) {
         doc2.apply_changes(changes);
     }
 
-    EXPECT_EQ(get_int(doc2.get(root, "a")), 1);
-    EXPECT_EQ(get_int(doc2.get(root, "b")), 2);
+    EXPECT_EQ(get_int_val(doc2.get(root, "a")), 1);
+    EXPECT_EQ(get_int_val(doc2.get(root, "b")), 2);
     EXPECT_EQ(doc2.length(root), 2u);
 }
 
@@ -3367,13 +3367,13 @@ TEST(Document, allows_empty_keys_in_maps) {
 
     auto val = doc.get(root, "");
     ASSERT_TRUE(val.has_value());
-    EXPECT_EQ(get_int(val), 1);
+    EXPECT_EQ(get_int_val(val), 1);
 
     // Round-trip through save/load
     auto bytes = doc.save();
     auto loaded = Document::load(bytes);
     ASSERT_TRUE(loaded.has_value());
-    EXPECT_EQ(get_int(loaded->get(root, "")), 1);
+    EXPECT_EQ(get_int_val(loaded->get(root, "")), 1);
 }
 
 TEST(Document, save_load_large_values_for_compression) {
@@ -3533,9 +3533,9 @@ TEST(Document, merge_is_associative) {
     right.merge(bc);
 
     EXPECT_EQ(left.length(root), right.length(root));
-    EXPECT_EQ(get_int(left.get(root, "a")), get_int(right.get(root, "a")));
-    EXPECT_EQ(get_int(left.get(root, "b")), get_int(right.get(root, "b")));
-    EXPECT_EQ(get_int(left.get(root, "c")), get_int(right.get(root, "c")));
+    EXPECT_EQ(get_int_val(left.get(root, "a")), get_int_val(right.get(root, "a")));
+    EXPECT_EQ(get_int_val(left.get(root, "b")), get_int_val(right.get(root, "b")));
+    EXPECT_EQ(get_int_val(left.get(root, "c")), get_int_val(right.get(root, "c")));
 }
 
 // =============================================================================
@@ -3869,7 +3869,7 @@ TEST(Document, apply_changes_twice_is_idempotent) {
 
     // Should still have just 1 key with value 42
     EXPECT_EQ(doc2.length(root), 1u);
-    EXPECT_EQ(get_int(doc2.get(root, "key")), 42);
+    EXPECT_EQ(get_int_val(doc2.get(root, "key")), 42);
 }
 
 TEST(Document, three_way_merge_with_all_operations) {
@@ -4081,7 +4081,7 @@ TEST(Document, large_list_indexing_correctness) {
     for (int i = 0; i < count; ++i) {
         auto val = doc.get(list_id, static_cast<std::size_t>(i));
         ASSERT_TRUE(val.has_value()) << "Missing element at index " << i;
-        EXPECT_EQ(get_int(val), std::int64_t{i}) << "Wrong value at index " << i;
+        EXPECT_EQ(get_int_val(val), std::int64_t{i}) << "Wrong value at index " << i;
     }
 
     // Round-trip through save/load
@@ -4243,7 +4243,7 @@ TEST(Document, save_load_delete_only_change) {
     auto loaded = Document::load(bytes);
     ASSERT_TRUE(loaded.has_value());
     EXPECT_FALSE(loaded->get(root, "a").has_value());
-    EXPECT_EQ(get_int(loaded->get(root, "b")), 2);
+    EXPECT_EQ(get_int_val(loaded->get(root, "b")), 2);
 }
 
 TEST(Document, save_load_created_object_with_no_subsequent_ops) {
@@ -4282,8 +4282,8 @@ TEST(Document, save_load_empty_transactions_interspersed) {
     auto bytes = doc.save();
     auto loaded = Document::load(bytes);
     ASSERT_TRUE(loaded.has_value());
-    EXPECT_EQ(get_int(loaded->get(root, "a")), 1);
-    EXPECT_EQ(get_int(loaded->get(root, "b")), 2);
+    EXPECT_EQ(get_int_val(loaded->get(root, "a")), 1);
+    EXPECT_EQ(get_int_val(loaded->get(root, "b")), 2);
 }
 
 TEST(Document, forked_actor_ids_tracked_in_save_load) {
@@ -4302,8 +4302,8 @@ TEST(Document, forked_actor_ids_tracked_in_save_load) {
     auto bytes = doc2.save();
     auto loaded = Document::load(bytes);
     ASSERT_TRUE(loaded.has_value());
-    EXPECT_EQ(get_int(loaded->get(root, "a")), 1);
-    EXPECT_EQ(get_int(loaded->get(root, "b")), 2);
+    EXPECT_EQ(get_int_val(loaded->get(root, "a")), 1);
+    EXPECT_EQ(get_int_val(loaded->get(root, "b")), 2);
 }
 
 // =============================================================================
@@ -4323,8 +4323,8 @@ TEST(Document, big_list_creation_and_access) {
     });
 
     EXPECT_EQ(doc.length(list_id), static_cast<std::size_t>(count));
-    EXPECT_EQ(get_int(doc.get(list_id, std::size_t{0})), 0);
-    EXPECT_EQ(get_int(doc.get(list_id, std::size_t{count - 1})), count - 1);
+    EXPECT_EQ(get_int_val(doc.get(list_id, std::size_t{0})), 0);
+    EXPECT_EQ(get_int_val(doc.get(list_id, std::size_t{count - 1})), count - 1);
 
     // Patches should account for all insertions
     auto doc2 = make_doc(2);
@@ -4350,7 +4350,7 @@ TEST(Document, insert_after_many_deletes) {
             });
         }
     }
-    EXPECT_EQ(get_int(doc.get(root, "key")), 99);
+    EXPECT_EQ(get_int_val(doc.get(root, "key")), 99);
 }
 
 TEST(Document, large_list_patches_have_correct_paths) {
@@ -4626,4 +4626,448 @@ TEST(Document, list_counter_in_nested_map_survives_save_load) {
     ASSERT_TRUE(val.has_value());
     auto cv = std::get<Counter>(std::get<ScalarValue>(*val));
     EXPECT_EQ(cv.value, 15);
+}
+
+// =============================================================================
+// Phase 12A: Modern C++ API — Typed get<T>()
+// =============================================================================
+
+TEST(Document, get_template_string_from_map) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "name", std::string{"Alice"});
+    });
+    auto val = doc.get<std::string>(root, "name");
+    ASSERT_TRUE(val.has_value());
+    EXPECT_EQ(*val, "Alice");
+}
+
+TEST(Document, get_template_int64_from_map) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "age", std::int64_t{30});
+    });
+    auto val = doc.get<std::int64_t>(root, "age");
+    ASSERT_TRUE(val.has_value());
+    EXPECT_EQ(*val, 30);
+}
+
+TEST(Document, get_template_double_from_map) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "pi", 3.14);
+    });
+    auto val = doc.get<double>(root, "pi");
+    ASSERT_TRUE(val.has_value());
+    EXPECT_DOUBLE_EQ(*val, 3.14);
+}
+
+TEST(Document, get_template_bool_from_map) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "active", true);
+    });
+    auto val = doc.get<bool>(root, "active");
+    ASSERT_TRUE(val.has_value());
+    EXPECT_TRUE(*val);
+}
+
+TEST(Document, get_template_uint64_from_map) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "big", std::uint64_t{9999999999ULL});
+    });
+    auto val = doc.get<std::uint64_t>(root, "big");
+    ASSERT_TRUE(val.has_value());
+    EXPECT_EQ(*val, 9999999999ULL);
+}
+
+TEST(Document, get_template_counter_from_map) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "hits", Counter{42});
+    });
+    auto val = doc.get<Counter>(root, "hits");
+    ASSERT_TRUE(val.has_value());
+    EXPECT_EQ(val->value, 42);
+}
+
+TEST(Document, get_template_timestamp_from_map) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "created", Timestamp{1700000000000});
+    });
+    auto val = doc.get<Timestamp>(root, "created");
+    ASSERT_TRUE(val.has_value());
+    EXPECT_EQ(val->millis_since_epoch, 1700000000000);
+}
+
+TEST(Document, get_template_nullopt_on_missing_key) {
+    auto doc = make_doc(1);
+    auto val = doc.get<std::string>(root, "nonexistent");
+    EXPECT_FALSE(val.has_value());
+}
+
+TEST(Document, get_template_nullopt_on_type_mismatch) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "num", std::int64_t{42});
+    });
+    // Ask for string, but it's an int
+    auto val = doc.get<std::string>(root, "num");
+    EXPECT_FALSE(val.has_value());
+}
+
+TEST(Document, get_template_from_list_index) {
+    auto doc = make_doc(1);
+    auto list_id = ObjId{};
+    doc.transact([&](auto& tx) {
+        list_id = tx.put_object(root, "items", ObjType::list);
+        tx.insert(list_id, 0, std::string{"first"});
+        tx.insert(list_id, 1, std::int64_t{42});
+    });
+    auto s = doc.get<std::string>(list_id, std::size_t{0});
+    ASSERT_TRUE(s.has_value());
+    EXPECT_EQ(*s, "first");
+
+    auto i = doc.get<std::int64_t>(list_id, std::size_t{1});
+    ASSERT_TRUE(i.has_value());
+    EXPECT_EQ(*i, 42);
+}
+
+// =============================================================================
+// Phase 12A: Modern C++ API — Scalar convenience overloads
+// =============================================================================
+
+TEST(Document, put_string_overload) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "a", std::string{"hello"});
+        tx.put(root, "b", "world");   // const char*
+    });
+    EXPECT_EQ(*doc.get<std::string>(root, "a"), "hello");
+    EXPECT_EQ(*doc.get<std::string>(root, "b"), "world");
+}
+
+TEST(Document, put_int_overload) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "a", 42);  // int -> int64_t
+    });
+    EXPECT_EQ(*doc.get<std::int64_t>(root, "a"), 42);
+}
+
+TEST(Document, put_bool_overload) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "flag", true);
+    });
+    EXPECT_EQ(*doc.get<bool>(root, "flag"), true);
+}
+
+TEST(Document, put_double_overload) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "val", 2.718);
+    });
+    EXPECT_DOUBLE_EQ(*doc.get<double>(root, "val"), 2.718);
+}
+
+TEST(Document, put_null_overload) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "empty", Null{});
+    });
+    auto val = doc.get(root, "empty");
+    ASSERT_TRUE(val.has_value());
+    auto sv = std::get<ScalarValue>(*val);
+    EXPECT_TRUE(std::holds_alternative<Null>(sv));
+}
+
+TEST(Document, insert_string_overload) {
+    auto doc = make_doc(1);
+    auto list_id = ObjId{};
+    doc.transact([&](auto& tx) {
+        list_id = tx.put_object(root, "items", ObjType::list);
+        tx.insert(list_id, 0, std::string{"hello"});
+        tx.insert(list_id, 1, "world");  // const char*
+    });
+    EXPECT_EQ(*doc.get<std::string>(list_id, std::size_t{0}), "hello");
+    EXPECT_EQ(*doc.get<std::string>(list_id, std::size_t{1}), "world");
+}
+
+TEST(Document, insert_int_overload) {
+    auto doc = make_doc(1);
+    auto list_id = ObjId{};
+    doc.transact([&](auto& tx) {
+        list_id = tx.put_object(root, "items", ObjType::list);
+        tx.insert(list_id, 0, 99);  // int -> int64_t
+    });
+    EXPECT_EQ(*doc.get<std::int64_t>(list_id, std::size_t{0}), 99);
+}
+
+TEST(Document, set_string_overload) {
+    auto doc = make_doc(1);
+    auto list_id = ObjId{};
+    doc.transact([&](auto& tx) {
+        list_id = tx.put_object(root, "items", ObjType::list);
+        tx.insert(list_id, 0, std::string{"old"});
+    });
+    doc.transact([&](auto& tx) {
+        tx.set(list_id, 0, std::string{"new"});
+    });
+    EXPECT_EQ(*doc.get<std::string>(list_id, std::size_t{0}), "new");
+}
+
+// =============================================================================
+// Phase 12A: Modern C++ API — Templated transact with return value
+// =============================================================================
+
+TEST(Document, transact_returns_obj_id) {
+    auto doc = make_doc(1);
+    auto list_id = doc.transact([](Transaction& tx) {
+        return tx.put_object(root, "items", ObjType::list);
+    });
+    EXPECT_NE(list_id, root);
+    auto type = doc.object_type(list_id);
+    ASSERT_TRUE(type.has_value());
+    EXPECT_EQ(*type, ObjType::list);
+}
+
+TEST(Document, transact_returns_int) {
+    auto doc = make_doc(1);
+    auto result = doc.transact([](Transaction& tx) -> int {
+        tx.put(root, "x", std::int64_t{42});
+        return 123;
+    });
+    EXPECT_EQ(result, 123);
+    EXPECT_EQ(*doc.get<std::int64_t>(root, "x"), 42);
+}
+
+TEST(Document, transact_returns_string) {
+    auto doc = make_doc(1);
+    auto result = doc.transact([](Transaction& tx) -> std::string {
+        tx.put(root, "greeting", std::string{"hello"});
+        return "done";
+    });
+    EXPECT_EQ(result, "done");
+    EXPECT_EQ(*doc.get<std::string>(root, "greeting"), "hello");
+}
+
+TEST(Document, transact_void_template_overload) {
+    auto doc = make_doc(1);
+    // Generic lambda uses the template void overload
+    doc.transact([](auto& tx) {
+        tx.put(root, "x", std::int64_t{1});
+    });
+    EXPECT_EQ(*doc.get<std::int64_t>(root, "x"), 1);
+}
+
+TEST(Document, transact_with_patches_returns_pair) {
+    auto doc = make_doc(1);
+    auto [list_id, patches] = doc.transact_with_patches([](Transaction& tx) {
+        return tx.put_object(root, "items", ObjType::list);
+    });
+    EXPECT_NE(list_id, root);
+    EXPECT_FALSE(patches.empty());
+}
+
+// =============================================================================
+// Phase 12A: Modern C++ API — Batch operations
+// =============================================================================
+
+TEST(Document, insert_all_initializer_list) {
+    auto doc = make_doc(1);
+    auto list_id = ObjId{};
+    doc.transact([&](auto& tx) {
+        list_id = tx.put_object(root, "nums", ObjType::list);
+        tx.insert_all(list_id, 0, {
+            ScalarValue{std::int64_t{1}},
+            ScalarValue{std::int64_t{2}},
+            ScalarValue{std::int64_t{3}},
+        });
+    });
+    EXPECT_EQ(doc.length(list_id), 3u);
+    EXPECT_EQ(*doc.get<std::int64_t>(list_id, std::size_t{0}), 1);
+    EXPECT_EQ(*doc.get<std::int64_t>(list_id, std::size_t{1}), 2);
+    EXPECT_EQ(*doc.get<std::int64_t>(list_id, std::size_t{2}), 3);
+}
+
+TEST(Document, put_all_initializer_list) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put_all(root, {
+            {"name", ScalarValue{std::string{"Bob"}}},
+            {"age", ScalarValue{std::int64_t{25}}},
+            {"active", ScalarValue{true}},
+        });
+    });
+    EXPECT_EQ(*doc.get<std::string>(root, "name"), "Bob");
+    EXPECT_EQ(*doc.get<std::int64_t>(root, "age"), 25);
+    EXPECT_EQ(*doc.get<bool>(root, "active"), true);
+}
+
+TEST(Document, put_map_from_std_map) {
+    auto doc = make_doc(1);
+    auto data = std::map<std::string, ScalarValue>{
+        {"x", ScalarValue{std::int64_t{10}}},
+        {"y", ScalarValue{std::int64_t{20}}},
+    };
+    doc.transact([&](auto& tx) {
+        tx.put_map(root, data);
+    });
+    EXPECT_EQ(*doc.get<std::int64_t>(root, "x"), 10);
+    EXPECT_EQ(*doc.get<std::int64_t>(root, "y"), 20);
+}
+
+TEST(Document, insert_range_from_vector) {
+    auto doc = make_doc(1);
+    auto list_id = ObjId{};
+    auto values = std::vector<ScalarValue>{
+        ScalarValue{std::int64_t{10}},
+        ScalarValue{std::int64_t{20}},
+        ScalarValue{std::int64_t{30}},
+    };
+    doc.transact([&](auto& tx) {
+        list_id = tx.put_object(root, "nums", ObjType::list);
+        tx.insert_range(list_id, 0, values);
+    });
+    EXPECT_EQ(doc.length(list_id), 3u);
+    EXPECT_EQ(*doc.get<std::int64_t>(list_id, std::size_t{0}), 10);
+    EXPECT_EQ(*doc.get<std::int64_t>(list_id, std::size_t{2}), 30);
+}
+
+// =============================================================================
+// Phase 12A: Modern C++ API — operator[] and get_path
+// =============================================================================
+
+TEST(Document, operator_bracket_root_access) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "greeting", std::string{"hi"});
+    });
+    auto val = doc["greeting"];
+    ASSERT_TRUE(val.has_value());
+    EXPECT_EQ(*get_scalar<std::string>(*val), "hi");
+}
+
+TEST(Document, operator_bracket_missing_key_returns_nullopt) {
+    auto doc = make_doc(1);
+    auto val = doc["missing"];
+    EXPECT_FALSE(val.has_value());
+}
+
+TEST(Document, get_path_single_level) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "x", std::int64_t{42});
+    });
+    auto val = doc.get_path("x");
+    ASSERT_TRUE(val.has_value());
+    EXPECT_EQ(*get_scalar<std::int64_t>(*val), 42);
+}
+
+TEST(Document, get_path_nested_map) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        auto config = tx.put_object(root, "config", ObjType::map);
+        auto db = tx.put_object(config, "database", ObjType::map);
+        tx.put(db, "port", std::int64_t{5432});
+    });
+    auto val = doc.get_path("config", "database", "port");
+    ASSERT_TRUE(val.has_value());
+    EXPECT_EQ(*get_scalar<std::int64_t>(*val), 5432);
+}
+
+TEST(Document, get_path_into_list) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        auto list = tx.put_object(root, "items", ObjType::list);
+        auto item = tx.insert_object(list, 0, ObjType::map);
+        tx.put(item, "title", std::string{"todo"});
+    });
+    auto val = doc.get_path("items", std::size_t{0}, "title");
+    ASSERT_TRUE(val.has_value());
+    EXPECT_EQ(*get_scalar<std::string>(*val), "todo");
+}
+
+TEST(Document, get_path_missing_intermediate_returns_nullopt) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "x", std::int64_t{1});
+    });
+    // "x" is a scalar, not an object - can't traverse further
+    auto val = doc.get_path("x", "y");
+    EXPECT_FALSE(val.has_value());
+}
+
+TEST(Document, get_path_missing_key_returns_nullopt) {
+    auto doc = make_doc(1);
+    auto val = doc.get_path("nonexistent", "deep");
+    EXPECT_FALSE(val.has_value());
+}
+
+// =============================================================================
+// Phase 12A: Modern C++ API — get_scalar<T> free function
+// =============================================================================
+
+TEST(Document, get_scalar_from_value) {
+    auto val = Value{ScalarValue{std::int64_t{42}}};
+    auto result = get_scalar<std::int64_t>(val);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, 42);
+}
+
+TEST(Document, get_scalar_type_mismatch_returns_nullopt) {
+    auto val = Value{ScalarValue{std::string{"hello"}}};
+    auto result = get_scalar<std::int64_t>(val);
+    EXPECT_FALSE(result.has_value());
+}
+
+TEST(Document, get_scalar_from_optional_value) {
+    auto val = std::optional<Value>{ScalarValue{std::string{"test"}}};
+    auto result = get_scalar<std::string>(val);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, "test");
+}
+
+TEST(Document, get_scalar_from_nullopt_returns_nullopt) {
+    auto val = std::optional<Value>{};
+    auto result = get_scalar<std::string>(val);
+    EXPECT_FALSE(result.has_value());
+}
+
+TEST(Document, get_scalar_object_type_returns_nullopt) {
+    auto val = Value{ObjType::map};
+    auto result = get_scalar<std::string>(val);
+    EXPECT_FALSE(result.has_value());
+}
+
+// =============================================================================
+// Phase 12A: Modern C++ API — overload helper
+// =============================================================================
+
+TEST(Document, overload_helper_with_variant) {
+    auto val = ScalarValue{std::int64_t{42}};
+    auto result = std::visit(overload{
+        [](std::int64_t i) { return i; },
+        [](auto&&) -> std::int64_t { return -1; },
+    }, val);
+    EXPECT_EQ(result, 42);
+}
+
+TEST(Document, overload_helper_multi_type) {
+    auto check = [](const ScalarValue& sv) -> std::string {
+        return std::visit(overload{
+            [](const std::string& s) { return s; },
+            [](std::int64_t i) { return std::to_string(i); },
+            [](bool b) { return std::string{b ? "true" : "false"}; },
+            [](auto&&) { return std::string{"other"}; },
+        }, sv);
+    };
+
+    EXPECT_EQ(check(ScalarValue{std::string{"hello"}}), "hello");
+    EXPECT_EQ(check(ScalarValue{std::int64_t{42}}), "42");
+    EXPECT_EQ(check(ScalarValue{true}), "true");
+    EXPECT_EQ(check(ScalarValue{3.14}), "other");
 }

@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -87,5 +88,46 @@ constexpr auto is_scalar(const Value& v) -> bool {
 constexpr auto is_object(const Value& v) -> bool {
     return std::holds_alternative<ObjType>(v);
 }
+
+// -- Variant visitor helper ---------------------------------------------------
+
+/// Helper for constructing ad-hoc visitors from lambdas.
+///
+/// @code
+/// std::visit(overload{
+///     [](std::string s) { printf("%s\n", s.c_str()); },
+///     [](std::int64_t i) { printf("%lld\n", i); },
+///     [](auto&&) { printf("other\n"); },
+/// }, some_variant);
+/// @endcode
+template <typename... Ts>
+struct overload : Ts... { using Ts::operator()...; };
+
+template <typename... Ts>
+overload(Ts...) -> overload<Ts...>;
+
+// -- Typed scalar extraction helpers ------------------------------------------
+
+/// Extract a typed scalar from a Value, or nullopt on type mismatch.
+/// @code
+/// auto name = get_scalar<std::string>(value);
+/// @endcode
+template <typename T>
+auto get_scalar(const Value& v) -> std::optional<T> {
+    if (const auto* sv = std::get_if<ScalarValue>(&v)) {
+        if (const auto* t = std::get_if<T>(sv)) {
+            return *t;
+        }
+    }
+    return std::nullopt;
+}
+
+/// Extract a typed scalar from an optional<Value>.
+template <typename T>
+auto get_scalar(const std::optional<Value>& v) -> std::optional<T> {
+    if (!v) return std::nullopt;
+    return get_scalar<T>(*v);
+}
+
 
 }  // namespace automerge_cpp
