@@ -1329,3 +1329,369 @@ TEST(Document, double_save_load_round_trip) {
     EXPECT_EQ(get_int(loaded2->get(root, "x")), 42);
     EXPECT_EQ(get_str(loaded2->get(root, "s")), "hello");
 }
+
+// -- Phase 5: Sync Protocol ---------------------------------------------------
+
+// Helper: run sync protocol until both peers converge (returns message count).
+auto sync_docs(Document& a, Document& b) -> int {
+    auto sa = SyncState{};
+    auto sb = SyncState{};
+    int count = 0;
+    constexpr int max_rounds = 20;
+
+    for (int round = 0; round < max_rounds; ++round) {
+        bool progress = false;
+
+        auto msg_a = a.generate_sync_message(sa);
+        if (msg_a) {
+            b.receive_sync_message(sb, *msg_a);
+            ++count;
+            progress = true;
+        }
+
+        auto msg_b = b.generate_sync_message(sb);
+        if (msg_b) {
+            a.receive_sync_message(sa, *msg_b);
+            ++count;
+            progress = true;
+        }
+
+        if (!progress) break;
+    }
+    return count;
+}
+
+TEST(Document, sync_two_fresh_documents) {
+    auto doc1 = make_doc(1);
+    doc1.transact([](auto& tx) {
+        tx.put(root, "x", std::int64_t{1});
+    });
+
+    auto doc2 = make_doc(2);
+    doc2.transact([](auto& tx) {
+        tx.put(root, "y", std::int64_t{2});
+    });
+
+    sync_docs(doc1, doc2);
+
+    // Both should have both keys
+    EXPECT_EQ(doc1.length(root), 2u);
+    EXPECT_EQ(doc2.length(root), 2u);
+    EXPECT_EQ(get_int(doc1.get(root, "x")), 1);
+    EXPECT_EQ(get_int(doc1.get(root, "y")), 2);
+    EXPECT_EQ(get_int(doc2.get(root, "x")), 1);
+    EXPECT_EQ(get_int(doc2.get(root, "y")), 2);
+}
+
+TEST(Document, sync_one_empty_one_populated) {
+    auto doc1 = make_doc(1);
+    doc1.transact([](auto& tx) {
+        tx.put(root, "a", std::int64_t{10});
+        tx.put(root, "b", std::string{"hello"});
+    });
+
+    auto doc2 = make_doc(2);
+
+    sync_docs(doc1, doc2);
+
+    EXPECT_EQ(doc2.length(root), 2u);
+    EXPECT_EQ(get_int(doc2.get(root, "a")), 10);
+    EXPECT_EQ(get_str(doc2.get(root, "b")), "hello");
+}
+
+TEST(Document, sync_already_in_sync_produces_few_messages) {
+    auto doc1 = make_doc(1);
+    doc1.transact([](auto& tx) {
+        tx.put(root, "x", std::int64_t{1});
+    });
+
+    auto doc2 = doc1.fork();  // exact same state
+
+    auto sa = SyncState{};
+    auto sb = SyncState{};
+
+    // First round: exchange heads
+    auto msg1 = doc1.generate_sync_message(sa);
+    ASSERT_TRUE(msg1.has_value());
+    doc2.receive_sync_message(sb, *msg1);
+
+    auto msg2 = doc2.generate_sync_message(sb);
+    ASSERT_TRUE(msg2.has_value());
+    EXPECT_TRUE(msg2->changes.empty());  // no changes needed
+    doc1.receive_sync_message(sa, *msg2);
+
+    // After exchanging heads, both should realize they're synced
+    auto msg3 = doc1.generate_sync_message(sa);
+    // Should be no more messages or an empty ack
+    if (msg3) {
+        EXPECT_TRUE(msg3->changes.empty());
+    }
+}
+
+TEST(Document, sync_after_concurrent_edits) {
+    auto doc1 = make_doc(1);
+    doc1.transact([](auto& tx) {
+        tx.put(root, "base", std::int64_t{0});
+    });
+    auto doc2 = doc1.fork();
+
+    // Concurrent edits
+    doc1.transact([](auto& tx) {
+        tx.put(root, "from_1", std::int64_t{1});
+    });
+    doc2.transact([](auto& tx) {
+        tx.put(root, "from_2", std::int64_t{2});
+    });
+
+    sync_docs(doc1, doc2);
+
+    // Both should have all three keys
+    EXPECT_EQ(doc1.length(root), 3u);
+    EXPECT_EQ(doc2.length(root), 3u);
+    EXPECT_EQ(get_int(doc1.get(root, "base")), 0);
+    EXPECT_EQ(get_int(doc1.get(root, "from_1")), 1);
+    EXPECT_EQ(get_int(doc1.get(root, "from_2")), 2);
+    EXPECT_EQ(get_int(doc2.get(root, "base")), 0);
+    EXPECT_EQ(get_int(doc2.get(root, "from_1")), 1);
+    EXPECT_EQ(get_int(doc2.get(root, "from_2")), 2);
+}
+
+TEST(Document, sync_with_list_operations) {
+    auto doc1 = make_doc(1);
+    auto list_id = ObjId{};
+    doc1.transact([&](auto& tx) {
+        list_id = tx.put_object(root, "items", ObjType::list);
+        tx.insert(list_id, 0, std::string{"A"});
+    });
+
+    auto doc2 = make_doc(2);
+
+    sync_docs(doc1, doc2);
+
+    EXPECT_EQ(doc2.length(list_id), 1u);
+    EXPECT_EQ(get_str(doc2.get(list_id, std::size_t{0})), "A");
+}
+
+TEST(Document, sync_with_text_operations) {
+    auto doc1 = make_doc(1);
+    auto text_id = ObjId{};
+    doc1.transact([&](auto& tx) {
+        text_id = tx.put_object(root, "content", ObjType::text);
+        tx.splice_text(text_id, 0, 0, "Hello");
+    });
+
+    auto doc2 = make_doc(2);
+
+    sync_docs(doc1, doc2);
+
+    EXPECT_EQ(doc2.text(text_id), "Hello");
+}
+
+TEST(Document, sync_multiple_transactions) {
+    auto doc1 = make_doc(1);
+    doc1.transact([](auto& tx) {
+        tx.put(root, "x", std::int64_t{1});
+    });
+    doc1.transact([](auto& tx) {
+        tx.put(root, "x", std::int64_t{2});
+    });
+    doc1.transact([](auto& tx) {
+        tx.put(root, "y", std::int64_t{3});
+    });
+
+    auto doc2 = make_doc(2);
+
+    sync_docs(doc1, doc2);
+
+    EXPECT_EQ(get_int(doc2.get(root, "x")), 2);
+    EXPECT_EQ(get_int(doc2.get(root, "y")), 3);
+    EXPECT_EQ(doc2.get_changes().size(), 3u);
+}
+
+TEST(Document, sync_three_peers) {
+    auto doc1 = make_doc(1);
+    doc1.transact([](auto& tx) {
+        tx.put(root, "a", std::int64_t{1});
+    });
+
+    auto doc2 = make_doc(2);
+    doc2.transact([](auto& tx) {
+        tx.put(root, "b", std::int64_t{2});
+    });
+
+    auto doc3 = make_doc(3);
+    doc3.transact([](auto& tx) {
+        tx.put(root, "c", std::int64_t{3});
+    });
+
+    // Sync doc1 <-> doc2
+    sync_docs(doc1, doc2);
+    // Sync doc2 <-> doc3
+    sync_docs(doc2, doc3);
+    // Sync doc1 <-> doc3 (should get doc3's changes via doc2)
+    sync_docs(doc1, doc3);
+
+    // All three should have all keys
+    for (auto* doc : {&doc1, &doc2, &doc3}) {
+        EXPECT_EQ(doc->length(root), 3u);
+        EXPECT_EQ(get_int(doc->get(root, "a")), 1);
+        EXPECT_EQ(get_int(doc->get(root, "b")), 2);
+        EXPECT_EQ(get_int(doc->get(root, "c")), 3);
+    }
+}
+
+TEST(Document, sync_incremental_changes) {
+    auto doc1 = make_doc(1);
+    auto doc2 = make_doc(2);
+
+    // First sync: initial data
+    doc1.transact([](auto& tx) {
+        tx.put(root, "v", std::int64_t{1});
+    });
+    sync_docs(doc1, doc2);
+    EXPECT_EQ(get_int(doc2.get(root, "v")), 1);
+
+    // Second sync: incremental update
+    doc1.transact([](auto& tx) {
+        tx.put(root, "v", std::int64_t{2});
+    });
+    sync_docs(doc1, doc2);
+    EXPECT_EQ(get_int(doc2.get(root, "v")), 2);
+
+    // Third sync: update from other direction
+    doc2.transact([](auto& tx) {
+        tx.put(root, "w", std::int64_t{99});
+    });
+    sync_docs(doc1, doc2);
+    EXPECT_EQ(get_int(doc1.get(root, "w")), 99);
+}
+
+TEST(Document, sync_with_counter_increments) {
+    auto doc1 = make_doc(1);
+    doc1.transact([](auto& tx) {
+        tx.put(root, "count", Counter{0});
+    });
+
+    auto doc2 = doc1.fork();
+
+    doc1.transact([](auto& tx) {
+        tx.increment(root, "count", 5);
+    });
+    doc2.transact([](auto& tx) {
+        tx.increment(root, "count", 3);
+    });
+
+    sync_docs(doc1, doc2);
+
+    auto val1 = doc1.get(root, "count");
+    ASSERT_TRUE(val1.has_value());
+    auto c1 = std::get<Counter>(std::get<ScalarValue>(*val1));
+    EXPECT_EQ(c1.value, 8);
+
+    auto val2 = doc2.get(root, "count");
+    ASSERT_TRUE(val2.has_value());
+    auto c2 = std::get<Counter>(std::get<ScalarValue>(*val2));
+    EXPECT_EQ(c2.value, 8);
+}
+
+TEST(Document, sync_with_nested_objects) {
+    auto doc1 = make_doc(1);
+    auto nested = ObjId{};
+    doc1.transact([&](auto& tx) {
+        nested = tx.put_object(root, "config", ObjType::map);
+        tx.put(nested, "debug", true);
+        tx.put(nested, "version", std::int64_t{3});
+    });
+
+    auto doc2 = make_doc(2);
+    sync_docs(doc1, doc2);
+
+    EXPECT_EQ(doc2.length(nested), 2u);
+    auto debug = doc2.get(nested, "debug");
+    ASSERT_TRUE(debug.has_value());
+    EXPECT_TRUE(std::get<bool>(std::get<ScalarValue>(*debug)));
+    EXPECT_EQ(get_int(doc2.get(nested, "version")), 3);
+}
+
+TEST(Document, sync_generates_first_message_from_empty) {
+    auto doc = make_doc(1);
+    auto state = SyncState{};
+
+    auto msg = doc.generate_sync_message(state);
+    ASSERT_TRUE(msg.has_value());  // always send first message
+    EXPECT_TRUE(msg->changes.empty());  // no changes for empty doc
+}
+
+TEST(Document, sync_state_encode_decode_round_trip) {
+    auto state = SyncState{};
+
+    // Simulate setting shared_heads (normally done by sync protocol)
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "x", std::int64_t{1});
+    });
+
+    auto doc2 = make_doc(2);
+    sync_docs(doc, doc2);
+
+    // Encode/decode a fresh state
+    auto encoded = state.encode();
+    EXPECT_FALSE(encoded.empty());
+    auto decoded = SyncState::decode(encoded);
+    ASSERT_TRUE(decoded.has_value());
+    EXPECT_EQ(decoded->shared_heads(), state.shared_heads());
+}
+
+TEST(Document, sync_state_decode_invalid_returns_nullopt) {
+    auto bad_data = std::vector<std::byte>{std::byte{0xFF}};
+    EXPECT_FALSE(SyncState::decode(bad_data).has_value());
+}
+
+TEST(Document, sync_bidirectional_concurrent) {
+    auto doc1 = make_doc(1);
+    auto doc2 = make_doc(2);
+
+    // Both start with shared base
+    doc1.transact([](auto& tx) {
+        tx.put(root, "base", std::int64_t{0});
+    });
+    sync_docs(doc1, doc2);
+
+    // Both make concurrent changes
+    doc1.transact([](auto& tx) {
+        tx.put(root, "x", std::int64_t{1});
+    });
+    doc2.transact([](auto& tx) {
+        tx.put(root, "y", std::int64_t{2});
+    });
+
+    // Sync again
+    sync_docs(doc1, doc2);
+
+    // Should converge
+    EXPECT_EQ(doc1.keys(root), doc2.keys(root));
+    EXPECT_EQ(doc1.length(root), 3u);
+    EXPECT_EQ(doc2.length(root), 3u);
+}
+
+TEST(Document, sync_with_deletes) {
+    auto doc1 = make_doc(1);
+    doc1.transact([](auto& tx) {
+        tx.put(root, "keep", std::int64_t{1});
+        tx.put(root, "remove", std::int64_t{2});
+    });
+
+    auto doc2 = make_doc(2);
+    sync_docs(doc1, doc2);
+    EXPECT_EQ(doc2.length(root), 2u);
+
+    // Delete on doc1
+    doc1.transact([](auto& tx) {
+        tx.delete_key(root, "remove");
+    });
+    sync_docs(doc1, doc2);
+
+    EXPECT_EQ(doc2.length(root), 1u);
+    EXPECT_TRUE(doc2.get(root, "keep").has_value());
+    EXPECT_FALSE(doc2.get(root, "remove").has_value());
+}

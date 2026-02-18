@@ -1,6 +1,7 @@
 #pragma once
 
 #include <automerge-cpp/change.hpp>
+#include <automerge-cpp/sync_state.hpp>
 #include <automerge-cpp/transaction.hpp>
 #include <automerge-cpp/types.hpp>
 #include <automerge-cpp/value.hpp>
@@ -64,6 +65,10 @@ public:
     // Phase 4: Binary Serialization
     auto save() const -> std::vector<std::byte>;
     static auto load(std::span<const std::byte> data) -> std::optional<Document>;
+
+    // Phase 5: Sync Protocol
+    auto generate_sync_message(SyncState& sync_state) const -> std::optional<SyncMessage>;
+    void receive_sync_message(SyncState& sync_state, const SyncMessage& message);
 
 private:
     std::unique_ptr<detail::DocState> state_;

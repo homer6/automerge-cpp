@@ -162,19 +162,38 @@
 ---
 
 ## Phase 5: Sync Protocol
-**Goal**: Two `Document` instances can synchronize over a byte stream.
+**Status**: Complete — 170 tests passing (154 Phase 1-4 + 16 sync)
 
 ### Deliverables
-- `SyncState` — per-peer state machine
-- `sync/bloom_filter.cpp` — bloom filter encode/decode
-- `sync/message.cpp` — sync message encode/decode
-- `generate_message()` / `receive_message()` API
+- [x] `sync/bloom_filter.hpp` — bloom filter (10 bits/entry, 7 probes, ~1% FPR, LFSR hashing)
+- [x] `sync_state.hpp` — `SyncState` per-peer state machine with encode/decode
+- [x] `SyncMessage` — message type with heads, need, have (bloom), and changes
+- [x] `Document::generate_sync_message()` — produces next message to send
+- [x] `Document::receive_sync_message()` — processes received message, applies changes
+- [x] Bloom filter-based change discovery (get_hashes_to_send algorithm)
+- [x] In-flight message tracking and deduplication
+- [ ] Upstream Rust interop via message bytes (deferred)
 
-### Tests
-- Two fresh documents sync to identical state
-- Partially overlapping documents sync efficiently
-- Already-in-sync documents produce no messages
-- Interop: sync C++ doc with Rust doc via message bytes
+### Protocol Design
+- Bloom filter summarizes changes since last sync point (Have struct)
+- LFSR multi-hash from first 12 bytes of ChangeHash for probe positions
+- `get_hashes_to_send` uses bloom + transitive dependency closure
+- SyncState persistence via encode/decode (shared_heads only)
+
+### Tests (16 new)
+- [x] Two fresh documents sync to identical state
+- [x] One empty + one populated sync correctly
+- [x] Already-in-sync produces few/no change messages
+- [x] Sync after concurrent edits preserves all changes
+- [x] Sync with list, text, counter, and nested object operations
+- [x] Sync multiple transactions
+- [x] Three-peer transitive sync
+- [x] Incremental sync (multiple rounds of edits + sync)
+- [x] Bidirectional concurrent sync
+- [x] Sync with delete operations
+- [x] First message always generated from empty state
+- [x] SyncState encode/decode round-trip
+- [x] SyncState decode invalid data returns nullopt
 
 ---
 

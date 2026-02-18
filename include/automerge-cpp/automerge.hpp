@@ -7,6 +7,7 @@
 #include <automerge-cpp/document.hpp>
 #include <automerge-cpp/error.hpp>
 #include <automerge-cpp/op.hpp>
+#include <automerge-cpp/sync_state.hpp>
 #include <automerge-cpp/transaction.hpp>
 #include <automerge-cpp/types.hpp>
 #include <automerge-cpp/value.hpp>

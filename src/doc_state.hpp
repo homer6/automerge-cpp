@@ -475,6 +475,103 @@ struct DocState {
         }
     }
 
+    // -- Sync helpers (Phase 5) -------------------------------------------------
+
+    // Build a map from change hash → index in change_history.
+    auto change_hash_index() const -> std::map<ChangeHash, std::size_t> {
+        auto index = std::map<ChangeHash, std::size_t>{};
+        for (std::size_t i = 0; i < change_history.size(); ++i) {
+            auto hash = compute_change_hash(change_history[i]);
+            index[hash] = i;
+        }
+        return index;
+    }
+
+    // Check if we have a change with the given hash.
+    auto has_change_hash(const ChangeHash& hash) const -> bool {
+        auto idx = change_hash_index();
+        return idx.contains(hash);
+    }
+
+    // Get all change hashes.
+    auto all_change_hashes() const -> std::vector<ChangeHash> {
+        auto result = std::vector<ChangeHash>{};
+        result.reserve(change_history.size());
+        for (const auto& change : change_history) {
+            result.push_back(compute_change_hash(change));
+        }
+        return result;
+    }
+
+    // Get change hashes that are NOT ancestors of the given set of hashes.
+    // This returns all hashes that are "new" relative to the given set.
+    auto get_changes_since(const std::vector<ChangeHash>& since_heads) const
+        -> std::vector<ChangeHash> {
+        if (since_heads.empty()) return all_change_hashes();
+
+        auto all_hashes = all_change_hashes();
+        auto hash_idx = change_hash_index();
+
+        // BFS: find all ancestors of since_heads
+        auto ancestors = std::unordered_set<ChangeHash>{};
+        auto queue = std::vector<ChangeHash>{};
+        for (const auto& h : since_heads) {
+            if (hash_idx.contains(h)) {
+                ancestors.insert(h);
+                queue.push_back(h);
+            }
+        }
+
+        while (!queue.empty()) {
+            auto h = queue.back();
+            queue.pop_back();
+            auto it = hash_idx.find(h);
+            if (it == hash_idx.end()) continue;
+            for (const auto& dep : change_history[it->second].deps) {
+                if (ancestors.insert(dep).second) {
+                    queue.push_back(dep);
+                }
+            }
+        }
+
+        // Return hashes not in ancestors
+        auto result = std::vector<ChangeHash>{};
+        for (const auto& h : all_hashes) {
+            if (!ancestors.contains(h)) {
+                result.push_back(h);
+            }
+        }
+        return result;
+    }
+
+    // Get changes we're missing that would be needed to know the given heads.
+    auto get_missing_deps(const std::vector<ChangeHash>& their_heads) const
+        -> std::vector<ChangeHash> {
+        auto result = std::vector<ChangeHash>{};
+        for (const auto& h : their_heads) {
+            if (!has_change_hash(h) &&
+                std::ranges::find(result, h) == result.end()) {
+                result.push_back(h);
+            }
+        }
+        return result;
+    }
+
+    // Get changes by their hashes, in the order given.
+    auto get_changes_by_hash(const std::vector<ChangeHash>& hashes) const
+        -> std::vector<Change> {
+        auto idx = change_hash_index();
+        auto result = std::vector<Change>{};
+        result.reserve(hashes.size());
+        for (const auto& h : hashes) {
+            auto it = idx.find(h);
+            if (it != idx.end()) {
+                result.push_back(change_history[it->second]);
+            }
+        }
+        return result;
+    }
+
     // -- Change hash computation (Phase 3 simple hash, SHA-256 in Phase 4) ----
 
     static auto compute_change_hash(const Change& change) -> ChangeHash {

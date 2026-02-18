@@ -3,9 +3,11 @@
 #include "doc_state.hpp"
 #include "storage/serializer.hpp"
 #include "storage/deserializer.hpp"
+#include "sync/bloom_filter.hpp"
 
 #include <algorithm>
 #include <ranges>
+#include <set>
 #include <unordered_set>
 
 namespace automerge_cpp {
@@ -455,6 +457,273 @@ auto Document::load(std::span<const std::byte> data) -> std::optional<Document> 
     doc.state_->clock = std::move(clock);
 
     return doc;
+}
+
+// -- Phase 5: Sync Protocol ---------------------------------------------------
+
+// SyncState encode/decode
+
+auto SyncState::encode() const -> std::vector<std::byte> {
+    auto s = storage::Serializer{};
+    s.write_u8(0x43);  // sync state marker
+    s.write_uleb128(shared_heads_.size());
+    for (const auto& h : shared_heads_) {
+        s.write_change_hash(h);
+    }
+    return s.take();
+}
+
+auto SyncState::decode(std::span<const std::byte> data) -> std::optional<SyncState> {
+    auto d = storage::Deserializer{data};
+    auto marker = d.read_u8();
+    if (!marker || *marker != 0x43) return std::nullopt;
+
+    auto num_heads = d.read_uleb128();
+    if (!num_heads) return std::nullopt;
+
+    auto state = SyncState{};
+    state.shared_heads_.reserve(static_cast<std::size_t>(*num_heads));
+    for (std::uint64_t i = 0; i < *num_heads; ++i) {
+        auto h = d.read_change_hash();
+        if (!h) return std::nullopt;
+        state.shared_heads_.push_back(*h);
+    }
+    return state;
+}
+
+// Determine which change hashes to send based on peer's bloom filter and needs.
+static auto get_hashes_to_send(
+    const detail::DocState& state,
+    const std::vector<Have>& their_have,
+    const std::vector<ChangeHash>& their_need) -> std::vector<ChangeHash> {
+
+    if (their_have.empty()) {
+        return their_need;
+    }
+
+    // Collect all last_sync heads from the Have entries
+    auto last_sync_heads = std::vector<ChangeHash>{};
+    auto bloom_filters = std::vector<sync::BloomFilter>{};
+    for (const auto& have : their_have) {
+        last_sync_heads.insert(last_sync_heads.end(),
+            have.last_sync.begin(), have.last_sync.end());
+        auto bf = sync::BloomFilter::from_bytes(have.bloom_bytes);
+        bloom_filters.push_back(bf.value_or(sync::BloomFilter{}));
+    }
+
+    // Get all changes since last_sync
+    auto hashes = state.get_changes_since(last_sync_heads);
+
+    // Build dependency graph (hash → dependents)
+    auto hash_idx = state.change_hash_index();
+    auto dependents = std::map<ChangeHash, std::vector<ChangeHash>>{};
+    auto change_hashes_set = std::set<ChangeHash>(hashes.begin(), hashes.end());
+
+    for (const auto& h : hashes) {
+        auto it = hash_idx.find(h);
+        if (it == hash_idx.end()) continue;
+        for (const auto& dep : state.change_history[it->second].deps) {
+            dependents[dep].push_back(h);
+        }
+    }
+
+    // Find hashes NOT in any bloom filter
+    auto hashes_to_send = std::set<ChangeHash>{};
+    for (const auto& h : hashes) {
+        auto in_any = std::ranges::any_of(bloom_filters,
+            [&](const auto& bf) { return bf.contains_hash(h); });
+        if (!in_any) {
+            hashes_to_send.insert(h);
+        }
+    }
+
+    // Transitive closure: if we send X, send everything that depends on X
+    auto stack = std::vector<ChangeHash>(hashes_to_send.begin(), hashes_to_send.end());
+    while (!stack.empty()) {
+        auto h = stack.back();
+        stack.pop_back();
+        auto dep_it = dependents.find(h);
+        if (dep_it != dependents.end()) {
+            for (const auto& dependent : dep_it->second) {
+                if (hashes_to_send.insert(dependent).second) {
+                    stack.push_back(dependent);
+                }
+            }
+        }
+    }
+
+    // Build result: explicitly needed first, then our additions in document order
+    auto result = std::vector<ChangeHash>{};
+    for (const auto& h : their_need) {
+        if (!hashes_to_send.contains(h)) {
+            result.push_back(h);
+        }
+    }
+    for (const auto& h : hashes) {
+        if (hashes_to_send.contains(h)) {
+            result.push_back(h);
+        }
+    }
+    return result;
+}
+
+auto Document::generate_sync_message(SyncState& sync_state) const
+    -> std::optional<SyncMessage> {
+
+    auto our_heads = get_heads();
+
+    // Determine what we need from them
+    auto our_need = std::vector<ChangeHash>{};
+    if (sync_state.their_heads_) {
+        our_need = state_->get_missing_deps(*sync_state.their_heads_);
+    }
+
+    // Build our "have" bloom filter
+    auto our_have = std::vector<Have>{};
+    auto their_heads_set = std::set<ChangeHash>{};
+    if (sync_state.their_heads_) {
+        their_heads_set.insert(sync_state.their_heads_->begin(),
+                               sync_state.their_heads_->end());
+    }
+
+    // Check if all our needs are in their heads (normal case)
+    auto all_needs_in_their_heads = std::ranges::all_of(our_need,
+        [&](const auto& h) { return their_heads_set.contains(h); });
+
+    if (all_needs_in_their_heads) {
+        auto changes_since = state_->get_changes_since(sync_state.shared_heads_);
+        auto bloom_hashes = std::vector<ChangeHash>{};
+        for (const auto& h : changes_since) {
+            bloom_hashes.push_back(h);
+        }
+        auto bloom = sync::BloomFilter::from_hashes(bloom_hashes);
+        our_have.push_back(Have{
+            .last_sync = sync_state.shared_heads_,
+            .bloom_bytes = bloom.to_bytes(),
+        });
+    }
+
+    // Determine changes to send
+    auto changes_to_send = std::vector<Change>{};
+    if (sync_state.their_have_ && sync_state.their_need_) {
+        auto hashes = get_hashes_to_send(*state_,
+            *sync_state.their_have_, *sync_state.their_need_);
+
+        // Deduplicate with sent_hashes
+        auto unsent = std::vector<ChangeHash>{};
+        for (const auto& h : hashes) {
+            if (!sync_state.sent_hashes_.contains(h)) {
+                unsent.push_back(h);
+            }
+        }
+
+        changes_to_send = state_->get_changes_by_hash(unsent);
+
+        // Track what we're sending
+        for (const auto& h : unsent) {
+            sync_state.sent_hashes_.insert(h);
+        }
+    }
+
+    // Should we send a message?
+    auto heads_unchanged = (sync_state.last_sent_heads_ == our_heads);
+    auto heads_equal = (sync_state.their_heads_.has_value() &&
+                        *sync_state.their_heads_ == our_heads);
+
+    if (heads_unchanged && sync_state.have_responded_) {
+        if (heads_equal && changes_to_send.empty()) {
+            return std::nullopt;  // fully synced
+        }
+        if (sync_state.in_flight_) {
+            return std::nullopt;  // waiting for ack
+        }
+    }
+
+    // Build and return message
+    sync_state.have_responded_ = true;
+    sync_state.last_sent_heads_ = our_heads;
+    sync_state.in_flight_ = true;
+
+    return SyncMessage{
+        .heads = std::move(our_heads),
+        .need = std::move(our_need),
+        .have = std::move(our_have),
+        .changes = std::move(changes_to_send),
+    };
+}
+
+void Document::receive_sync_message(SyncState& sync_state,
+                                     const SyncMessage& message) {
+    // Clear in-flight flag (ack)
+    sync_state.in_flight_ = false;
+
+    // Apply changes from message
+    if (!message.changes.empty()) {
+        apply_changes(message.changes);
+
+        // Advance shared_heads: keep new heads that appeared
+        auto after_heads = get_heads();
+        sync_state.shared_heads_ = after_heads;
+    }
+
+    // Trim sent_hashes: remove ancestors of their acknowledged heads
+    if (!message.heads.empty()) {
+        auto hash_idx = state_->change_hash_index();
+        auto ancestors = std::set<ChangeHash>{};
+        auto queue = std::vector<ChangeHash>{};
+
+        for (const auto& h : message.heads) {
+            if (hash_idx.contains(h)) {
+                ancestors.insert(h);
+                queue.push_back(h);
+            }
+        }
+        while (!queue.empty()) {
+            auto h = queue.back();
+            queue.pop_back();
+            auto it = hash_idx.find(h);
+            if (it == hash_idx.end()) continue;
+            for (const auto& dep : state_->change_history[it->second].deps) {
+                if (ancestors.insert(dep).second) {
+                    queue.push_back(dep);
+                }
+            }
+        }
+
+        std::erase_if(sync_state.sent_hashes_,
+            [&](const auto& h) { return ancestors.contains(h); });
+    }
+
+    // Update shared_heads based on what we now know they have
+    auto known_heads = std::vector<ChangeHash>{};
+    for (const auto& h : message.heads) {
+        if (state_->has_change_hash(h)) {
+            known_heads.push_back(h);
+        }
+    }
+
+    if (known_heads.size() == message.heads.size()) {
+        // We know all their heads
+        sync_state.shared_heads_ = message.heads;
+        if (message.heads.empty()) {
+            sync_state.last_sent_heads_.clear();
+            sync_state.sent_hashes_.clear();
+        }
+    } else {
+        // Merge known heads into shared
+        for (const auto& h : known_heads) {
+            if (std::ranges::find(sync_state.shared_heads_, h) ==
+                sync_state.shared_heads_.end()) {
+                sync_state.shared_heads_.push_back(h);
+            }
+        }
+        std::ranges::sort(sync_state.shared_heads_);
+    }
+
+    // Store peer info for next generate_sync_message
+    sync_state.their_have_ = message.have;
+    sync_state.their_heads_ = message.heads;
+    sync_state.their_need_ = message.need;
 }
 
 }  // namespace automerge_cpp

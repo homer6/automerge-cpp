@@ -100,6 +100,53 @@ doc.save()                                  -> std::vector<std::byte>         //
 Document::load(std::span<const std::byte>)  -> std::optional<Document>        // deserialize from binary
 ```
 
+### Sync Protocol
+
+```cpp
+doc.generate_sync_message(SyncState&)       -> std::optional<SyncMessage>     // next message to send (nullopt = synced)
+doc.receive_sync_message(SyncState&, const SyncMessage&) -> void              // process received message
+```
+
+---
+
+## SyncState
+
+Per-peer synchronization state machine. Create one `SyncState` per peer.
+
+```cpp
+#include <automerge-cpp/sync_state.hpp>
+```
+
+```cpp
+auto state = SyncState{};                   // fresh state for a new peer
+
+state.shared_heads()       -> const std::vector<ChangeHash>&   // what both sides have
+state.last_sent_heads()    -> const std::vector<ChangeHash>&   // what we last told them
+
+state.encode()             -> std::vector<std::byte>           // persist for reconnection
+SyncState::decode(span)    -> std::optional<SyncState>         // restore persisted state
+```
+
+## SyncMessage
+
+```cpp
+struct SyncMessage {
+    std::vector<ChangeHash> heads;     // sender's current heads
+    std::vector<ChangeHash> need;      // hashes sender explicitly needs
+    std::vector<Have> have;            // bloom filter summaries
+    std::vector<Change> changes;       // changes to apply
+};
+```
+
+## Have
+
+```cpp
+struct Have {
+    std::vector<ChangeHash> last_sync;  // snapshot point
+    std::vector<std::byte> bloom_bytes; // serialized bloom filter
+};
+```
+
 ---
 
 ## Transaction
@@ -476,4 +523,44 @@ if (loaded) {
         tx.put(am::root, "new_key", std::int64_t{42});
     });
 }
+```
+
+### Sync Protocol
+
+```cpp
+namespace am = automerge_cpp;
+
+auto doc_a = am::Document{};
+doc_a.transact([](auto& tx) {
+    tx.put(am::root, "from_a", std::int64_t{1});
+});
+
+auto doc_b = am::Document{};
+doc_b.transact([](auto& tx) {
+    tx.put(am::root, "from_b", std::int64_t{2});
+});
+
+// Each peer gets its own SyncState
+auto state_a = am::SyncState{};
+auto state_b = am::SyncState{};
+
+// Exchange messages until synced
+for (int i = 0; i < 10; ++i) {
+    bool progress = false;
+
+    if (auto msg = doc_a.generate_sync_message(state_a)) {
+        doc_b.receive_sync_message(state_b, *msg);
+        progress = true;
+    }
+    if (auto msg = doc_b.generate_sync_message(state_b)) {
+        doc_a.receive_sync_message(state_a, *msg);
+        progress = true;
+    }
+
+    if (!progress) break;  // fully synced
+}
+
+// Both documents now have both keys
+doc_a.get(am::root, "from_b");  // 2
+doc_b.get(am::root, "from_a");  // 1
 ```
