@@ -28,7 +28,7 @@ int main() {
         tx.put(am::root, "title", "Shopping List");    // direct string literal
         tx.put(am::root, "count", 0);                  // int promotes to int64
 
-        auto items = tx.put_object(am::root, "items", am::ObjType::list);
+        auto items = tx.put(am::root, "items", am::ObjType::list);
         tx.insert(items, 0, "Milk");
         tx.insert(items, 1, "Eggs");
         tx.insert(items, 2, "Bread");
@@ -93,12 +93,12 @@ doc.transact([](auto& tx) {
 ```cpp
 // Lambda return type is deduced — no external variable needed
 auto list_id = doc.transact([](Transaction& tx) {
-    return tx.put_object(root, "items", ObjType::list);
+    return tx.put(root, "items", ObjType::list);
 });
 
 // transact_with_patches returns {result, patches}
 auto [obj_id, patches] = doc.transact_with_patches([](Transaction& tx) {
-    return tx.put_object(root, "data", ObjType::map);
+    return tx.put(root, "data", ObjType::map);
 });
 ```
 
@@ -113,7 +113,7 @@ doc.transact([](auto& tx) {
     });
 
     // Batch insert into lists
-    auto list = tx.put_object(root, "nums", ObjType::list);
+    auto list = tx.put(root, "nums", ObjType::list);
     tx.insert_all(list, 0, {
         ScalarValue{std::int64_t{1}},
         ScalarValue{std::int64_t{2}},

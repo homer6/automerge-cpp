@@ -148,6 +148,15 @@ public:
         put(obj, key, ScalarValue{val});
     }
 
+    /// Create a nested object at a map key (convenience overload for put_object).
+    /// @param obj The map object to modify.
+    /// @param key The key to set.
+    /// @param type The type of nested object to create (ObjType::map, ObjType::list, etc.).
+    /// @return The ObjId of the newly created object.
+    auto put(const ObjId& obj, std::string_view key, ObjType type) -> ObjId {
+        return put_object(obj, key, type);
+    }
+
     // -- Scalar convenience overloads (list insert) ---------------------------
 
     /// Insert a std::string into a list.
@@ -181,6 +190,15 @@ public:
     /// Insert a bool into a list.
     void insert(const ObjId& obj, std::size_t index, bool val) {
         insert(obj, index, ScalarValue{val});
+    }
+
+    /// Insert a nested object into a list (convenience overload for insert_object).
+    /// @param obj The list object to modify.
+    /// @param index The position to insert at.
+    /// @param type The type of nested object to create (ObjType::map, ObjType::list, etc.).
+    /// @return The ObjId of the newly created object.
+    auto insert(const ObjId& obj, std::size_t index, ObjType type) -> ObjId {
+        return insert_object(obj, index, type);
     }
 
     // -- Scalar convenience overloads (list set) ------------------------------
