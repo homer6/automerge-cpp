@@ -1,7 +1,7 @@
 // automerge-cpp benchmarks — measures throughput of core operations.
 
 #include <automerge-cpp/automerge.hpp>
-#include "../src/thread_pool.hpp"
+#include <automerge-cpp/thread_pool.hpp>
 
 #include <benchmark/benchmark.h>
 
@@ -484,129 +484,75 @@ static void bm_cursor_resolve(benchmark::State& state) {
 BENCHMARK(bm_cursor_resolve);
 
 // =============================================================================
-// Fork/merge batch — sequential vs parallel
+// Fork/merge batch put — fixed 4000 keys, vary thread count
+//
+// Sequential: 1 transaction, 4000 puts.
+// Parallel/T: fork T copies, pool dispatches T tasks, merge back.
+// Same total work — speedup = time(1) / time(T).
 // =============================================================================
 
-static void bm_fork_merge_batch_sequential(benchmark::State& state) {
-    const auto total_keys = static_cast<int>(state.range(0));
-    for (auto _ : state) {
-        auto doc = Document{};
-        doc.transact([total_keys](auto& tx) {
-            for (int i = 0; i < total_keys; ++i) {
-                tx.put(root, "k" + std::to_string(i), std::int64_t{i});
-            }
-        });
-        benchmark::DoNotOptimize(doc);
-    }
-    state.SetItemsProcessed(static_cast<std::int64_t>(state.iterations()) * total_keys);
-}
-BENCHMARK(bm_fork_merge_batch_sequential)->Arg(400)->Arg(2000)->Arg(4000);
+static void bm_fork_merge_batch(benchmark::State& state) {
+    const auto num_workers = static_cast<int>(state.range(0));
+    constexpr int total_keys = 4000;
 
-static void bm_fork_merge_batch_parallel(benchmark::State& state) {
-    const auto num_forks = static_cast<int>(state.range(0));
-    constexpr int keys_per_fork = 500;
+    // One pool, reused across all iterations
+    auto pool = std::make_shared<thread_pool>(num_workers);
 
     for (auto _ : state) {
-        auto doc = Document{};
-        auto forks = std::vector<Document>{};
-        forks.reserve(num_forks);
-        for (int f = 0; f < num_forks; ++f) {
-            forks.push_back(doc.fork());
-        }
-
-        auto threads = std::vector<std::jthread>{};
-        for (int f = 0; f < num_forks; ++f) {
-            threads.emplace_back([&forks, f]() {
-                forks[f].transact([f](auto& tx) {
-                    for (int i = 0; i < keys_per_fork; ++i) {
-                        tx.put(root, "k" + std::to_string(f * keys_per_fork + i),
-                               std::int64_t{f * keys_per_fork + i});
-                    }
-                });
-            });
-        }
-        threads.clear();  // join all
-
-        for (auto& f : forks) {
-            doc.merge(f);
-        }
-        benchmark::DoNotOptimize(doc);
-    }
-    state.SetItemsProcessed(static_cast<std::int64_t>(state.iterations()) * num_forks * keys_per_fork);
-}
-BENCHMARK(bm_fork_merge_batch_parallel)->Arg(2)->Arg(4)->Arg(8);
-
-// =============================================================================
-// Concurrent reads — thread-safe Document, N readers
-// =============================================================================
-
-static void bm_concurrent_reads(benchmark::State& state) {
-    const auto num_threads = static_cast<int>(state.range(0));
-
-    auto doc = Document{};
-    doc.transact([](auto& tx) {
-        for (int i = 0; i < 1000; ++i) {
-            tx.put(root, "key_" + std::to_string(i), std::int64_t{i * 100});
-        }
-    });
-
-    for (auto _ : state) {
-        auto threads = std::vector<std::jthread>{};
-        constexpr int reads_per_thread = 100;
-        for (int t = 0; t < num_threads; ++t) {
-            threads.emplace_back([&doc, t]() {
-                for (int i = 0; i < reads_per_thread; ++i) {
-                    auto key = "key_" + std::to_string((t * reads_per_thread + i) % 1000);
-                    auto val = doc.get(root, key);
-                    benchmark::DoNotOptimize(val);
+        if (num_workers == 1) {
+            auto doc = Document{pool};
+            doc.transact([](auto& tx) {
+                for (int i = 0; i < total_keys; ++i) {
+                    tx.put(root, "k" + std::to_string(i), std::int64_t{i});
                 }
             });
-        }
-        threads.clear();
-    }
-    state.SetItemsProcessed(static_cast<std::int64_t>(state.iterations()) * num_threads * 100);
-}
-BENCHMARK(bm_concurrent_reads)->Arg(1)->Arg(4)->Arg(8);
+            benchmark::DoNotOptimize(doc);
+        } else {
+            auto doc = Document{pool};
+            const auto keys_per_fork = total_keys / num_workers;
+            auto forks = std::vector<Document>{};
+            forks.reserve(num_workers);
+            for (int f = 0; f < num_workers; ++f) {
+                forks.push_back(doc.fork());
+            }
 
-// =============================================================================
-// Concurrent writers — thread-safe Document, N writers
-// =============================================================================
-
-static void bm_concurrent_writes(benchmark::State& state) {
-    const auto num_threads = static_cast<int>(state.range(0));
-
-    for (auto _ : state) {
-        auto doc = Document{};
-        auto threads = std::vector<std::jthread>{};
-        constexpr int writes_per_thread = 50;
-        for (int t = 0; t < num_threads; ++t) {
-            threads.emplace_back([&doc, t]() {
-                for (int i = 0; i < writes_per_thread; ++i) {
-                    doc.transact([t, i](auto& tx) {
-                        tx.put(root, "t" + std::to_string(t) + "_" + std::to_string(i),
-                               std::int64_t{t * 1000 + i});
+            pool->parallelize_loop(0, num_workers, [&](int start, int end) {
+                for (int f = start; f < end; ++f) {
+                    forks[f].transact([f, keys_per_fork](auto& tx) {
+                        for (int i = 0; i < keys_per_fork; ++i) {
+                            auto idx = f * keys_per_fork + i;
+                            tx.put(root, "k" + std::to_string(idx), std::int64_t{idx});
+                        }
                     });
                 }
             });
+
+            for (auto& f : forks) {
+                doc.merge(f);
+            }
+            benchmark::DoNotOptimize(doc);
         }
-        threads.clear();
     }
-    state.SetItemsProcessed(static_cast<std::int64_t>(state.iterations()) * num_threads * 50);
+    state.SetItemsProcessed(static_cast<std::int64_t>(state.iterations()) * total_keys);
+    state.SetLabel(std::to_string(num_workers) + "T");
 }
-BENCHMARK(bm_concurrent_writes)->Arg(1)->Arg(4)->Arg(8);
+BENCHMARK(bm_fork_merge_batch)->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Arg(16)->Arg(30);
 
 // =============================================================================
-// Parallel save — save N independent documents concurrently
+// Save 500 independent documents — vary thread count
+//
+// One pool with T workers. Same 500 docs. Speedup = time(1) / time(T).
 // =============================================================================
 
-static void bm_parallel_save(benchmark::State& state) {
-    const auto doc_count = static_cast<int>(state.range(0));
-    auto hw = std::max(1u, std::thread::hardware_concurrency());
+static void bm_save_docs(benchmark::State& state) {
+    const auto num_workers = static_cast<unsigned int>(state.range(0));
+    constexpr int doc_count = 500;
 
-    // Prepare documents
+    auto pool = std::make_shared<thread_pool>(num_workers);
+
     auto docs = std::vector<Document>(doc_count);
     for (int i = 0; i < doc_count; ++i) {
-        docs[i] = Document{1u};
+        docs[i] = Document{pool};
         docs[i].transact([i](auto& tx) {
             for (int k = 0; k < 50; ++k) {
                 tx.put(root, "f" + std::to_string(k), std::int64_t{i * 1000 + k});
@@ -616,37 +562,33 @@ static void bm_parallel_save(benchmark::State& state) {
 
     for (auto _ : state) {
         auto saved = std::vector<std::vector<std::byte>>(doc_count);
-        auto threads = std::vector<std::jthread>{};
-        auto chunk = doc_count / static_cast<int>(hw);
-        if (chunk < 1) chunk = 1;
-        for (unsigned int w = 0; w < hw && static_cast<int>(w) * chunk < doc_count; ++w) {
-            auto begin = static_cast<int>(w) * chunk;
-            auto end = (w == hw - 1) ? doc_count : std::min(begin + chunk, doc_count);
-            threads.emplace_back([&docs, &saved, begin, end]() {
-                for (int i = begin; i < end; ++i) {
-                    saved[i] = docs[i].save();
-                }
-            });
-        }
-        threads.clear();
+        pool->parallelize_loop(0, doc_count, [&](int start, int end) {
+            for (int i = start; i < end; ++i) {
+                saved[i] = docs[i].save();
+            }
+        });
         benchmark::DoNotOptimize(saved);
     }
     state.SetItemsProcessed(static_cast<std::int64_t>(state.iterations()) * doc_count);
+    state.SetLabel(std::to_string(num_workers) + "T");
 }
-BENCHMARK(bm_parallel_save)->Arg(100)->Arg(500);
+BENCHMARK(bm_save_docs)->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Arg(16)->Arg(30);
 
 // =============================================================================
-// Parallel load — load N documents concurrently from saved bytes
+// Load 500 documents from bytes — vary thread count
+//
+// One pool with T workers. Same 500 blobs. Speedup = time(1) / time(T).
 // =============================================================================
 
-static void bm_parallel_load(benchmark::State& state) {
-    const auto doc_count = static_cast<int>(state.range(0));
-    auto hw = std::max(1u, std::thread::hardware_concurrency());
+static void bm_load_docs(benchmark::State& state) {
+    const auto num_workers = static_cast<unsigned int>(state.range(0));
+    constexpr int doc_count = 500;
 
-    // Prepare saved bytes
+    auto pool = std::make_shared<thread_pool>(num_workers);
+
     auto saved = std::vector<std::vector<std::byte>>(doc_count);
     for (int i = 0; i < doc_count; ++i) {
-        auto doc = Document{1u};
+        auto doc = Document{pool};
         doc.transact([i](auto& tx) {
             for (int k = 0; k < 50; ++k) {
                 tx.put(root, "f" + std::to_string(k), std::int64_t{i * 1000 + k});
@@ -657,36 +599,69 @@ static void bm_parallel_load(benchmark::State& state) {
 
     for (auto _ : state) {
         auto loaded = std::vector<std::optional<Document>>(doc_count);
-        auto threads = std::vector<std::jthread>{};
-        auto chunk = doc_count / static_cast<int>(hw);
-        if (chunk < 1) chunk = 1;
-        for (unsigned int w = 0; w < hw && static_cast<int>(w) * chunk < doc_count; ++w) {
-            auto begin = static_cast<int>(w) * chunk;
-            auto end = (w == hw - 1) ? doc_count : std::min(begin + chunk, doc_count);
-            threads.emplace_back([&saved, &loaded, begin, end]() {
-                for (int i = begin; i < end; ++i) {
-                    loaded[i] = Document::load(saved[i]);
-                }
-            });
-        }
-        threads.clear();
+        pool->parallelize_loop(0, doc_count, [&](int start, int end) {
+            for (int i = start; i < end; ++i) {
+                loaded[i] = Document::load(saved[i]);
+            }
+        });
         benchmark::DoNotOptimize(loaded);
     }
     state.SetItemsProcessed(static_cast<std::int64_t>(state.iterations()) * doc_count);
+    state.SetLabel(std::to_string(num_workers) + "T");
 }
-BENCHMARK(bm_parallel_load)->Arg(100)->Arg(500);
+BENCHMARK(bm_load_docs)->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Arg(16)->Arg(30);
 
 // =============================================================================
-// Tree reduce merge — parallel pairwise merge of N peers
+// Read 1000 keys from one document — vary thread count
+//
+// One pool with T workers. Same 1000 reads split across pool.
+// Speedup = time(1) / time(T).
 // =============================================================================
 
-static void bm_tree_reduce_merge(benchmark::State& state) {
-    const auto peer_count = static_cast<int>(state.range(0));
+static void bm_concurrent_reads(benchmark::State& state) {
+    const auto num_workers = static_cast<unsigned int>(state.range(0));
+    constexpr int total_reads = 1000;
 
-    // Pre-build peers (outside the timed loop)
+    auto pool = std::make_shared<thread_pool>(num_workers);
+
+    auto doc = Document{pool};
+    doc.transact([](auto& tx) {
+        for (int i = 0; i < total_reads; ++i) {
+            tx.put(root, "key_" + std::to_string(i), std::int64_t{i * 100});
+        }
+    });
+
+    for (auto _ : state) {
+        pool->parallelize_loop(0, total_reads, [&](int start, int end) {
+            for (int i = start; i < end; ++i) {
+                auto val = doc.get(root, "key_" + std::to_string(i));
+                benchmark::DoNotOptimize(val);
+            }
+        });
+    }
+    state.SetItemsProcessed(static_cast<std::int64_t>(state.iterations()) * total_reads);
+    state.SetLabel(std::to_string(num_workers) + "T");
+}
+BENCHMARK(bm_concurrent_reads)->Arg(1)->Arg(2)->Arg(4)->Arg(8)->Arg(16)->Arg(30);
+
+// =============================================================================
+// Tree reduce merge — 64 peers, sequential vs parallel (pool-based)
+//
+// Sequential: fold left into one accumulator.
+// Parallel: pairwise tree reduce dispatched via pool.
+// Same 64 peers, same result. Speedup = time(seq) / time(parallel).
+// =============================================================================
+
+static void bm_merge_reduce(benchmark::State& state) {
+    const bool parallel = state.range(0) != 0;
+    constexpr int peer_count = 64;
+
+    auto pool = std::make_shared<thread_pool>(
+        std::thread::hardware_concurrency());
+
     auto base_peers = std::vector<Document>(peer_count);
     for (int p = 0; p < peer_count; ++p) {
-        base_peers[p] = Document{1u};
+        base_peers[p] = Document{pool};
         base_peers[p].transact([p](auto& tx) {
             for (int k = 0; k < 10; ++k) {
                 tx.put(root, "p" + std::to_string(p) + "_k" + std::to_string(k),
@@ -696,63 +671,45 @@ static void bm_tree_reduce_merge(benchmark::State& state) {
     }
 
     for (auto _ : state) {
-        // Copy peers into work vector
         auto work = std::vector<Document>{};
         work.reserve(peer_count);
         for (const auto& p : base_peers) {
-            auto copy = Document{1u};
+            auto copy = Document{pool};
             copy.merge(p);
             work.push_back(std::move(copy));
         }
 
-        // Tree reduce: merge pairs in parallel
-        while (work.size() > 1) {
-            auto next = std::vector<Document>{};
-            auto threads = std::vector<std::jthread>{};
-            auto pairs = work.size() / 2;
-            next.resize(pairs + (work.size() % 2));
+        if (!parallel) {
+            for (std::size_t i = 1; i < work.size(); ++i) {
+                work[0].merge(work[i]);
+            }
+        } else {
+            while (work.size() > 1) {
+                auto pairs = work.size() / 2;
+                auto next = std::vector<Document>{};
+                next.resize(pairs + (work.size() % 2));
 
-            for (std::size_t i = 0; i < pairs; ++i) {
-                threads.emplace_back([&work, &next, i]() {
-                    work[i * 2].merge(work[i * 2 + 1]);
-                    next[i] = std::move(work[i * 2]);
+                pool->parallelize_loop(std::size_t{0}, pairs, [&](std::size_t start, std::size_t end) {
+                    for (auto i = start; i < end; ++i) {
+                        work[i * 2].merge(work[i * 2 + 1]);
+                        next[i] = std::move(work[i * 2]);
+                    }
                 });
+                if (work.size() % 2 == 1) {
+                    next[pairs] = std::move(work.back());
+                }
+                work = std::move(next);
             }
-            if (work.size() % 2 == 1) {
-                next[pairs] = std::move(work.back());
-            }
-            threads.clear();
-            work = std::move(next);
         }
         benchmark::DoNotOptimize(work);
     }
     state.SetItemsProcessed(static_cast<std::int64_t>(state.iterations()) * peer_count);
+    state.SetLabel(parallel ? "parallel" : "sequential");
 }
-BENCHMARK(bm_tree_reduce_merge)->Arg(16)->Arg(64);
+BENCHMARK(bm_merge_reduce)->Arg(0)->Arg(1);
 
 // =============================================================================
-// Thread pool overhead — parallel_for with trivial work
-// =============================================================================
-
-static void bm_thread_pool_overhead(benchmark::State& state) {
-    const auto count = static_cast<std::size_t>(state.range(0));
-    auto pool = std::make_shared<automerge_cpp::detail::ThreadPool>(
-        std::thread::hardware_concurrency());
-
-    auto sink = std::vector<std::int64_t>(count, 0);
-
-    for (auto _ : state) {
-        pool->parallel_for(count, [&sink](std::size_t i) {
-            sink[i] = static_cast<std::int64_t>(i * i);
-        });
-        benchmark::DoNotOptimize(sink);
-    }
-    state.SetItemsProcessed(static_cast<std::int64_t>(state.iterations() * count));
-}
-BENCHMARK(bm_thread_pool_overhead)->Arg(100)->Arg(10000);
-
-// =============================================================================
-// Document constructor — pool creation overhead
+// Document constructor — default (spawns pool) vs shared pool
 // =============================================================================
 
 static void bm_document_constructor_default(benchmark::State& state) {
@@ -765,7 +722,7 @@ static void bm_document_constructor_default(benchmark::State& state) {
 BENCHMARK(bm_document_constructor_default);
 
 static void bm_document_constructor_shared_pool(benchmark::State& state) {
-    auto pool = std::make_shared<automerge_cpp::detail::ThreadPool>(
+    auto pool = std::make_shared<thread_pool>(
         std::thread::hardware_concurrency());
 
     for (auto _ : state) {

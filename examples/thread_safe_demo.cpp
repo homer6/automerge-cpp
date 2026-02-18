@@ -148,7 +148,7 @@ int main() {
     // =========================================================================
     std::printf("\n=== Scenario 5: Shared thread pool ===\n");
 
-    auto pool = doc.thread_pool();
+    auto pool = doc.get_thread_pool();
     auto doc2 = am::Document{pool};
     auto doc3 = am::Document{pool};
 
@@ -160,7 +160,7 @@ int main() {
     });
 
     std::printf("doc2 and doc3 share pool: pool=%s\n",
-                (doc2.thread_pool() == doc3.thread_pool()) ? "shared" : "different");
+                (doc2.get_thread_pool() == doc3.get_thread_pool()) ? "shared" : "different");
 
     std::printf("\nDone.\n");
     return 0;

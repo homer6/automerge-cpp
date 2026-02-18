@@ -4,7 +4,7 @@
 #include <automerge-cpp/patch.hpp>
 
 #include "doc_state.hpp"
-#include "thread_pool.hpp"
+#include <automerge-cpp/thread_pool.hpp>
 #include "encoding/leb128.hpp"
 #include "storage/serializer.hpp"
 #include "storage/deserializer.hpp"
@@ -22,17 +22,17 @@
 
 namespace automerge_cpp {
 
-static auto make_default_pool() -> std::shared_ptr<detail::ThreadPool> {
+static auto make_default_pool() -> std::shared_ptr<thread_pool> {
     auto n = std::thread::hardware_concurrency();
     if (n <= 1) return nullptr;
-    return std::make_shared<detail::ThreadPool>(n);
+    return std::make_shared<thread_pool>(n);
 }
 
-static auto make_pool(unsigned int num_threads) -> std::shared_ptr<detail::ThreadPool> {
+static auto make_pool(unsigned int num_threads) -> std::shared_ptr<thread_pool> {
     if (num_threads == 1) return nullptr;
     auto n = (num_threads == 0) ? std::thread::hardware_concurrency() : num_threads;
     if (n <= 1) return nullptr;
-    return std::make_shared<detail::ThreadPool>(n);
+    return std::make_shared<thread_pool>(n);
 }
 
 Document::Document()
@@ -43,7 +43,7 @@ Document::Document(unsigned int num_threads)
     : state_{std::make_unique<detail::DocState>()},
       pool_{make_pool(num_threads)} {}
 
-Document::Document(std::shared_ptr<detail::ThreadPool> pool)
+Document::Document(std::shared_ptr<thread_pool> pool)
     : state_{std::make_unique<detail::DocState>()},
       pool_{std::move(pool)} {}
 
@@ -75,7 +75,7 @@ auto Document::operator=(const Document& other) -> Document& {
     return *this;
 }
 
-auto Document::thread_pool() const -> std::shared_ptr<detail::ThreadPool> {
+auto Document::get_thread_pool() const -> std::shared_ptr<thread_pool> {
     return pool_;
 }
 

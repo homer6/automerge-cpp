@@ -1,7 +1,7 @@
 #include <automerge-cpp/automerge.hpp>
 
 // Internal header for shared pool test
-#include "../src/thread_pool.hpp"
+#include <automerge-cpp/thread_pool.hpp>
 
 #include <gtest/gtest.h>
 
@@ -2570,7 +2570,7 @@ TEST(Document, constructor_with_thread_count) {
 }
 
 TEST(Document, constructor_with_shared_pool) {
-    auto pool = std::make_shared<automerge_cpp::detail::ThreadPool>(2);
+    auto pool = std::make_shared<automerge_cpp::thread_pool>(2);
     auto doc1 = Document{pool};
     auto doc2 = Document{pool};
 
@@ -2581,7 +2581,7 @@ TEST(Document, constructor_with_shared_pool) {
         tx.put(root, "from", std::string{"doc2"});
     });
 
-    EXPECT_EQ(doc1.thread_pool(), doc2.thread_pool());
+    EXPECT_EQ(doc1.get_thread_pool(), doc2.get_thread_pool());
 
     auto v1 = doc1.get(root, "from");
     auto v2 = doc2.get(root, "from");
@@ -2595,7 +2595,7 @@ TEST(Document, fork_shares_thread_pool) {
         tx.put(root, "key", std::string{"value"});
     });
     auto forked = doc.fork();
-    EXPECT_EQ(doc.thread_pool(), forked.thread_pool());
+    EXPECT_EQ(doc.get_thread_pool(), forked.get_thread_pool());
 }
 
 TEST(Document, concurrent_reads_are_safe) {

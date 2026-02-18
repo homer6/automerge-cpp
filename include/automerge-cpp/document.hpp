@@ -12,6 +12,8 @@
 #include <automerge-cpp/types.hpp>
 #include <automerge-cpp/value.hpp>
 
+#include <automerge-cpp/thread_pool.hpp>
+
 #include <cstddef>
 #include <functional>
 #include <memory>
@@ -26,7 +28,6 @@ namespace automerge_cpp {
 
 namespace detail {
 struct DocState;
-class ThreadPool;
 }  // namespace detail
 
 /// A CRDT document that supports concurrent editing and deterministic merge.
@@ -61,7 +62,7 @@ public:
     /// Construct with an externally-owned thread pool.
     /// The pool is shared (via shared_ptr) and can be reused across documents.
     /// @param pool The thread pool to use. nullptr = sequential (no pool).
-    explicit Document(std::shared_ptr<detail::ThreadPool> pool);
+    explicit Document(std::shared_ptr<thread_pool> pool);
 
     ~Document();
 
@@ -243,11 +244,11 @@ public:
                   const std::vector<ChangeHash>& heads) const -> std::vector<Mark>;
 
     /// Get the thread pool (may be nullptr if sequential mode).
-    auto thread_pool() const -> std::shared_ptr<detail::ThreadPool>;
+    auto get_thread_pool() const -> std::shared_ptr<thread_pool>;
 
 private:
     std::unique_ptr<detail::DocState> state_;
-    std::shared_ptr<detail::ThreadPool> pool_;
+    std::shared_ptr<thread_pool> pool_;
     mutable std::shared_mutex mutex_;
 };
 
