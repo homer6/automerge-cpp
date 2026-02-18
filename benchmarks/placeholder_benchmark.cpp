@@ -14,7 +14,13 @@ using namespace automerge_cpp;
 
 // One pool for the entire benchmark suite. Every Document and every
 // parallelize_loop shares this pool — no extra threads are ever created.
-static auto g_pool = std::make_shared<thread_pool>(std::thread::hardware_concurrency());
+// sleep_duration=0 uses yield instead of 500us sleep for low-latency dispatch.
+static auto make_pool() -> std::shared_ptr<thread_pool> {
+    auto p = std::make_shared<thread_pool>(std::thread::hardware_concurrency());
+    p->sleep_duration = 0;
+    return p;
+}
+static auto g_pool = make_pool();
 
 static auto make_doc() -> Document { return Document{g_pool}; }
 
