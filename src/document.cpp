@@ -4,6 +4,7 @@
 #include <automerge-cpp/patch.hpp>
 
 #include "doc_state.hpp"
+#include "thread_pool.hpp"
 #include "encoding/leb128.hpp"
 #include "storage/serializer.hpp"
 #include "storage/deserializer.hpp"
@@ -14,59 +15,107 @@
 #include <algorithm>
 #include <ranges>
 #include <set>
+#include <shared_mutex>
 #include <unordered_set>
 
 namespace automerge_cpp {
 
+static auto make_default_pool() -> std::shared_ptr<detail::ThreadPool> {
+    auto n = std::thread::hardware_concurrency();
+    if (n <= 1) return nullptr;
+    return std::make_shared<detail::ThreadPool>(n);
+}
+
+static auto make_pool(unsigned int num_threads) -> std::shared_ptr<detail::ThreadPool> {
+    if (num_threads == 1) return nullptr;
+    auto n = (num_threads == 0) ? std::thread::hardware_concurrency() : num_threads;
+    if (n <= 1) return nullptr;
+    return std::make_shared<detail::ThreadPool>(n);
+}
+
 Document::Document()
-    : state_{std::make_unique<detail::DocState>()} {}
+    : state_{std::make_unique<detail::DocState>()},
+      pool_{make_default_pool()} {}
+
+Document::Document(unsigned int num_threads)
+    : state_{std::make_unique<detail::DocState>()},
+      pool_{make_pool(num_threads)} {}
+
+Document::Document(std::shared_ptr<detail::ThreadPool> pool)
+    : state_{std::make_unique<detail::DocState>()},
+      pool_{std::move(pool)} {}
 
 Document::~Document() = default;
 
-Document::Document(Document&&) noexcept = default;
-auto Document::operator=(Document&&) noexcept -> Document& = default;
+Document::Document(Document&& other) noexcept
+    : state_{std::move(other.state_)},
+      pool_{std::move(other.pool_)} {}
 
-Document::Document(const Document& other)
-    : state_{std::make_unique<detail::DocState>(*other.state_)} {}
-
-auto Document::operator=(const Document& other) -> Document& {
+auto Document::operator=(Document&& other) noexcept -> Document& {
     if (this != &other) {
-        state_ = std::make_unique<detail::DocState>(*other.state_);
+        auto lock = std::unique_lock{mutex_};
+        state_ = std::move(other.state_);
+        pool_ = std::move(other.pool_);
     }
     return *this;
 }
 
+Document::Document(const Document& other)
+    : state_{std::make_unique<detail::DocState>(*other.state_)},
+      pool_{other.pool_} {}
+
+auto Document::operator=(const Document& other) -> Document& {
+    if (this != &other) {
+        auto lock = std::unique_lock{mutex_};
+        state_ = std::make_unique<detail::DocState>(*other.state_);
+        pool_ = other.pool_;
+    }
+    return *this;
+}
+
+auto Document::thread_pool() const -> std::shared_ptr<detail::ThreadPool> {
+    return pool_;
+}
+
 auto Document::actor_id() const -> const ActorId& {
+    auto lock = std::shared_lock{mutex_};
     return state_->actor;
 }
 
 void Document::set_actor_id(ActorId id) {
+    auto lock = std::unique_lock{mutex_};
     state_->actor = id;
 }
 
 void Document::transact(const std::function<void(Transaction&)>& fn) {
+    auto lock = std::unique_lock{mutex_};
     auto tx = Transaction{*state_};
     fn(tx);
     tx.commit();
 }
 
 auto Document::get(const ObjId& obj, std::string_view key) const -> std::optional<Value> {
+    auto lock = std::shared_lock{mutex_};
     return state_->map_get(obj, std::string{key});
 }
 
 auto Document::get_all(const ObjId& obj, std::string_view key) const -> std::vector<Value> {
+    auto lock = std::shared_lock{mutex_};
     return state_->map_get_all(obj, std::string{key});
 }
 
 auto Document::get(const ObjId& obj, std::size_t index) const -> std::optional<Value> {
+    auto lock = std::shared_lock{mutex_};
     return state_->list_get(obj, index);
 }
 
 auto Document::keys(const ObjId& obj) const -> std::vector<std::string> {
+    auto lock = std::shared_lock{mutex_};
     return state_->map_keys(obj);
 }
 
 auto Document::values(const ObjId& obj) const -> std::vector<Value> {
+    auto lock = std::shared_lock{mutex_};
     const auto type = state_->object_type(obj);
     if (!type) return {};
 
@@ -82,30 +131,36 @@ auto Document::values(const ObjId& obj) const -> std::vector<Value> {
 }
 
 auto Document::length(const ObjId& obj) const -> std::size_t {
+    auto lock = std::shared_lock{mutex_};
     return state_->object_length(obj);
 }
 
 auto Document::text(const ObjId& obj) const -> std::string {
+    auto lock = std::shared_lock{mutex_};
     return state_->text_content(obj);
 }
 
 auto Document::object_type(const ObjId& obj) const -> std::optional<ObjType> {
+    auto lock = std::shared_lock{mutex_};
     return state_->object_type(obj);
 }
 
 // -- Phase 3: Fork and Merge --------------------------------------------------
 
 auto Document::fork() const -> Document {
-    auto forked = Document{*this};
+    auto lock = std::shared_lock{mutex_};
+    auto forked = Document{pool_};
+    *forked.state_ = *state_;
     // Create a unique actor by incrementing the last byte
     auto new_actor = state_->actor;
     new_actor.bytes[15] = static_cast<std::byte>(
         static_cast<std::uint8_t>(new_actor.bytes[15]) + 1);
-    forked.set_actor_id(new_actor);
+    forked.state_->actor = new_actor;
     return forked;
 }
 
 void Document::merge(const Document& other) {
+    auto lock = std::unique_lock{mutex_};
     // Find changes from other that we haven't seen
     auto missing = std::vector<Change>{};
     for (const auto& change : other.state_->change_history) {
@@ -118,14 +173,29 @@ void Document::merge(const Document& other) {
     std::ranges::sort(missing, [](const Change& a, const Change& b) {
         return a.start_op < b.start_op;
     });
-    apply_changes(missing);
+    // Apply changes inline (avoid recursive lock from apply_changes)
+    for (const auto& change : missing) {
+        for (const auto& op : change.operations) {
+            state_->apply_op(op);
+        }
+        auto& seq = state_->clock[change.actor];
+        seq = std::max(seq, change.seq);
+        auto hash = detail::DocState::compute_change_hash(change);
+        for (const auto& dep : change.deps) {
+            std::erase(state_->heads, dep);
+        }
+        state_->heads.push_back(hash);
+        state_->change_history.push_back(change);
+    }
 }
 
 auto Document::get_changes() const -> std::vector<Change> {
+    auto lock = std::shared_lock{mutex_};
     return state_->change_history;
 }
 
 void Document::apply_changes(const std::vector<Change>& changes) {
+    auto lock = std::unique_lock{mutex_};
     for (const auto& change : changes) {
         // Apply each operation
         for (const auto& op : change.operations) {
@@ -150,6 +220,7 @@ void Document::apply_changes(const std::vector<Change>& changes) {
 }
 
 auto Document::get_heads() const -> std::vector<ChangeHash> {
+    auto lock = std::shared_lock{mutex_};
     return state_->heads;
 }
 
@@ -161,6 +232,7 @@ static constexpr std::uint8_t MAGIC[] = {0x85, 0x6F, 0x4A, 0x83};
 static constexpr std::uint8_t FORMAT_VERSION = 0x01;
 
 auto Document::save() const -> std::vector<std::byte> {
+    auto lock = std::shared_lock{mutex_};
     const auto& actor_table = state_->actor_table();
 
     // Build document body (pre-size: actor table + heads + ~256 bytes per change)
@@ -654,8 +726,9 @@ static auto get_hashes_to_send(
 
 auto Document::generate_sync_message(SyncState& sync_state) const
     -> std::optional<SyncMessage> {
+    auto lock = std::shared_lock{mutex_};
 
-    auto our_heads = get_heads();
+    auto our_heads = state_->heads;
 
     // Determine what we need from them
     auto our_need = std::vector<ChangeHash>{};
@@ -739,15 +812,29 @@ auto Document::generate_sync_message(SyncState& sync_state) const
 
 void Document::receive_sync_message(SyncState& sync_state,
                                      const SyncMessage& message) {
+    auto lock = std::unique_lock{mutex_};
+
     // Clear in-flight flag (ack)
     sync_state.in_flight_ = false;
 
-    // Apply changes from message
+    // Apply changes from message inline (avoid recursive lock)
     if (!message.changes.empty()) {
-        apply_changes(message.changes);
+        for (const auto& change : message.changes) {
+            for (const auto& op : change.operations) {
+                state_->apply_op(op);
+            }
+            auto& seq = state_->clock[change.actor];
+            seq = std::max(seq, change.seq);
+            auto hash = detail::DocState::compute_change_hash(change);
+            for (const auto& dep : change.deps) {
+                std::erase(state_->heads, dep);
+            }
+            state_->heads.push_back(hash);
+            state_->change_history.push_back(change);
+        }
 
         // Advance shared_heads: keep new heads that appeared
-        auto after_heads = get_heads();
+        auto after_heads = state_->heads;
         sync_state.shared_heads_ = after_heads;
     }
 
@@ -933,6 +1020,7 @@ static auto ops_to_patches(const std::vector<Op>& ops) -> std::vector<Patch> {
 
 auto Document::transact_with_patches(const std::function<void(Transaction&)>& fn)
     -> std::vector<Patch> {
+    auto lock = std::unique_lock{mutex_};
     auto tx = Transaction{*state_};
     fn(tx);
 
@@ -947,24 +1035,28 @@ auto Document::transact_with_patches(const std::function<void(Transaction&)>& fn
 
 auto Document::get_at(const ObjId& obj, std::string_view key,
                       const std::vector<ChangeHash>& heads) const -> std::optional<Value> {
+    auto lock = std::shared_lock{mutex_};
     auto snapshot = state_->rebuild_state_at(heads);
     return snapshot.map_get(obj, std::string{key});
 }
 
 auto Document::get_at(const ObjId& obj, std::size_t index,
                       const std::vector<ChangeHash>& heads) const -> std::optional<Value> {
+    auto lock = std::shared_lock{mutex_};
     auto snapshot = state_->rebuild_state_at(heads);
     return snapshot.list_get(obj, index);
 }
 
 auto Document::keys_at(const ObjId& obj,
                        const std::vector<ChangeHash>& heads) const -> std::vector<std::string> {
+    auto lock = std::shared_lock{mutex_};
     auto snapshot = state_->rebuild_state_at(heads);
     return snapshot.map_keys(obj);
 }
 
 auto Document::values_at(const ObjId& obj,
                          const std::vector<ChangeHash>& heads) const -> std::vector<Value> {
+    auto lock = std::shared_lock{mutex_};
     auto snapshot = state_->rebuild_state_at(heads);
     auto type = snapshot.object_type(obj);
     if (!type) return {};
@@ -981,12 +1073,14 @@ auto Document::values_at(const ObjId& obj,
 
 auto Document::length_at(const ObjId& obj,
                          const std::vector<ChangeHash>& heads) const -> std::size_t {
+    auto lock = std::shared_lock{mutex_};
     auto snapshot = state_->rebuild_state_at(heads);
     return snapshot.object_length(obj);
 }
 
 auto Document::text_at(const ObjId& obj,
                        const std::vector<ChangeHash>& heads) const -> std::string {
+    auto lock = std::shared_lock{mutex_};
     auto snapshot = state_->rebuild_state_at(heads);
     return snapshot.text_content(obj);
 }
@@ -995,6 +1089,7 @@ auto Document::text_at(const ObjId& obj,
 
 auto Document::cursor(const ObjId& obj, std::size_t index) const
     -> std::optional<Cursor> {
+    auto lock = std::shared_lock{mutex_};
     auto id = state_->list_element_id_at(obj, index);
     if (!id) return std::nullopt;
     return Cursor{*id};
@@ -1002,6 +1097,7 @@ auto Document::cursor(const ObjId& obj, std::size_t index) const
 
 auto Document::resolve_cursor(const ObjId& obj, const Cursor& cur) const
     -> std::optional<std::size_t> {
+    auto lock = std::shared_lock{mutex_};
     return state_->find_element_visible_index(obj, cur.position);
 }
 
@@ -1028,11 +1124,13 @@ static auto collect_marks(const detail::DocState& state, const ObjId& obj)
 }
 
 auto Document::marks(const ObjId& obj) const -> std::vector<Mark> {
+    auto lock = std::shared_lock{mutex_};
     return collect_marks(*state_, obj);
 }
 
 auto Document::marks_at(const ObjId& obj,
                         const std::vector<ChangeHash>& heads) const -> std::vector<Mark> {
+    auto lock = std::shared_lock{mutex_};
     auto snapshot = state_->rebuild_state_at(heads);
     return collect_marks(snapshot, obj);
 }

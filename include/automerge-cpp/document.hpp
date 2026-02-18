@@ -16,6 +16,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <shared_mutex>
 #include <span>
 #include <string>
 #include <string_view>
@@ -23,7 +24,10 @@
 
 namespace automerge_cpp {
 
-namespace detail { struct DocState; }
+namespace detail {
+struct DocState;
+class ThreadPool;
+}  // namespace detail
 
 /// A CRDT document that supports concurrent editing and deterministic merge.
 ///
@@ -46,7 +50,19 @@ namespace detail { struct DocState; }
 class Document {
 public:
     /// Construct a new empty document with a random actor ID.
+    /// Creates an internal thread pool with hardware_concurrency() threads.
     Document();
+
+    /// Construct with an explicit thread count.
+    /// @param num_threads Number of threads for internal parallelism.
+    ///   0 = hardware_concurrency(), 1 = sequential (no pool).
+    explicit Document(unsigned int num_threads);
+
+    /// Construct with an externally-owned thread pool.
+    /// The pool is shared (via shared_ptr) and can be reused across documents.
+    /// @param pool The thread pool to use. nullptr = sequential (no pool).
+    explicit Document(std::shared_ptr<detail::ThreadPool> pool);
+
     ~Document();
 
     Document(Document&&) noexcept;
@@ -226,8 +242,13 @@ public:
     auto marks_at(const ObjId& obj,
                   const std::vector<ChangeHash>& heads) const -> std::vector<Mark>;
 
+    /// Get the thread pool (may be nullptr if sequential mode).
+    auto thread_pool() const -> std::shared_ptr<detail::ThreadPool>;
+
 private:
     std::unique_ptr<detail::DocState> state_;
+    std::shared_ptr<detail::ThreadPool> pool_;
+    mutable std::shared_mutex mutex_;
 };
 
 }  // namespace automerge_cpp
