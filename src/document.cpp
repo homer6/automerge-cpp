@@ -13,6 +13,8 @@
 #include "sync/bloom_filter.hpp"
 
 #include <algorithm>
+#include <atomic>
+#include <cstring>
 #include <ranges>
 #include <set>
 #include <shared_mutex>
@@ -149,12 +151,13 @@ auto Document::object_type(const ObjId& obj) const -> std::optional<ObjType> {
 
 auto Document::fork() const -> Document {
     auto lock = std::shared_lock{mutex_};
+    static std::atomic<std::uint64_t> fork_counter{1};
     auto forked = Document{pool_};
     *forked.state_ = *state_;
-    // Create a unique actor by incrementing the last byte
+    // Create a unique actor by stamping a monotonic counter into the last 8 bytes
     auto new_actor = state_->actor;
-    new_actor.bytes[15] = static_cast<std::byte>(
-        static_cast<std::uint8_t>(new_actor.bytes[15]) + 1);
+    auto counter = fork_counter.fetch_add(1, std::memory_order_relaxed);
+    std::memcpy(&new_actor.bytes[8], &counter, sizeof(counter));
     forked.state_->actor = new_actor;
     return forked;
 }

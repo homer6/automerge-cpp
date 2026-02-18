@@ -1,9 +1,14 @@
 #include <automerge-cpp/automerge.hpp>
 
+// Internal header for shared pool test
+#include "../src/thread_pool.hpp"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <atomic>
 #include <string>
+#include <thread>
 
 using namespace automerge_cpp;
 
@@ -2544,4 +2549,196 @@ TEST(Document, mark_transact_with_patches_mark_only_transaction) {
     auto marks = doc.marks(text_id);
     ASSERT_EQ(marks.size(), 1u);
     EXPECT_EQ(marks[0].name, "bold");
+}
+
+// -- Thread safety and parallelism (11C) --------------------------------------
+
+TEST(Document, constructor_with_thread_count) {
+    auto doc1 = Document{};          // default: hardware_concurrency()
+    auto doc2 = Document{4u};        // explicit 4 threads
+    auto doc3 = Document{1u};        // sequential, no pool
+    auto doc4 = Document{0u};        // 0 = auto
+
+    // All should work identically
+    for (auto* doc : {&doc1, &doc2, &doc3, &doc4}) {
+        doc->transact([](auto& tx) {
+            tx.put(root, "key", std::string{"value"});
+        });
+        auto val = doc->get(root, "key");
+        ASSERT_TRUE(val.has_value());
+    }
+}
+
+TEST(Document, constructor_with_shared_pool) {
+    auto pool = std::make_shared<automerge_cpp::detail::ThreadPool>(2);
+    auto doc1 = Document{pool};
+    auto doc2 = Document{pool};
+
+    doc1.transact([](auto& tx) {
+        tx.put(root, "from", std::string{"doc1"});
+    });
+    doc2.transact([](auto& tx) {
+        tx.put(root, "from", std::string{"doc2"});
+    });
+
+    EXPECT_EQ(doc1.thread_pool(), doc2.thread_pool());
+
+    auto v1 = doc1.get(root, "from");
+    auto v2 = doc2.get(root, "from");
+    ASSERT_TRUE(v1.has_value());
+    ASSERT_TRUE(v2.has_value());
+}
+
+TEST(Document, fork_shares_thread_pool) {
+    auto doc = Document{4u};
+    doc.transact([](auto& tx) {
+        tx.put(root, "key", std::string{"value"});
+    });
+    auto forked = doc.fork();
+    EXPECT_EQ(doc.thread_pool(), forked.thread_pool());
+}
+
+TEST(Document, concurrent_reads_are_safe) {
+    auto doc = Document{};
+    doc.transact([](auto& tx) {
+        for (int i = 0; i < 100; ++i) {
+            tx.put(root, "key_" + std::to_string(i),
+                   std::string{"val_" + std::to_string(i)});
+        }
+    });
+
+    // Launch multiple threads doing concurrent reads
+    auto threads = std::vector<std::jthread>{};
+    auto errors = std::atomic<int>{0};
+    for (int t = 0; t < 8; ++t) {
+        threads.emplace_back([&doc, &errors, t]() {
+            for (int i = 0; i < 100; ++i) {
+                auto key = "key_" + std::to_string((t * 13 + i) % 100);
+                auto val = doc.get(root, key);
+                if (!val.has_value()) {
+                    errors.fetch_add(1, std::memory_order_relaxed);
+                }
+                auto keys = doc.keys(root);
+                if (keys.size() != 100) {
+                    errors.fetch_add(1, std::memory_order_relaxed);
+                }
+            }
+        });
+    }
+    threads.clear();  // join all
+    EXPECT_EQ(errors.load(), 0);
+}
+
+TEST(Document, fork_merge_batch_put) {
+    // Simulate parallel batch put via fork/merge
+    auto doc = Document{1u};  // sequential base
+    doc.transact([](auto& tx) {
+        tx.put(root, "existing", std::string{"keep_me"});
+    });
+
+    // Fork N copies, each puts a partition of keys, merge back
+    constexpr int num_forks = 4;
+    constexpr int keys_per_fork = 25;
+
+    auto forks = std::vector<Document>{};
+    forks.reserve(num_forks);
+    for (int f = 0; f < num_forks; ++f) {
+        forks.push_back(doc.fork());
+    }
+
+    // Each fork puts its partition
+    for (int f = 0; f < num_forks; ++f) {
+        forks[f].transact([f](auto& tx) {
+            for (int i = 0; i < keys_per_fork; ++i) {
+                auto key = "batch_" + std::to_string(f * keys_per_fork + i);
+                tx.put(root, key, std::int64_t{f * keys_per_fork + i});
+            }
+        });
+    }
+
+    // Merge all forks back
+    for (auto& f : forks) {
+        doc.merge(f);
+    }
+
+    // Verify all keys present
+    auto val = doc.get(root, "existing");
+    ASSERT_TRUE(val.has_value());
+
+    for (int i = 0; i < num_forks * keys_per_fork; ++i) {
+        auto key = "batch_" + std::to_string(i);
+        auto v = doc.get(root, key);
+        ASSERT_TRUE(v.has_value()) << "Missing key: " << key;
+    }
+
+    EXPECT_EQ(doc.length(root),
+              static_cast<std::size_t>(1 + num_forks * keys_per_fork));
+}
+
+TEST(Document, threaded_fork_merge_batch_put) {
+    // Same as above but forks execute on separate threads
+    auto doc = Document{};
+    doc.transact([](auto& tx) {
+        tx.put(root, "base", std::string{"value"});
+    });
+
+    constexpr int num_forks = 8;
+    constexpr int keys_per_fork = 50;
+
+    auto forks = std::vector<Document>{};
+    forks.reserve(num_forks);
+    for (int f = 0; f < num_forks; ++f) {
+        forks.push_back(doc.fork());
+    }
+
+    // Execute fork mutations in parallel
+    auto threads = std::vector<std::jthread>{};
+    for (int f = 0; f < num_forks; ++f) {
+        threads.emplace_back([&forks, f]() {
+            forks[f].transact([f](auto& tx) {
+                for (int i = 0; i < keys_per_fork; ++i) {
+                    auto key = "p" + std::to_string(f) + "_" + std::to_string(i);
+                    tx.put(root, key, std::int64_t{f * 1000 + i});
+                }
+            });
+        });
+    }
+    threads.clear();  // join all
+
+    // Merge sequentially (merge order doesn't matter — CRDT guarantee)
+    for (auto& f : forks) {
+        doc.merge(f);
+    }
+
+    // Verify: base key + all fork keys
+    EXPECT_TRUE(doc.get(root, "base").has_value());
+    for (int f = 0; f < num_forks; ++f) {
+        for (int i = 0; i < keys_per_fork; ++i) {
+            auto key = "p" + std::to_string(f) + "_" + std::to_string(i);
+            auto v = doc.get(root, key);
+            ASSERT_TRUE(v.has_value()) << "Missing: " << key;
+        }
+    }
+
+    EXPECT_EQ(doc.length(root),
+              static_cast<std::size_t>(1 + num_forks * keys_per_fork));
+}
+
+TEST(Document, save_load_with_thread_pool) {
+    auto doc = Document{4u};
+    doc.transact([](auto& tx) {
+        for (int i = 0; i < 50; ++i) {
+            tx.put(root, "k" + std::to_string(i), std::int64_t{i});
+        }
+    });
+
+    auto bytes = doc.save();
+    auto loaded = Document::load(bytes);
+    ASSERT_TRUE(loaded.has_value());
+
+    for (int i = 0; i < 50; ++i) {
+        auto key = "k" + std::to_string(i);
+        auto v = loaded->get(root, key);
+        ASSERT_TRUE(v.has_value()) << "Missing: " << key;
+    }
 }
