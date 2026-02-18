@@ -41,10 +41,10 @@ auto Document::actor_id() const -> const ActorId& {
 }
 
 void Document::set_actor_id(ActorId id) {
-    state_->actor = std::move(id);
+    state_->actor = id;
 }
 
-void Document::transact(std::function<void(Transaction&)> fn) {
+void Document::transact(const std::function<void(Transaction&)>& fn) {
     auto tx = Transaction{*state_};
     fn(tx);
     tx.commit();
@@ -954,7 +954,7 @@ static auto ops_to_patches(const std::vector<Op>& ops) -> std::vector<Patch> {
     return patches;
 }
 
-auto Document::transact_with_patches(std::function<void(Transaction&)> fn)
+auto Document::transact_with_patches(const std::function<void(Transaction&)>& fn)
     -> std::vector<Patch> {
     auto tx = Transaction{*state_};
     fn(tx);

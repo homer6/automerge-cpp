@@ -135,7 +135,7 @@ public:
             --literal_remaining_;
             auto val = decode_value();
             if (!val) return std::nullopt;  // truncated
-            return std::optional<T>{*val};
+            return val;
         }
 
         // Read next control word
@@ -160,13 +160,13 @@ public:
             if (!val) return std::nullopt;
             run_value_ = *val;
             run_remaining_ = static_cast<std::uint64_t>(control->value) - 1;
-            return std::optional<T>{*val};
+            return val;
         } else {
             // Literal run: |count| distinct values
             literal_remaining_ = static_cast<std::uint64_t>(-control->value) - 1;
             auto val = decode_value();
             if (!val) return std::nullopt;
-            return std::optional<T>{*val};
+            return val;
         }
     }
 

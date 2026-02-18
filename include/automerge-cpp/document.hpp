@@ -73,7 +73,7 @@ public:
     /// when the function returns. If the function throws, the transaction
     /// is rolled back.
     /// @param fn A function that receives a Transaction reference.
-    void transact(std::function<void(Transaction&)> fn);
+    void transact(const std::function<void(Transaction&)>& fn);
 
     // -- Reading: map operations ----------------------------------------------
 
@@ -172,7 +172,7 @@ public:
     /// (puts, inserts, deletes, increments, text splices).
     /// @param fn A function that receives a Transaction reference.
     /// @return The patches produced by the transaction.
-    auto transact_with_patches(std::function<void(Transaction&)> fn) -> std::vector<Patch>;
+    auto transact_with_patches(const std::function<void(Transaction&)>& fn) -> std::vector<Patch>;
 
     // -- Historical reads (time travel) ---------------------------------------
 

@@ -117,7 +117,7 @@ inline auto sha256(std::span<const std::byte> input) -> std::array<std::byte, 32
 
         // Prepare message schedule
         for (int i = 0; i < 16; ++i) {
-            w[i] = detail::read_be32(bp + i * 4);
+            w[i] = detail::read_be32(bp + static_cast<std::ptrdiff_t>(i) * 4);
         }
         for (int i = 16; i < 64; ++i) {
             w[i] = detail::gamma1(w[i - 2]) + w[i - 7] +
@@ -149,7 +149,7 @@ inline auto sha256(std::span<const std::byte> input) -> std::array<std::byte, 32
     // Produce output
     auto result = std::array<std::byte, 32>{};
     for (int i = 0; i < 8; ++i) {
-        detail::write_be32(result.data() + i * 4, h[i]);
+        detail::write_be32(result.data() + static_cast<std::ptrdiff_t>(i) * 4, h[i]);
     }
     return result;
 }

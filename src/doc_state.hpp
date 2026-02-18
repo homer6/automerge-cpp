@@ -406,15 +406,11 @@ struct DocState {
 
             if (!origin_in_scan) break;
 
-            if (same_origin && elem.insert_id > new_id) {
-                // Higher priority concurrent insert — skip it
-                scanned.insert(elem.insert_id);
-                ++pos;
-            } else if (same_origin) {
+            if (same_origin && elem.insert_id <= new_id) {
                 // Lower priority — insert before it
                 break;
             } else {
-                // Different origin but in scanned set — subtree element, skip
+                // Higher priority concurrent insert or subtree element — skip
                 scanned.insert(elem.insert_id);
                 ++pos;
             }
