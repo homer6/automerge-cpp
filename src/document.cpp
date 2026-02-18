@@ -79,8 +79,20 @@ auto Document::get_thread_pool() const -> std::shared_ptr<thread_pool> {
     return pool_;
 }
 
+void Document::set_read_locking(bool enabled) {
+    read_locking_ = enabled;
+}
+
+auto Document::read_locking() const -> bool {
+    return read_locking_;
+}
+
+auto Document::read_guard() const -> ReadGuard {
+    return ReadGuard{mutex_, read_locking_};
+}
+
 auto Document::actor_id() const -> const ActorId& {
-    auto lock = std::shared_lock{mutex_};
+    auto guard = read_guard();
     return state_->actor;
 }
 
@@ -97,27 +109,27 @@ void Document::transact(const std::function<void(Transaction&)>& fn) {
 }
 
 auto Document::get(const ObjId& obj, std::string_view key) const -> std::optional<Value> {
-    auto lock = std::shared_lock{mutex_};
+    auto guard = read_guard();
     return state_->map_get(obj, std::string{key});
 }
 
 auto Document::get_all(const ObjId& obj, std::string_view key) const -> std::vector<Value> {
-    auto lock = std::shared_lock{mutex_};
+    auto guard = read_guard();
     return state_->map_get_all(obj, std::string{key});
 }
 
 auto Document::get(const ObjId& obj, std::size_t index) const -> std::optional<Value> {
-    auto lock = std::shared_lock{mutex_};
+    auto guard = read_guard();
     return state_->list_get(obj, index);
 }
 
 auto Document::keys(const ObjId& obj) const -> std::vector<std::string> {
-    auto lock = std::shared_lock{mutex_};
+    auto guard = read_guard();
     return state_->map_keys(obj);
 }
 
 auto Document::values(const ObjId& obj) const -> std::vector<Value> {
-    auto lock = std::shared_lock{mutex_};
+    auto guard = read_guard();
     const auto type = state_->object_type(obj);
     if (!type) return {};
 
@@ -133,24 +145,24 @@ auto Document::values(const ObjId& obj) const -> std::vector<Value> {
 }
 
 auto Document::length(const ObjId& obj) const -> std::size_t {
-    auto lock = std::shared_lock{mutex_};
+    auto guard = read_guard();
     return state_->object_length(obj);
 }
 
 auto Document::text(const ObjId& obj) const -> std::string {
-    auto lock = std::shared_lock{mutex_};
+    auto guard = read_guard();
     return state_->text_content(obj);
 }
 
 auto Document::object_type(const ObjId& obj) const -> std::optional<ObjType> {
-    auto lock = std::shared_lock{mutex_};
+    auto guard = read_guard();
     return state_->object_type(obj);
 }
 
 // -- Phase 3: Fork and Merge --------------------------------------------------
 
 auto Document::fork() const -> Document {
-    auto lock = std::shared_lock{mutex_};
+    auto guard = read_guard();
     static std::atomic<std::uint64_t> fork_counter{1};
     auto forked = Document{pool_};
     *forked.state_ = *state_;
@@ -193,7 +205,7 @@ void Document::merge(const Document& other) {
 }
 
 auto Document::get_changes() const -> std::vector<Change> {
-    auto lock = std::shared_lock{mutex_};
+    auto guard = read_guard();
     return state_->change_history;
 }
 
@@ -223,7 +235,7 @@ void Document::apply_changes(const std::vector<Change>& changes) {
 }
 
 auto Document::get_heads() const -> std::vector<ChangeHash> {
-    auto lock = std::shared_lock{mutex_};
+    auto guard = read_guard();
     return state_->heads;
 }
 
@@ -235,7 +247,7 @@ static constexpr std::uint8_t MAGIC[] = {0x85, 0x6F, 0x4A, 0x83};
 static constexpr std::uint8_t FORMAT_VERSION = 0x01;
 
 auto Document::save() const -> std::vector<std::byte> {
-    auto lock = std::shared_lock{mutex_};
+    auto guard = read_guard();
     const auto& actor_table = state_->actor_table();
 
     // Build document body (pre-size: actor table + heads + ~256 bytes per change)
@@ -729,7 +741,7 @@ static auto get_hashes_to_send(
 
 auto Document::generate_sync_message(SyncState& sync_state) const
     -> std::optional<SyncMessage> {
-    auto lock = std::shared_lock{mutex_};
+    auto guard = read_guard();
 
     auto our_heads = state_->heads;
 
@@ -1038,28 +1050,28 @@ auto Document::transact_with_patches(const std::function<void(Transaction&)>& fn
 
 auto Document::get_at(const ObjId& obj, std::string_view key,
                       const std::vector<ChangeHash>& heads) const -> std::optional<Value> {
-    auto lock = std::shared_lock{mutex_};
+    auto guard = read_guard();
     auto snapshot = state_->rebuild_state_at(heads);
     return snapshot.map_get(obj, std::string{key});
 }
 
 auto Document::get_at(const ObjId& obj, std::size_t index,
                       const std::vector<ChangeHash>& heads) const -> std::optional<Value> {
-    auto lock = std::shared_lock{mutex_};
+    auto guard = read_guard();
     auto snapshot = state_->rebuild_state_at(heads);
     return snapshot.list_get(obj, index);
 }
 
 auto Document::keys_at(const ObjId& obj,
                        const std::vector<ChangeHash>& heads) const -> std::vector<std::string> {
-    auto lock = std::shared_lock{mutex_};
+    auto guard = read_guard();
     auto snapshot = state_->rebuild_state_at(heads);
     return snapshot.map_keys(obj);
 }
 
 auto Document::values_at(const ObjId& obj,
                          const std::vector<ChangeHash>& heads) const -> std::vector<Value> {
-    auto lock = std::shared_lock{mutex_};
+    auto guard = read_guard();
     auto snapshot = state_->rebuild_state_at(heads);
     auto type = snapshot.object_type(obj);
     if (!type) return {};
@@ -1076,14 +1088,14 @@ auto Document::values_at(const ObjId& obj,
 
 auto Document::length_at(const ObjId& obj,
                          const std::vector<ChangeHash>& heads) const -> std::size_t {
-    auto lock = std::shared_lock{mutex_};
+    auto guard = read_guard();
     auto snapshot = state_->rebuild_state_at(heads);
     return snapshot.object_length(obj);
 }
 
 auto Document::text_at(const ObjId& obj,
                        const std::vector<ChangeHash>& heads) const -> std::string {
-    auto lock = std::shared_lock{mutex_};
+    auto guard = read_guard();
     auto snapshot = state_->rebuild_state_at(heads);
     return snapshot.text_content(obj);
 }
@@ -1092,7 +1104,7 @@ auto Document::text_at(const ObjId& obj,
 
 auto Document::cursor(const ObjId& obj, std::size_t index) const
     -> std::optional<Cursor> {
-    auto lock = std::shared_lock{mutex_};
+    auto guard = read_guard();
     auto id = state_->list_element_id_at(obj, index);
     if (!id) return std::nullopt;
     return Cursor{*id};
@@ -1100,7 +1112,7 @@ auto Document::cursor(const ObjId& obj, std::size_t index) const
 
 auto Document::resolve_cursor(const ObjId& obj, const Cursor& cur) const
     -> std::optional<std::size_t> {
-    auto lock = std::shared_lock{mutex_};
+    auto guard = read_guard();
     return state_->find_element_visible_index(obj, cur.position);
 }
 
@@ -1127,13 +1139,13 @@ static auto collect_marks(const detail::DocState& state, const ObjId& obj)
 }
 
 auto Document::marks(const ObjId& obj) const -> std::vector<Mark> {
-    auto lock = std::shared_lock{mutex_};
+    auto guard = read_guard();
     return collect_marks(*state_, obj);
 }
 
 auto Document::marks_at(const ObjId& obj,
                         const std::vector<ChangeHash>& heads) const -> std::vector<Mark> {
-    auto lock = std::shared_lock{mutex_};
+    auto guard = read_guard();
     auto snapshot = state_->rebuild_state_at(heads);
     return collect_marks(snapshot, obj);
 }

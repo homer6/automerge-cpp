@@ -12,7 +12,7 @@ This is a **from-scratch** reimplementation, not a wrapper. It mirrors the upstr
 Automerge semantics while embracing idiomatic C++23: algebraic types, ranges pipelines,
 strong types, and APIs that make illegal states unrepresentable.
 
-**274 tests passing** across 8 implementation phases.
+**281 tests passing** across 8 implementation phases.
 
 ## Quick Example
 
@@ -85,22 +85,36 @@ int main() {
 
 ## Performance
 
-Release-build highlights (Intel Xeon Platinum 8358, Linux, GCC 13.3):
+Release-build highlights (Intel Xeon Platinum 8358, 30 cores, Linux, GCC 13.3, `-O3 -march=native`):
+
+### Single-Threaded
 
 | Operation | Throughput |
 |-----------|------------|
-| Map put (batched) | 4.1 M ops/s |
-| Map get | 27.2 M ops/s |
-| Sync round trip | 26.4 K ops/s |
-| Time travel get_at | 2.88 M ops/s |
-| Merge (10+10 puts) | 260 K ops/s |
-| Cursor resolve | 2.9 M ops/s |
-| Save (100 keys) | 31.8 K ops/s |
+| Map put (batched) | 4.3 M ops/s |
+| Map get | 19.8 M ops/s |
+| Sync round trip | 23.6 K ops/s |
+| Time travel get_at | 2.9 M ops/s |
+| Merge (10+10 puts) | 241 K ops/s |
+| Cursor resolve | 1.8 M ops/s |
+| Save (100 keys) | 30.6 K ops/s |
 
-Key optimizations in v0.4.0 delivered **22x** faster time travel and **5.6x** faster sync
-via hash caching, actor table caching, and allocation reduction.
+### Parallel Scaling (30 cores)
 
-See [docs/benchmark-results.md](docs/benchmark-results.md) for full results and platform comparison.
+| Operation | Sequential | Parallel | Speedup |
+|-----------|-----------|----------|---------|
+| Get (100K keys, lock-free) | 7.1 M ops/s | **95.0 M ops/s** | **13.5x** |
+| Get (1M keys, lock-free) | 5.7 M ops/s | **55.0 M ops/s** | **9.6x** |
+| Put (100K keys, sharded) | 2.0 M ops/s | **13.5 M ops/s** | **6.9x** |
+| Put (1M keys, sharded) | 1.7 M ops/s | **8.4 M ops/s** | **4.8x** |
+| Save 500 docs | 95 K docs/s | **806 K docs/s** | **8.4x** |
+| Load 500 docs | 48 K docs/s | **190 K docs/s** | **3.9x** |
+
+v0.4.0 optimizations: **22x** faster time travel, **5.6x** faster sync (hash/actor table caching),
+**13.5x** parallel read scaling (lock-free reads eliminate shared_mutex contention).
+
+See [docs/benchmark-results.md](docs/benchmark-results.md) for full results, platform comparison,
+and perf analysis.
 
 ## Design Philosophy
 

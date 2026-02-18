@@ -542,6 +542,89 @@ benchmarks with 100-1000 changes to show meaningful speedups.
 | ~~P3~~ | ~~Buffer pre-sizing (reserve)~~ | ~~RLE encoder allocs~~ | ~~RLE encoder allocs~~ | ~~1.5x save~~ | **DONE** — reserve in save/serialize/hash |
 | **P3** | Parallel DEFLATE compress/decompress | 0.5% of save | ~6% of save (post-opt) | 2-4x per change | **TODO** |
 
+## Parallel Profiling: shared_mutex Bottleneck and Lock-Free Fix
+
+### The Problem: shared_mutex Reader-Count Contention
+
+`perf record` on parallel `bm_get_scale/1/1000000` (30 threads, 1M keys, single
+shared document) revealed that **51% of CPU** was spent inside pthread_rwlock:
+
+| Function | % CPU |
+|----------|-------|
+| `pthread_rwlock_unlock` (shared_mutex unlock_shared) | **30.23%** |
+| `pthread_rwlock_rdlock` (shared_mutex lock_shared) | **21.21%** |
+| kernel futex/scheduling | **~23%** |
+| `std::map::find` (actual map lookup work) | 2.73% |
+| `__memcmp_evex_movbe` (string comparison) | 1.97% |
+| `thread_pool::worker()` | 1.35% |
+
+**Root cause:** `std::shared_mutex` uses `pthread_rwlock`, which maintains an
+atomic reader count. With 30 threads all acquiring `shared_lock` simultaneously,
+every lock/unlock bounces the reader-count cache line across all 30 cores via the
+MESI protocol. Each bounce costs ~100ns on this Xeon (cross-socket coherence).
+
+**Hardware counter evidence:**
+- **IPC: 0.49** (should be 2-4 for compute-bound workloads)
+- **9.3M context switches** in 44 seconds (futex wait/wake)
+- **576s sys time vs 330s user time** — kernel spent more time than userspace
+- Only **2.97% L1d miss rate** — the data itself fits in cache; the stalls are
+  from atomic coherence traffic, not data cache misses
+
+### The Fix: Lock-Free Read Path
+
+Added `set_read_locking(bool)` to Document. When disabled, read methods skip the
+`shared_lock` entirely. Safe when the caller guarantees no concurrent writers
+(which is the common case for read-heavy workloads and all benchmarks).
+
+Implementation: lightweight RAII `ReadGuard` that conditionally acquires the lock:
+```cpp
+struct ReadGuard {
+    std::shared_lock<std::shared_mutex> lock_;
+    bool engaged_;
+    explicit ReadGuard(std::shared_mutex& mtx, bool engage)
+        : lock_{mtx, std::defer_lock}, engaged_{engage} {
+        if (engaged_) lock_.lock();
+    }
+};
+```
+
+### Results: Before vs After
+
+| Keys | Before (shared_mutex) | After (lock-free) | Improvement |
+|------|----------------------|-------------------|-------------|
+| 100K | 10.6 M ops/s (2.4x) | **95.0 M ops/s (13.5x)** | 9x faster |
+| 500K | 10.2 M ops/s (1.8x) | **66.0 M ops/s (11.7x)** | 6.5x faster |
+| 1M | 10.2 M ops/s (1.9x) | **55.0 M ops/s (9.6x)** | 5.4x faster |
+
+(Speedup numbers in parentheses are vs sequential single-threaded.)
+
+**Post-fix hardware counters:** IPC improved from **0.49 → 1.16** (2.4x better
+CPU utilization). The CPU is now spending time on actual map lookups instead of
+stalling on cache-line coherence traffic.
+
+### Why Not Linear (30x)?
+
+At 1M keys, we achieve 9.6x on 30 cores (32% efficiency). The remaining gap is:
+
+1. **Thread pool dispatch overhead** — `parallelize_loop` divides work into blocks,
+   each wrapped in `std::function` (one heap allocation per block)
+2. **NUMA effects** — this Xeon has 30 cores across 2 sockets; cross-socket memory
+   access adds ~100ns latency vs ~10ns same-socket
+3. **std::map tree traversal** — `map_entries.find(key)` does O(log n) pointer-chasing
+   through a red-black tree, which is inherently cache-unfriendly. With 1M keys,
+   each lookup traverses ~20 tree nodes, many causing L1/L2 cache misses
+4. **String comparison overhead** — `memcmp` for key matching shows up at 2% even
+   in the lock-free profile
+
+### Remaining Optimization Opportunities for Reads
+
+| Approach | Expected Impact | Complexity |
+|----------|----------------|------------|
+| Replace `std::map` with `std::unordered_map` for map_entries | 2-3x (O(1) vs O(log n) lookup) | Medium |
+| Replace `std::unordered_map` with open-addressing hash map | 1.5-2x (cache-friendly) | Medium |
+| NUMA-aware memory placement | 1.3-1.5x on multi-socket | High |
+| Eliminate `std::function` in parallelize_loop | 1.1-1.2x (remove heap alloc) | Low |
+
 ## Reproducing This Analysis
 
 ### macOS (Apple Silicon)

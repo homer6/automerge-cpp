@@ -646,6 +646,10 @@ static void bm_concurrent_reads(benchmark::State& state) {
         }
     });
 
+    if (parallel) {
+        doc.set_read_locking(false);
+    }
+
     for (auto _ : state) {
         if (!parallel) {
             for (int i = 0; i < total_reads; ++i) {
@@ -812,6 +816,12 @@ static void bm_get_scale(benchmark::State& state) {
             tx.put(root, keys[i], std::int64_t{i});
         }
     });
+
+    // Disable read locking for parallel reads — no concurrent writers exist,
+    // so the shared_lock is pure overhead (51% of CPU per perf profile).
+    if (parallel) {
+        doc.set_read_locking(false);
+    }
 
     for (auto _ : state) {
         if (!parallel) {
