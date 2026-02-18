@@ -12,7 +12,7 @@ This is a **from-scratch** reimplementation, not a wrapper. It mirrors the upstr
 Automerge semantics while embracing idiomatic C++23: algebraic types, ranges pipelines,
 strong types, and APIs that make illegal states unrepresentable.
 
-**207 tests passing** across 7 implementation phases.
+**274 tests passing** across 8 implementation phases.
 
 ## Quick Example
 
@@ -63,7 +63,7 @@ int main() {
 - **CRDT data types**: Map, List, Text, Counter
 - **Conflict-free merging**: concurrent edits merge deterministically (RGA for lists/text)
 - **Fork and merge**: create independent document copies, merge them back
-- **Binary serialization**: `save()` / `load()` with LEB128 variable-length encoding
+- **Binary serialization**: `save()` / `load()` with upstream-compatible columnar encoding
 - **Sync protocol**: bloom filter-based peer-to-peer synchronization
 - **Patches**: incremental change notifications via `transact_with_patches()`
 - **Time travel**: read document state at any historical point (`get_at()`, `text_at()`, etc.)
@@ -72,10 +72,15 @@ int main() {
 - **Strong types**: `ActorId`, `ObjId`, `ChangeHash`, `OpId` never implicitly convert
 - **Type-safe values**: `std::variant`-based `ScalarValue` and `Value` types
 
+- **Columnar encoding**: upstream-compatible columnar op encoding with RLE, delta, and boolean encoders
+- **DEFLATE compression**: zlib-based compression for columns exceeding 256 bytes
+- **SHA-256 checksums**: chunk envelope with SHA-256 integrity validation
+- **Backward compatibility**: v1 format loading with automatic format detection
+
 ### Planned
 
-- Upstream Rust binary format interoperability
-- Columnar encoding and DEFLATE compression
+- Fuzz testing (libFuzzer targets for deserialization paths)
+- Doxygen API documentation
 
 ## Performance
 
@@ -110,6 +115,7 @@ Inspired by Ben Deane's approach to modern C++:
 
 - C++23 compiler (GCC 14+, Clang 18+, MSVC 19.38+)
 - CMake 3.28+
+- zlib (for DEFLATE compression)
 
 ### Build
 
@@ -158,8 +164,10 @@ automerge-cpp/
     document.cpp              #   Document methods
     transaction.cpp           #   Transaction methods
     doc_state.hpp             #   internal: DocState, ObjectState
-    encoding/                 #   LEB128 codec
-    storage/                  #   binary serializer/deserializer
+    crypto/                   #   SHA-256 (vendored)
+    encoding/                 #   LEB128, RLE, delta, boolean codecs
+    storage/                  #   columnar binary format
+      columns/                #   column spec, op encoding, value encoding, compression
     sync/                     #   bloom filter for sync protocol
   tests/                      # unit and integration tests
   examples/                   # example programs
