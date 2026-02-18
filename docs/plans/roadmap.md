@@ -1,38 +1,45 @@
 # automerge-cpp Implementation Roadmap
 
 ## Phase 0: Project Scaffolding
-**Status**: In Progress
+**Status**: Complete
 
 - [x] Repository setup (git, license, submodule)
-- [ ] CMake build system (library, tests, examples, benchmarks)
+- [x] CMake build system (library, tests, examples, benchmarks)
 - [ ] CI pipeline (GitHub Actions)
-- [ ] CLAUDE.md and README.md
-- [ ] Architecture plan (this document)
-- [ ] Skeleton headers for all public types
+- [x] CLAUDE.md and README.md
+- [x] Architecture plan (this document)
+- [x] Style guide (docs/style.md)
+- [x] Skeleton headers for all public types
 
 ---
 
 ## Phase 1: Core Types and Value Model
-**Goal**: All fundamental types compile and have full test coverage.
+**Status**: Complete — 53 tests passing
 
 ### Deliverables
-- `types.hpp` — `ActorId`, `ObjId`, `OpId`, `ChangeHash`, `Prop`
-- `value.hpp` — `ScalarValue`, `Value`, `ObjType`, `Null`, `Counter`, `Timestamp`, `Bytes`
-- `error.hpp` — `Error`, `ErrorKind`
-- `op.hpp` — `Op`, `OpType`
-- `change.hpp` — `Change`
+- [x] `error.hpp` — `Error`, `ErrorKind` (7 variants)
+- [x] `types.hpp` — `ActorId`, `ObjId`, `OpId`, `ChangeHash`, `Prop` + `std::hash` specializations
+- [x] `value.hpp` — `ScalarValue` (9 alternatives), `Value`, `ObjType`, `Null`, `Counter`, `Timestamp`, `Bytes`
+- [x] `op.hpp` — `Op`, `OpType` (7 variants)
+- [x] `change.hpp` — `Change`
+- [x] `automerge.hpp` — umbrella header
 
-### Key Design Decisions
-- `ActorId`: fixed-size 16-byte array with comparison, hashing, hex formatting
-- `ChangeHash`: fixed-size 32-byte array (SHA-256)
-- `ObjId`: variant of `Root` sentinel or `(counter, ActorId)` pair
+### Design Decisions (implemented)
+- `ActorId`: fixed-size 16-byte array with `operator<=>`, FNV-1a hashing
+- `ChangeHash`: fixed-size 32-byte array (SHA-256 sized)
+- `ObjId`: `std::variant<Root, OpId>` — root is a sentinel, non-root is the creating `OpId`
+- `OpId`: `(counter, ActorId)` with total ordering (counter first, actor tie-break)
 - All types are regular (copyable, movable, comparable, hashable)
-- All types have `std::format` / `operator<<` support
+- Designated initializers for `Op` and `Change`
 
-### Tests
-- Round-trip: construct, compare, hash, format, reconstruct
-- Ordering: `ActorId` and `OpId` have deterministic total order
-- Variant exhaustiveness: every `ScalarValue` alternative is tested
+### Tests (53 total)
+- [x] Round-trip: construct, compare, hash, reconstruct
+- [x] Ordering: `ActorId` and `OpId` have deterministic total order
+- [x] Hashing: all ID types usable in `std::unordered_set`
+- [x] Sorting: `ActorId` sortable via `std::ranges::sort`
+- [x] Variant exhaustiveness: every `ScalarValue` alternative tested
+- [x] `int64` and `uint64` are distinct alternatives
+- [x] `Op` and `Change` equality detects all field differences
 
 ---
 
