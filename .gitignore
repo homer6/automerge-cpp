@@ -39,3 +39,17 @@
 
 # debug information files
 *.dwo
+
+# CMake build directories
+build/
+cmake-build-*/
+CMakeUserPresets.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# compile_commands.json symlink
+compile_commands.json
