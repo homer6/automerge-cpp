@@ -130,7 +130,6 @@ void Document::apply_changes(const std::vector<Change>& changes) {
         // Apply each operation
         for (const auto& op : change.operations) {
             state_->apply_op(op);
-            state_->op_log.push_back(op);
         }
 
         // Update clock
@@ -556,7 +555,6 @@ auto Document::load(std::span<const std::byte> data) -> std::optional<Document> 
     for (const auto& change : parsed->changes) {
         for (const auto& op : change.operations) {
             doc.state_->apply_op(op);
-            doc.state_->op_log.push_back(op);
         }
     }
 

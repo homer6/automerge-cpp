@@ -21,6 +21,17 @@ option(AUTOMERGE_CPP_BUILD_FUZZ "Build fuzz targets (requires Clang)" OFF)
 # Dependencies
 find_package(ZLIB REQUIRED)
 
+include(FetchContent)
+FetchContent_Declare(
+    taskflow
+    GIT_REPOSITORY https://github.com/taskflow/taskflow.git
+    GIT_TAG v4.0.0
+)
+set(TF_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(TF_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(TF_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(taskflow)
+
 # Library
 add_library(automerge-cpp)
 add_library(automerge-cpp::automerge-cpp ALIAS automerge-cpp)
@@ -38,7 +49,7 @@ target_sources(automerge-cpp PRIVATE
     src/transaction.cpp
 )
 
-target_link_libraries(automerge-cpp PRIVATE ZLIB::ZLIB)
+target_link_libraries(automerge-cpp PRIVATE ZLIB::ZLIB Taskflow::Taskflow)
 
 # Subdirectories
 if(AUTOMERGE_CPP_BUILD_TESTS)

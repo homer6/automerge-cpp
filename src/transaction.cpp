@@ -8,54 +8,54 @@ Transaction::Transaction(detail::DocState& state)
     : state_{state}, start_op_{state.next_counter} {}
 
 void Transaction::put(const ObjId& obj, std::string_view key, ScalarValue val) {
-    auto pred = state_.map_pred(obj, std::string{key});
+    auto key_str = std::string{key};
+    auto pred = state_.map_pred(obj, key_str);
     auto op_id = state_.next_op_id();
     auto value = Value{std::move(val)};
-    state_.map_put(obj, std::string{key}, op_id, value);
+    state_.map_put(obj, key_str, op_id, value);
     auto op = Op{
         .id = op_id,
         .obj = obj,
-        .key = map_key(std::string{key}),
+        .key = map_key(std::move(key_str)),
         .action = OpType::put,
         .value = std::move(value),
         .pred = std::move(pred),
     };
-    state_.op_log.push_back(op);
     pending_ops_.push_back(std::move(op));
 }
 
 auto Transaction::put_object(const ObjId& obj, std::string_view key, ObjType type) -> ObjId {
-    auto pred = state_.map_pred(obj, std::string{key});
+    auto key_str = std::string{key};
+    auto pred = state_.map_pred(obj, key_str);
     auto op_id = state_.next_op_id();
     auto new_obj = state_.create_object(op_id, type);
     auto value = Value{type};
-    state_.map_put(obj, std::string{key}, op_id, value);
+    state_.map_put(obj, key_str, op_id, value);
     auto op = Op{
         .id = op_id,
         .obj = obj,
-        .key = map_key(std::string{key}),
+        .key = map_key(std::move(key_str)),
         .action = OpType::make_object,
         .value = std::move(value),
         .pred = std::move(pred),
     };
-    state_.op_log.push_back(op);
     pending_ops_.push_back(std::move(op));
     return new_obj;
 }
 
 void Transaction::delete_key(const ObjId& obj, std::string_view key) {
-    auto pred = state_.map_pred(obj, std::string{key});
+    auto key_str = std::string{key};
+    auto pred = state_.map_pred(obj, key_str);
     auto op_id = state_.next_op_id();
-    state_.map_delete(obj, std::string{key});
+    state_.map_delete(obj, key_str);
     auto op = Op{
         .id = op_id,
         .obj = obj,
-        .key = map_key(std::string{key}),
+        .key = map_key(std::move(key_str)),
         .action = OpType::del,
         .value = Value{ScalarValue{Null{}}},
         .pred = std::move(pred),
     };
-    state_.op_log.push_back(op);
     pending_ops_.push_back(std::move(op));
 }
 
@@ -73,7 +73,6 @@ void Transaction::insert(const ObjId& obj, std::size_t index, ScalarValue val) {
         .pred = {},
         .insert_after = insert_after,
     };
-    state_.op_log.push_back(op);
     pending_ops_.push_back(std::move(op));
 }
 
@@ -92,7 +91,6 @@ auto Transaction::insert_object(const ObjId& obj, std::size_t index, ObjType typ
         .pred = {},
         .insert_after = insert_after,
     };
-    state_.op_log.push_back(op);
     pending_ops_.push_back(std::move(op));
     return new_obj;
 }
@@ -110,7 +108,6 @@ void Transaction::set(const ObjId& obj, std::size_t index, ScalarValue val) {
         .value = std::move(value),
         .pred = std::move(pred),
     };
-    state_.op_log.push_back(op);
     pending_ops_.push_back(std::move(op));
 }
 
@@ -126,7 +123,6 @@ void Transaction::delete_index(const ObjId& obj, std::size_t index) {
         .value = Value{ScalarValue{Null{}}},
         .pred = std::move(pred),
     };
-    state_.op_log.push_back(op);
     pending_ops_.push_back(std::move(op));
 }
 
@@ -145,7 +141,6 @@ void Transaction::splice_text(const ObjId& obj, std::size_t pos, std::size_t del
             .value = Value{ScalarValue{Null{}}},
             .pred = std::move(pred),
         };
-        state_.op_log.push_back(op);
         pending_ops_.push_back(std::move(op));
     }
 
@@ -172,24 +167,23 @@ void Transaction::splice_text(const ObjId& obj, std::size_t pos, std::size_t del
             .pred = {},
             .insert_after = insert_after,
         };
-        state_.op_log.push_back(op);
         pending_ops_.push_back(std::move(op));
     }
 }
 
 void Transaction::increment(const ObjId& obj, std::string_view key, std::int64_t delta) {
-    auto pred = state_.map_pred(obj, std::string{key});
+    auto key_str = std::string{key};
+    auto pred = state_.map_pred(obj, key_str);
     auto op_id = state_.next_op_id();
-    state_.counter_increment(obj, std::string{key}, delta);
+    state_.counter_increment(obj, key_str, delta);
     auto op = Op{
         .id = op_id,
         .obj = obj,
-        .key = map_key(std::string{key}),
+        .key = map_key(std::move(key_str)),
         .action = OpType::increment,
         .value = Value{ScalarValue{Counter{delta}}},
         .pred = std::move(pred),
     };
-    state_.op_log.push_back(op);
     pending_ops_.push_back(std::move(op));
 }
 
@@ -201,18 +195,18 @@ void Transaction::mark(const ObjId& obj, std::size_t start, std::size_t end,
     auto end_elem = state_.list_element_id_at(obj, end > 0 ? end - 1 : 0);
     assert(end_elem);
 
+    auto name_str = std::string{name};
     auto op_id = state_.next_op_id();
     state_.mark_range(obj, op_id, *start_elem, *end_elem,
-                      std::string{name}, value);
+                      name_str, value);
     auto op = Op{
         .id = op_id,
         .obj = obj,
-        .key = map_key(std::string{name}),
+        .key = map_key(std::move(name_str)),
         .action = OpType::mark,
         .value = Value{value},
         .pred = {*start_elem, *end_elem},
     };
-    state_.op_log.push_back(op);
     pending_ops_.push_back(std::move(op));
 }
 

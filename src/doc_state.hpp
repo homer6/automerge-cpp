@@ -17,6 +17,7 @@
 #include <ranges>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -57,8 +58,7 @@ struct ObjectState {
 struct DocState {
     ActorId actor;
     std::uint64_t next_counter = 1;
-    std::map<ObjId, ObjectState> objects;
-    std::vector<Op> op_log;
+    std::unordered_map<ObjId, ObjectState> objects;
 
     // Change tracking (Phase 3)
     std::vector<Change> change_history;
