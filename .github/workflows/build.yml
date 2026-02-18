@@ -1,0 +1,60 @@
+name: Build
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux (GCC)
+            os: ubuntu-latest
+            cmake_args: -DCMAKE_BUILD_TYPE=Release
+
+          - name: Linux (Clang)
+            os: ubuntu-latest
+            cmake_args: -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+
+          - name: macOS
+            os: macos-latest
+            cmake_args: -DCMAKE_BUILD_TYPE=Release
+
+          - name: Windows (MSVC)
+            os: windows-latest
+            cmake_args: ""
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Configure CMake
+      run: cmake -B build ${{ matrix.cmake_args }} -DAUTOMERGE_CPP_BUILD_TESTS=ON -DAUTOMERGE_CPP_BUILD_EXAMPLES=ON -DAUTOMERGE_CPP_BUILD_BENCHMARKS=ON
+
+    - name: Build
+      run: cmake --build build --config Release
+
+    - name: Test
+      run: ctest --test-dir build -C Release --output-on-failure
+
+  bsd:
+    name: FreeBSD
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Build and test on FreeBSD
+      uses: vmactions/freebsd-vm@v1
+      with:
+        usesh: true
+        prepare: |
+          pkg install -y cmake git
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DAUTOMERGE_CPP_BUILD_TESTS=ON -DAUTOMERGE_CPP_BUILD_EXAMPLES=ON -DAUTOMERGE_CPP_BUILD_BENCHMARKS=ON
+          cmake --build build --config Release
+          ctest --test-dir build -C Release --output-on-failure

@@ -5,7 +5,7 @@
 
 - [x] Repository setup (git, license, submodule)
 - [x] CMake build system (library, tests, examples, benchmarks)
-- [ ] CI pipeline (GitHub Actions)
+- [x] CI pipeline (GitHub Actions — Linux GCC/Clang, macOS, Windows MSVC, FreeBSD)
 - [x] CLAUDE.md and README.md
 - [x] Architecture plan (this document)
 - [x] Style guide (docs/style.md)

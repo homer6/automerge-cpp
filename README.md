@@ -1,5 +1,7 @@
 # automerge-cpp
 
+![Build](https://github.com/homer6/automerge-cpp/actions/workflows/build.yml/badge.svg)
+
 A modern C++23 implementation of [Automerge](https://automerge.org/) — a conflict-free
 replicated data type (CRDT) library for building collaborative applications.
 
