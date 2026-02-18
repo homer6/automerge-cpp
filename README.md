@@ -77,10 +77,11 @@ int main() {
 - **SHA-256 checksums**: chunk envelope with SHA-256 integrity validation
 - **Backward compatibility**: v1 format loading with automatic format detection
 
-### Planned
+- **Fuzz testing**: libFuzzer targets for `Document::load()`, LEB128 decode, and change chunk parsing
+- **Static analysis**: clang-tidy CI with `bugprone-*`, `performance-*`, and `clang-analyzer-*` checks
+- **Sanitizer CI**: Address Sanitizer + Undefined Behavior Sanitizer on all tests
 
-- Fuzz testing (libFuzzer targets for deserialization paths)
-- Doxygen API documentation
+- **Doxygen documentation**: auto-generated API docs with GitHub Pages deployment
 
 ## Performance
 
@@ -88,14 +89,13 @@ Release-build highlights (Apple M3 Max):
 
 | Operation | Throughput |
 |-----------|------------|
-| Map put | 3.3 M ops/s |
-| Map get | 29.3 M ops/s |
+| Map put (batched) | 3.4 M ops/s |
+| Map get | 28.5 M ops/s |
 | List get | 4.5 M ops/s |
-| Save (100 keys) | 237.7 K ops/s |
-| Load (100 keys) | 53.7 K ops/s |
-| Merge (10+10 puts) | 305.8 K ops/s |
-| Cursor resolve | 6.1 M ops/s |
-| Time travel get_at | 1.3 M ops/s |
+| Fork | 125.6 K ops/s |
+| Merge (10+10 puts) | 248.7 K ops/s |
+| Cursor resolve | 6.0 M ops/s |
+| Time travel text_at | 463.3 K ops/s |
 
 See [docs/benchmark-results.md](docs/benchmark-results.md) for full results.
 
