@@ -17,6 +17,9 @@ option(AUTOMERGE_CPP_BUILD_TESTS "Build unit tests" OFF)
 option(AUTOMERGE_CPP_BUILD_EXAMPLES "Build example programs" OFF)
 option(AUTOMERGE_CPP_BUILD_BENCHMARKS "Build benchmarks" OFF)
 
+# Dependencies
+find_package(ZLIB REQUIRED)
+
 # Library
 add_library(automerge-cpp)
 add_library(automerge-cpp::automerge-cpp ALIAS automerge-cpp)
@@ -33,6 +36,8 @@ target_sources(automerge-cpp PRIVATE
     src/document.cpp
     src/transaction.cpp
 )
+
+target_link_libraries(automerge-cpp PRIVATE ZLIB::ZLIB)
 
 # Subdirectories
 if(AUTOMERGE_CPP_BUILD_TESTS)

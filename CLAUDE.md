@@ -27,14 +27,27 @@ automerge-cpp/
 │   ├── doc_state.hpp                       #   internal: DocState, ObjectState, MapEntry, ListElement, MarkEntry
 │   ├── document.cpp                        #   Document methods (core, save/load, sync, patches, time travel, cursors, marks)
 │   ├── transaction.cpp                     #   Transaction methods
-│   ├── encoding/                           #   LEB128 variable-length integer codec
-│   │   └── leb128.hpp
+│   ├── crypto/                             #   Cryptographic primitives
+│   │   └── sha256.hpp                      #     vendored header-only SHA-256
+│   ├── encoding/                           #   Columnar format codecs
+│   │   ├── leb128.hpp                      #     LEB128 variable-length integer codec
+│   │   ├── rle.hpp                         #     RLE encoder/decoder (runs, literals, nulls)
+│   │   ├── boolean_encoder.hpp             #     boolean encoder/decoder (alternating run-length)
+│   │   └── delta_encoder.hpp               #     delta encoder/decoder (RLE on consecutive deltas)
 │   ├── storage/                            #   Binary serialization
-│   │   ├── serializer.hpp                  #     byte stream writer
-│   │   └── deserializer.hpp                #     byte stream reader
+│   │   ├── serializer.hpp                  #     byte stream writer (v1 format)
+│   │   ├── deserializer.hpp                #     byte stream reader (v1 format)
+│   │   ├── chunk.hpp                       #     chunk envelope (magic + SHA-256 checksum + type + length)
+│   │   ├── change_chunk.hpp                #     change body serialization/deserialization
+│   │   └── columns/                        #     columnar encoding
+│   │       ├── column_spec.hpp             #       column type enum and spec bitfield
+│   │       ├── raw_column.hpp              #       raw column parse/write
+│   │       ├── compression.hpp             #       raw DEFLATE compress/decompress via zlib (no header, windowBits=-15)
+│   │       ├── value_encoding.hpp          #       value metadata encoding (type tag + length)
+│   │       └── change_op_columns.hpp       #       op column encoding/decoding (14 parallel columns)
 │   └── sync/                               #   Sync protocol internals
 │       └── bloom_filter.hpp                #     bloom filter (10 bits/entry, 7 probes)
-├── tests/                                  # TESTS (Google Test) — 207 tests
+├── tests/                                  # TESTS (Google Test) — 274 tests
 │   ├── CMakeLists.txt
 │   ├── error_test.cpp
 │   ├── types_test.cpp
@@ -42,7 +55,13 @@ automerge-cpp/
 │   ├── op_test.cpp
 │   ├── change_test.cpp
 │   ├── document_test.cpp                   #   core, merge, serialization, sync, patches, time travel, cursors, marks
-│   └── leb128_test.cpp
+│   ├── leb128_test.cpp
+│   ├── rle_test.cpp                        #   RLE encoder/decoder round-trips
+│   ├── delta_encoder_test.cpp              #   delta encoder/decoder round-trips
+│   ├── sha256_test.cpp                     #   SHA-256 NIST test vectors
+│   ├── column_spec_test.cpp                #   column spec encoding/decoding
+│   ├── chunk_test.cpp                      #   chunk envelope round-trips, checksum validation
+│   └── change_op_columns_test.cpp          #   op column encoding/decoding, all op types
 ├── examples/                               # EXAMPLES
 │   ├── CMakeLists.txt
 │   └── basic_usage.cpp
@@ -54,7 +73,8 @@ automerge-cpp/
 │   ├── style.md                            #   coding style guide (Ben Deane)
 │   └── plans/
 │       ├── architecture.md                 #   design & module decomposition
-│       └── roadmap.md                      #   phased implementation plan (Phases 0-6 complete)
+│       ├── roadmap.md                      #   phased implementation plan (Phases 0-8 complete)
+│       └── phase8-10-plan.md               #   Phase 8-10 detailed plan
 ├── .github/workflows/                      # CI
 │   ├── linux.yml                           #   GCC + Clang
 │   ├── macos.yml                           #   Apple Clang
@@ -84,6 +104,16 @@ ctest --test-dir build --output-on-failure
 # Run benchmarks
 ./build/benchmarks/automerge_cpp_benchmarks
 ```
+
+## Development Workflow
+
+**Always pass all tests before committing.** No exceptions. Run:
+
+```bash
+cmake --build build && ctest --test-dir build --output-on-failure
+```
+
+before every `git commit`. If tests fail, fix them first.
 
 ## Code Style
 
@@ -136,7 +166,9 @@ See [docs/plans/architecture.md](docs/plans/architecture.md) for the full design
 | `DocState` (internal) | Object store, op log, change history, RGA merge, time travel |
 | `SyncState` | Per-peer synchronization state machine |
 | `BloomFilter` (internal) | Probabilistic set for sync protocol change discovery |
-| `storage/` (internal) | Binary serialization/deserialization (LEB128-based) |
+| `storage/` (internal) | Columnar binary format (chunk envelope, op columns, raw DEFLATE compression) |
+| `crypto/` (internal) | SHA-256 for change hashes and chunk checksums |
+| `encoding/` (internal) | Codecs: LEB128, RLE, delta, boolean encoders |
 | `Patch` | Incremental change notifications from transactions |
 | `Cursor` | Stable position tracking in lists/text |
 | `Mark` | Rich text range annotations (bold, italic, links) |
@@ -152,7 +184,7 @@ See [docs/plans/architecture.md](docs/plans/architecture.md) for the full design
 
 ## Testing
 
-207 tests across 7 test files. Uses Google Test (fetched via CMake FetchContent).
+274 tests across 13 test files. Uses Google Test (fetched via CMake FetchContent).
 
 | Test File | Count | Covers |
 |-----------|-------|--------|
@@ -163,6 +195,12 @@ See [docs/plans/architecture.md](docs/plans/architecture.md) for the full design
 | `change_test.cpp` | 4 | Change |
 | `document_test.cpp` | 137 | Document core, merge, serialization, sync, patches, time travel, cursors, marks |
 | `leb128_test.cpp` | 22 | LEB128 encode/decode |
+| `rle_test.cpp` | 10 | RLE encoder/decoder round-trips |
+| `delta_encoder_test.cpp` | 11 | Delta encoder/decoder round-trips |
+| `sha256_test.cpp` | 7 | SHA-256 NIST test vectors |
+| `column_spec_test.cpp` | 8 | Column spec encoding/decoding |
+| `chunk_test.cpp` | 10 | Chunk envelope, checksum validation |
+| `change_op_columns_test.cpp` | 21 | Op column encode/decode, all op types including marks |
 
 - **Property tests**: verify CRDT algebraic properties (commutativity, associativity, idempotency)
 - **Naming**: `TEST(ModuleName, descriptive_behavior_name)`
@@ -214,7 +252,7 @@ See [docs/benchmark-results.md](docs/benchmark-results.md) for full results.
 | Benchmark Results | [docs/benchmark-results.md](docs/benchmark-results.md) | Performance measurements |
 | Style Guide | [docs/style.md](docs/style.md) | Coding conventions (Ben Deane principles) |
 | Architecture | [docs/plans/architecture.md](docs/plans/architecture.md) | Design, types, modules, data model |
-| Roadmap | [docs/plans/roadmap.md](docs/plans/roadmap.md) | Phased implementation plan (Phases 0-7 complete) |
+| Roadmap | [docs/plans/roadmap.md](docs/plans/roadmap.md) | Phased implementation plan (Phases 0-8 complete) |
 
 ## Dependencies
 
@@ -222,7 +260,7 @@ See [docs/benchmark-results.md](docs/benchmark-results.md) for full results.
 - **Test**: Google Test (fetched via CMake FetchContent)
 - **Bench**: Google Benchmark (fetched via CMake FetchContent)
 - **Crypto**: SHA-256 (vendored or system)
-- **Compression**: zlib / libdeflate
+- **Compression**: zlib (raw DEFLATE, no header)
 
 ## Upstream Reference
 

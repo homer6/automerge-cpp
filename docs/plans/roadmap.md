@@ -262,8 +262,8 @@
 - [x] Example programs: `basic_usage`, `collaborative_todo`, `text_editor`, `sync_demo`
 - [x] Benchmark results documented in [docs/benchmark-results.md](../benchmark-results.md)
 - [x] README.md and CLAUDE.md updated with current project state
-- [ ] Fuzz testing harness (deferred)
-- [ ] Doxygen API docs (deferred — api.md covers all public types)
+- [ ] Fuzz testing harness (deferred to Phase 9)
+- [ ] Doxygen API docs (deferred to Phase 10)
 
 ### Benchmark Results (Release, Apple M3 Max)
 
@@ -288,3 +288,41 @@ See [docs/benchmark-results.md](../benchmark-results.md) for full results.
 | `collaborative_todo` | Two actors concurrently editing a shared todo list |
 | `text_editor` | Text editing with patches, cursors, and time travel |
 | `sync_demo` | Peer-to-peer sync with SyncState |
+
+---
+
+## Phase 8: Upstream Binary Format Interoperability
+**Status**: Complete — 274 tests passing (207 Phase 1-7 + 67 Phase 8)
+
+### Deliverables
+- [x] `crypto/sha256.hpp` — vendored header-only SHA-256 (FIPS 180-4)
+- [x] `encoding/rle.hpp` — `RleEncoder<T>` / `RleDecoder<T>` (runs, literals, null runs)
+- [x] `encoding/boolean_encoder.hpp` — `BooleanEncoder` / `BooleanDecoder` (alternating run-length)
+- [x] `encoding/delta_encoder.hpp` — `DeltaEncoder` / `DeltaDecoder` (RLE on deltas)
+- [x] `storage/columns/column_spec.hpp` — `ColumnType` enum, `ColumnSpec` bitfield `(id << 4) | (deflate << 3) | type`
+- [x] `storage/columns/raw_column.hpp` — `RawColumn` struct, column header parse/write
+- [x] `storage/columns/compression.hpp` — DEFLATE compress/decompress via zlib (threshold 256 bytes)
+- [x] `storage/chunk.hpp` — chunk envelope: magic + SHA-256[:4] checksum + type + LEB128(length)
+- [x] `storage/columns/value_encoding.hpp` — value metadata `(byte_length << 4) | type_tag` as ULEB128
+- [x] `storage/columns/change_op_columns.hpp` — 14-column op encoding/decoding
+- [x] `storage/change_chunk.hpp` — change body serialization/deserialization
+- [x] `Document::save()` rewritten to produce v2 chunk-based format
+- [x] `Document::load()` supports both v2 (chunk-based) and v1 (row-based) with auto-detection
+- [x] `doc_state.hpp` — change hash migrated from FNV-1a to SHA-256
+
+### Design Decisions (implemented)
+- Value metadata places type tag in low 4 bits, byte length in upper bits (supports arbitrary value sizes)
+- ObjType encoded as uint in value columns to preserve map/table and list/text distinction
+- Format detection: try v2 first, fall back to v1 (backward compatible)
+- Column layout: OBJ(0), KEY(1), INSERT(3), ACTION(4), VAL(5), PRED(7), EXPAND(9), MARK_NAME(10)
+- Action codes: make_map/table=0, put=1, make_list/text=2, del=3, increment=4, mark=5
+- Raw DEFLATE compression (no zlib/gzip header, `windowBits=-15`) applied per-column when data exceeds 256 bytes, matching upstream Rust format
+- v1 heads recomputation tracks last hash per actor to preserve concurrent heads from merged documents
+
+### Tests (67 new)
+- [x] RLE: empty, single value, runs, literal runs, null runs, mixed, string values (10 tests)
+- [x] Delta: monotonic, negative deltas, nulls, large sequences (11 tests)
+- [x] SHA-256: NIST vectors (empty, "abc", long input), round-trip (7 tests)
+- [x] Column spec: encoding/decoding, well-known specs, ordering (8 tests)
+- [x] Chunk: header round-trip, checksum validation, tampered data, type encoding (10 tests)
+- [x] Op columns: all op types (put, delete, insert, make_object, increment, mark), multi-actor, nested objects, mixed ops (21 tests)
