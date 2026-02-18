@@ -36,3 +36,45 @@ jobs:
 
     - name: Test
       run: ctest --test-dir build -C Release --output-on-failure
+
+  sanitizers:
+    name: ASan + UBSan
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Configure
+      run: >
+        cmake -B build -DCMAKE_BUILD_TYPE=Debug
+        -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+        -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
+        -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+        -DAUTOMERGE_CPP_BUILD_TESTS=ON
+
+    - name: Build
+      run: cmake --build build
+
+    - name: Test
+      run: ctest --test-dir build --output-on-failure
+
+  clang-tidy:
+    name: clang-tidy
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Configure
+      run: >
+        cmake -B build
+        -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+        -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+        -DAUTOMERGE_CPP_BUILD_TESTS=OFF
+
+    - name: Run clang-tidy
+      run: >
+        find src include -name '*.cpp' -o -name '*.hpp' |
+        xargs clang-tidy -p build --warnings-as-errors='*'

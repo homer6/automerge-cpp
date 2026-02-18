@@ -56,5 +56,8 @@ CMakeUserPresets.json
 .cache/
 compile_commands.json
 
+# Fuzz testing artifacts
+fuzz/corpus/*.bin
+
 # macOS
 .DS_Store

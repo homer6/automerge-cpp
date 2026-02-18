@@ -326,3 +326,27 @@ See [docs/benchmark-results.md](../benchmark-results.md) for full results.
 - [x] Column spec: encoding/decoding, well-known specs, ordering (8 tests)
 - [x] Chunk: header round-trip, checksum validation, tampered data, type encoding (10 tests)
 - [x] Op columns: all op types (put, delete, insert, make_object, increment, mark), multi-actor, nested objects, mixed ops (21 tests)
+
+---
+
+## Phase 9: Fuzz Testing, ASan/UBSan, clang-tidy
+**Status**: Complete — 274 tests passing, 3 fuzz targets, 2 new CI jobs
+
+### Deliverables
+- [x] `fuzz/fuzz_load.cpp` — libFuzzer target for `Document::load()` + save round-trip
+- [x] `fuzz/fuzz_leb128.cpp` — libFuzzer target for LEB128 decode edge cases
+- [x] `fuzz/fuzz_change_chunk.cpp` — libFuzzer target for columnar change chunk parsing
+- [x] `fuzz/CMakeLists.txt` — libFuzzer build config with ASan+UBSan
+- [x] `fuzz/generate_seeds.cpp` — helper to generate valid seed corpus files
+- [x] `fuzz/corpus/` — seed corpus with 8 upstream crasher files + generated valid documents
+- [x] `AUTOMERGE_CPP_BUILD_FUZZ` CMake option
+- [x] ASan + UBSan CI job in linux.yml (Clang, Debug, all 274 tests)
+- [x] `.clang-tidy` — project-wide static analysis configuration
+- [x] clang-tidy CI job in linux.yml
+
+### Design Decisions
+- Fuzz targets require Clang (libFuzzer); CMake gracefully skips on other compilers
+- Seed corpus includes 8 upstream Rust crasher files for cross-implementation coverage
+- ASan+UBSan runs in Debug mode (unoptimized) for maximum sensitivity
+- clang-tidy checks are conservative: bugprone-*, clang-analyzer-*, performance-*, select modernize/readability
+- WarningsAsErrors empty in .clang-tidy (local dev sees warnings); CI uses --warnings-as-errors='*'

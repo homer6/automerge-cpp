@@ -68,15 +68,23 @@ automerge-cpp/
 ├── benchmarks/                             # BENCHMARKS (Google Benchmark)
 │   ├── CMakeLists.txt
 │   └── placeholder_benchmark.cpp
+├── fuzz/                                   # FUZZ TESTING (libFuzzer)
+│   ├── CMakeLists.txt                      #   libFuzzer build config
+│   ├── fuzz_load.cpp                       #   fuzz Document::load() + save round-trip
+│   ├── fuzz_leb128.cpp                     #   fuzz LEB128 decode
+│   ├── fuzz_change_chunk.cpp               #   fuzz change chunk parsing
+│   ├── generate_seeds.cpp                  #   helper to generate seed corpus
+│   └── corpus/                             #   seed corpus (upstream crashers + valid docs)
 ├── docs/                                   # DOCUMENTATION
 │   ├── api.md                              #   API reference
 │   ├── style.md                            #   coding style guide (Ben Deane)
 │   └── plans/
 │       ├── architecture.md                 #   design & module decomposition
-│       ├── roadmap.md                      #   phased implementation plan (Phases 0-8 complete)
+│       ├── roadmap.md                      #   phased implementation plan (Phases 0-9 complete)
 │       └── phase8-10-plan.md               #   Phase 8-10 detailed plan
+├── .clang-tidy                             # clang-tidy configuration
 ├── .github/workflows/                      # CI
-│   ├── linux.yml                           #   GCC + Clang
+│   ├── linux.yml                           #   GCC + Clang + ASan/UBSan + clang-tidy
 │   ├── macos.yml                           #   Apple Clang
 │   ├── windows.yml                         #   MSVC
 │   └── freebsd.yml                         #   Clang (VM)
@@ -103,6 +111,26 @@ ctest --test-dir build --output-on-failure
 
 # Run benchmarks
 ./build/benchmarks/automerge_cpp_benchmarks
+
+# Build fuzz targets (requires Clang)
+cmake -B build-fuzz -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+    -DAUTOMERGE_CPP_BUILD_FUZZ=ON
+cmake --build build-fuzz
+
+# Run a fuzz target (60 seconds)
+./build-fuzz/fuzz/fuzz_load fuzz/corpus/ -max_total_time=60
+
+# Build with ASan + UBSan
+cmake -B build-asan -DCMAKE_BUILD_TYPE=Debug \
+    -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+    -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
+    -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined" \
+    -DAUTOMERGE_CPP_BUILD_TESTS=ON
+cmake --build build-asan && ctest --test-dir build-asan --output-on-failure
+
+# Run clang-tidy
+cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+clang-tidy -p build src/document.cpp src/transaction.cpp
 ```
 
 ## Development Workflow
@@ -252,7 +280,7 @@ See [docs/benchmark-results.md](docs/benchmark-results.md) for full results.
 | Benchmark Results | [docs/benchmark-results.md](docs/benchmark-results.md) | Performance measurements |
 | Style Guide | [docs/style.md](docs/style.md) | Coding conventions (Ben Deane principles) |
 | Architecture | [docs/plans/architecture.md](docs/plans/architecture.md) | Design, types, modules, data model |
-| Roadmap | [docs/plans/roadmap.md](docs/plans/roadmap.md) | Phased implementation plan (Phases 0-8 complete) |
+| Roadmap | [docs/plans/roadmap.md](docs/plans/roadmap.md) | Phased implementation plan (Phases 0-9 complete) |
 
 ## Dependencies
 
