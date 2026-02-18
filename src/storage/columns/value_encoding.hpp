@@ -3,7 +3,7 @@
 // Value metadata encoding for the Automerge columnar format.
 //
 // Each value is encoded as a (type_tag, raw_bytes) pair across two columns:
-//   value_meta: ULEB128 encoded as (type_tag << 4) | byte_length
+//   value_meta: ULEB128 encoded as (byte_length << 4) | type_tag
 //   value_raw:  the raw bytes of the value
 //
 // Type tags (upstream compatible):
@@ -15,6 +15,7 @@
 #include <automerge-cpp/value.hpp>
 #include "../../encoding/leb128.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -87,8 +88,9 @@ inline void encode_scalar_value(const ScalarValue& sv,
         else return ValueTag::null_tag;
     }, sv);
 
-    // Encode meta: (tag << 4) | raw_length
-    auto meta_val = (static_cast<std::uint64_t>(tag) << 4) | raw_len;
+    // Encode meta: (raw_length << 4) | tag
+    // Tag occupies the low 4 bits; length occupies the remaining bits.
+    auto meta_val = (raw_len << 4) | static_cast<std::uint64_t>(tag);
     encoding::encode_uleb128(meta_val, meta_out);
 }
 
@@ -106,7 +108,7 @@ inline void encode_value(const Value& val,
         auto raw_start = raw_out.size();
         encoding::encode_uleb128(static_cast<std::uint64_t>(ot), raw_out);
         auto raw_len = raw_out.size() - raw_start;
-        auto meta_val = (static_cast<std::uint64_t>(ValueTag::uint_tag) << 4) | raw_len;
+        auto meta_val = (raw_len << 4) | static_cast<std::uint64_t>(ValueTag::uint_tag);
         encoding::encode_uleb128(meta_val, meta_out);
     }
 }
@@ -121,8 +123,8 @@ inline auto decode_value_from_columns(
     if (!meta_result) return std::nullopt;
     meta_pos += meta_result->bytes_read;
 
-    auto tag = static_cast<ValueTag>(meta_result->value >> 4);
-    auto raw_len = static_cast<std::size_t>(meta_result->value & 0x0F);
+    auto tag = static_cast<ValueTag>(meta_result->value & 0x0F);
+    auto raw_len = static_cast<std::size_t>(meta_result->value >> 4);
 
     if (raw_pos + raw_len > raw_data.size()) return std::nullopt;
 

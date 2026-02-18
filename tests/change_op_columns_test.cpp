@@ -367,6 +367,107 @@ TEST(ChangeOpColumns, nested_object_ops) {
     EXPECT_FALSE((*decoded)[1].obj.is_root());
 }
 
+TEST(ChangeOpColumns, mark_op_round_trip) {
+    auto actor = make_actor(1);
+    auto actor_table = std::vector<ActorId>{actor};
+
+    // Single mark op first to isolate
+    auto ops = std::vector<Op>{
+        Op{
+            .id = OpId{10, actor},
+            .obj = ObjId{OpId{1, actor}},
+            .key = map_key("bold"),
+            .action = OpType::mark,
+            .value = Value{ScalarValue{true}},
+            .pred = {OpId{2, actor}, OpId{6, actor}},
+        },
+    };
+
+    auto columns = encode_change_ops(ops, actor_table);
+    ASSERT_FALSE(columns.empty()) << "encode produced no columns";
+
+    auto decoded = decode_change_ops(columns, actor_table, actor, 10, 1);
+    ASSERT_TRUE(decoded.has_value()) << "decode returned nullopt";
+    ASSERT_EQ(decoded->size(), 1u);
+
+    auto& d = (*decoded)[0];
+    EXPECT_EQ(d.action, OpType::mark);
+
+    // Check key is a string
+    auto* ks = std::get_if<std::string>(&d.key);
+    ASSERT_NE(ks, nullptr) << "key is not a string";
+    EXPECT_EQ(*ks, "bold");
+
+    // Check value is ScalarValue
+    auto* sv = std::get_if<ScalarValue>(&d.value);
+    ASSERT_NE(sv, nullptr) << "value is not ScalarValue, it is ObjType";
+    EXPECT_TRUE(std::holds_alternative<bool>(*sv)) << "value is not bool";
+
+    // Check pred
+    EXPECT_EQ(d.pred.size(), 2u);
+    if (d.pred.size() >= 2) {
+        EXPECT_EQ(d.pred[0].counter, 2u);
+        EXPECT_EQ(d.pred[1].counter, 6u);
+    }
+}
+
+TEST(ChangeOpColumns, mixed_insert_and_mark_ops) {
+    auto actor = make_actor(1);
+    auto actor_table = std::vector<ActorId>{actor};
+
+    // Simulate: put_object(text) + splice_text("Hi") + mark("bold", true)
+    auto ops = std::vector<Op>{
+        Op{
+            .id = OpId{1, actor},
+            .obj = root,
+            .key = map_key("content"),
+            .action = OpType::make_object,
+            .value = Value{ObjType::text},
+            .pred = {},
+        },
+        Op{
+            .id = OpId{2, actor},
+            .obj = ObjId{OpId{1, actor}},
+            .key = Prop{std::size_t{0}},
+            .action = OpType::splice_text,
+            .value = Value{ScalarValue{std::string{"H"}}},
+            .pred = {},
+        },
+        Op{
+            .id = OpId{3, actor},
+            .obj = ObjId{OpId{1, actor}},
+            .key = Prop{std::size_t{0}},
+            .action = OpType::splice_text,
+            .value = Value{ScalarValue{std::string{"i"}}},
+            .pred = {},
+            .insert_after = OpId{2, actor},
+        },
+        Op{
+            .id = OpId{4, actor},
+            .obj = ObjId{OpId{1, actor}},
+            .key = map_key("bold"),
+            .action = OpType::mark,
+            .value = Value{ScalarValue{true}},
+            .pred = {OpId{2, actor}, OpId{3, actor}},
+        },
+    };
+
+    auto columns = encode_change_ops(ops, actor_table);
+    auto decoded = decode_change_ops(columns, actor_table, actor, 1, 4);
+    ASSERT_TRUE(decoded.has_value()) << "decode returned nullopt";
+    ASSERT_EQ(decoded->size(), 4u);
+
+    EXPECT_EQ((*decoded)[0].action, OpType::make_object);
+    EXPECT_EQ((*decoded)[1].action, OpType::splice_text);
+    EXPECT_EQ((*decoded)[2].action, OpType::splice_text);
+    EXPECT_EQ((*decoded)[3].action, OpType::mark);
+
+    // Check mark value
+    auto* sv = std::get_if<ScalarValue>(&(*decoded)[3].value);
+    ASSERT_NE(sv, nullptr) << "mark value not ScalarValue";
+    EXPECT_TRUE(std::holds_alternative<bool>(*sv));
+}
+
 TEST(ChangeOpColumns, increment_op_round_trip) {
     auto actor = make_actor(1);
     auto actor_table = std::vector<ActorId>{actor};
