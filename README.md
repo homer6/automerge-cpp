@@ -76,7 +76,23 @@ int main() {
 - Rich text marks (bold, italic, etc.)
 - Upstream Rust binary format interoperability
 - Columnar encoding and DEFLATE compression
-- Performance optimization and benchmarking
+
+## Performance
+
+Release-build highlights (Apple M3 Max):
+
+| Operation | Throughput |
+|-----------|------------|
+| Map put | 3.3 M ops/s |
+| Map get | 29.3 M ops/s |
+| List get | 4.5 M ops/s |
+| Save (100 keys) | 237.7 K ops/s |
+| Load (100 keys) | 53.7 K ops/s |
+| Merge (10+10 puts) | 305.8 K ops/s |
+| Cursor resolve | 6.1 M ops/s |
+| Time travel get_at | 1.3 M ops/s |
+
+See [docs/benchmark-results.md](docs/benchmark-results.md) for full results.
 
 ## Design Philosophy
 
@@ -154,9 +170,28 @@ automerge-cpp/
   upstream/automerge/         # upstream Rust reference (git submodule)
 ```
 
+## Examples
+
+Four example programs in `examples/`:
+
+| Example | Description |
+|---------|-------------|
+| `basic_usage` | Create doc, put/get values, counters, save/load |
+| `collaborative_todo` | Two actors concurrently editing a shared todo list |
+| `text_editor` | Text editing with patches, cursors, and time travel |
+| `sync_demo` | Peer-to-peer sync with SyncState |
+
+```bash
+./build/examples/basic_usage
+./build/examples/collaborative_todo
+./build/examples/text_editor
+./build/examples/sync_demo
+```
+
 ## Documentation
 
 - [API Reference](docs/api.md) — every public type, method, and usage examples
+- [Benchmark Results](docs/benchmark-results.md) — performance measurements
 - [Style Guide](docs/style.md) — coding style and conventions (Ben Deane's modern C++ principles)
 - [Architecture Plan](docs/plans/architecture.md) — design principles, core types, module layout
 - [Implementation Roadmap](docs/plans/roadmap.md) — phased development plan with status

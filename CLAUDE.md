@@ -176,14 +176,42 @@ TEST(Document, put_and_get_round_trips) {
 }
 ```
 
+## Examples
+
+Four example programs in `examples/`:
+
+| Example | Description |
+|---------|-------------|
+| `basic_usage` | Create doc, put/get values, counters, save/load |
+| `collaborative_todo` | Two actors concurrently editing a shared todo list |
+| `text_editor` | Text editing with patches, cursors, and time travel |
+| `sync_demo` | Peer-to-peer sync with SyncState |
+
+## Benchmarks
+
+26 benchmarks in `benchmarks/placeholder_benchmark.cpp` using Google Benchmark.
+Run with: `./build-release/benchmarks/automerge_cpp_benchmarks`
+
+Key release-build results (Apple M3 Max):
+
+| Operation | Throughput |
+|-----------|------------|
+| Map put | 3.3 M ops/s |
+| Map get | 29.3 M ops/s |
+| Merge | 305.8 K ops/s |
+| Cursor resolve | 6.1 M ops/s |
+
+See [docs/benchmark-results.md](docs/benchmark-results.md) for full results.
+
 ## Documentation
 
 | Document | Path | Description |
 |----------|------|-------------|
 | API Reference | [docs/api.md](docs/api.md) | Every public type, method, and usage examples |
+| Benchmark Results | [docs/benchmark-results.md](docs/benchmark-results.md) | Performance measurements |
 | Style Guide | [docs/style.md](docs/style.md) | Coding conventions (Ben Deane principles) |
 | Architecture | [docs/plans/architecture.md](docs/plans/architecture.md) | Design, types, modules, data model |
-| Roadmap | [docs/plans/roadmap.md](docs/plans/roadmap.md) | Phased implementation plan (Phases 0-6 complete) |
+| Roadmap | [docs/plans/roadmap.md](docs/plans/roadmap.md) | Phased implementation plan (Phases 0-7 complete) |
 
 ## Dependencies
 
