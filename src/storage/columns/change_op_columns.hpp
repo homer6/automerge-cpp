@@ -283,9 +283,7 @@ inline auto decode_change_ops(const std::vector<RawColumn>& columns,
         auto obj_counter_val = obj_counter_dec.next();
         if (!obj_actor_val || !obj_counter_val) return std::nullopt;
 
-        if (!*obj_actor_val || (*obj_counter_val && **obj_counter_val == 0 && !*obj_actor_val)) {
-            op.obj = ObjId{};  // root
-        } else if (*obj_actor_val && *obj_counter_val) {
+        if (*obj_actor_val && *obj_counter_val) {
             auto actor_idx = **obj_actor_val;
             if (actor_idx >= actor_table.size()) return std::nullopt;
             op.obj = ObjId{OpId{static_cast<std::uint64_t>(**obj_counter_val),

@@ -51,7 +51,7 @@ inline auto deflate_compress(const std::vector<std::byte>& input)
 // Decompress raw DEFLATE data (no zlib/gzip header).
 // max_output_size limits decompressed output to prevent memory bombs.
 inline auto deflate_decompress(const std::vector<std::byte>& input,
-                                std::size_t max_output_size = 64 * 1024 * 1024)
+                                std::size_t max_output_size = std::size_t{64} * 1024 * 1024)
     -> std::optional<std::vector<std::byte>> {
 
     if (input.empty()) return std::vector<std::byte>{};

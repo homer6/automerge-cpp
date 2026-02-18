@@ -47,10 +47,8 @@ inline void encode_scalar_value(const ScalarValue& sv,
 
     std::visit([&](const auto& v) {
         using T = std::decay_t<decltype(v)>;
-        if constexpr (std::is_same_v<T, Null>) {
-            // null: no raw bytes
-        } else if constexpr (std::is_same_v<T, bool>) {
-            // bool: no raw bytes, encoded in tag
+        if constexpr (std::is_same_v<T, Null> || std::is_same_v<T, bool>) {
+            // null and bool: no raw bytes, encoded in tag
         } else if constexpr (std::is_same_v<T, std::uint64_t>) {
             encoding::encode_uleb128(v, raw_out);
         } else if constexpr (std::is_same_v<T, std::int64_t>) {
@@ -85,7 +83,7 @@ inline void encode_scalar_value(const ScalarValue& sv,
         else if constexpr (std::is_same_v<T, Timestamp>)     return ValueTag::timestamp_tag;
         else if constexpr (std::is_same_v<T, std::string>)   return ValueTag::utf8_tag;
         else if constexpr (std::is_same_v<T, Bytes>)         return ValueTag::bytes_tag;
-        else return ValueTag::null_tag;
+        else { static_assert(!sizeof(T), "unhandled ScalarValue type"); }
     }, sv);
 
     // Encode meta: (raw_length << 4) | tag
