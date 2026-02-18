@@ -728,6 +728,116 @@ static void bm_merge_reduce(benchmark::State& state) {
 BENCHMARK(bm_merge_reduce)->Arg(0)->Arg(1);
 
 // =============================================================================
+// Massive put at scale — sequential vs parallel
+//
+// Fixed total keys. Sequential: 1 doc, 1 txn, all keys.
+// Parallel: thread_count independent docs, keys/threads each, concurrent.
+// Pre-generated keys to isolate put throughput from string generation.
+//
+// Args: {0|1, total_keys}
+// =============================================================================
+
+static void bm_put_scale(benchmark::State& state) {
+    const bool parallel = state.range(0) != 0;
+    const auto total_keys = static_cast<int>(state.range(1));
+    const auto nthreads = static_cast<int>(g_pool->get_thread_count());
+
+    // Pre-generate keys (not timed)
+    auto keys = std::vector<std::string>(total_keys);
+    for (int i = 0; i < total_keys; ++i) {
+        keys[i] = "k" + std::to_string(i);
+    }
+
+    for (auto _ : state) {
+        if (!parallel) {
+            auto doc = make_doc();
+            doc.transact([&](auto& tx) {
+                for (int i = 0; i < total_keys; ++i) {
+                    tx.put(root, keys[i], std::int64_t{i});
+                }
+            });
+            benchmark::DoNotOptimize(doc);
+        } else {
+            auto docs = std::vector<Document>(nthreads);
+            auto per_thread = total_keys / nthreads;
+
+            g_pool->parallelize_loop(0, nthreads, [&](int s, int e) {
+                for (int t = s; t < e; ++t) {
+                    docs[t] = make_doc();
+                    auto base = t * per_thread;
+                    auto count = (t == nthreads - 1) ? total_keys - base : per_thread;
+                    docs[t].transact([&keys, base, count](auto& tx) {
+                        for (int i = 0; i < count; ++i) {
+                            tx.put(root, keys[base + i], std::int64_t{base + i});
+                        }
+                    });
+                }
+            });
+            benchmark::DoNotOptimize(docs);
+        }
+    }
+    state.SetItemsProcessed(static_cast<std::int64_t>(state.iterations()) * total_keys);
+    state.SetLabel(parallel ? "parallel" : "sequential");
+}
+BENCHMARK(bm_put_scale)
+    ->Args({0, 100000})->Args({1, 100000})
+    ->Args({0, 500000})->Args({1, 500000})
+    ->Args({0, 1000000})->Args({1, 1000000})
+    ->Unit(benchmark::kMillisecond);
+
+// =============================================================================
+// Massive get at scale — single doc, concurrent readers
+//
+// One doc with N keys. Sequential reads one-by-one.
+// Parallel: parallelize_loop fans out across pool (shared_lock readers).
+// Pre-generated keys to isolate get throughput from string generation.
+//
+// Args: {0|1, total_keys}
+// =============================================================================
+
+static void bm_get_scale(benchmark::State& state) {
+    const bool parallel = state.range(0) != 0;
+    const auto total_keys = static_cast<int>(state.range(1));
+
+    // Pre-generate keys (not timed)
+    auto keys = std::vector<std::string>(total_keys);
+    for (int i = 0; i < total_keys; ++i) {
+        keys[i] = "k" + std::to_string(i);
+    }
+
+    // Build doc with all keys (not timed — setup)
+    auto doc = make_doc();
+    doc.transact([&](auto& tx) {
+        for (int i = 0; i < total_keys; ++i) {
+            tx.put(root, keys[i], std::int64_t{i});
+        }
+    });
+
+    for (auto _ : state) {
+        if (!parallel) {
+            for (int i = 0; i < total_keys; ++i) {
+                auto val = doc.get(root, keys[i]);
+                benchmark::DoNotOptimize(val);
+            }
+        } else {
+            g_pool->parallelize_loop(0, total_keys, [&](int s, int e) {
+                for (int i = s; i < e; ++i) {
+                    auto val = doc.get(root, keys[i]);
+                    benchmark::DoNotOptimize(val);
+                }
+            });
+        }
+    }
+    state.SetItemsProcessed(static_cast<std::int64_t>(state.iterations()) * total_keys);
+    state.SetLabel(parallel ? "parallel" : "sequential");
+}
+BENCHMARK(bm_get_scale)
+    ->Args({0, 100000})->Args({1, 100000})
+    ->Args({0, 500000})->Args({1, 500000})
+    ->Args({0, 1000000})->Args({1, 1000000})
+    ->Unit(benchmark::kMillisecond);
+
+// =============================================================================
 // Document constructor — default (no pool) vs shared pool
 // =============================================================================
 
