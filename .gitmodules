@@ -1,0 +1,3 @@
+[submodule "upstream/automerge"]
+	path = upstream/automerge
+	url = https://github.com/homer6/automerge.git
