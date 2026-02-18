@@ -13,6 +13,7 @@
 #include <map>
 #include <optional>
 #include <ranges>
+#include <set>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -570,6 +571,86 @@ struct DocState {
             }
         }
         return result;
+    }
+
+    // -- Historical reads (Phase 6) ---------------------------------------------
+
+    // Find indices (into change_history) of all changes visible at given heads.
+    auto changes_visible_at(const std::vector<ChangeHash>& target_heads) const
+        -> std::vector<std::size_t> {
+        auto hash_idx = change_hash_index();
+        auto visited = std::set<ChangeHash>{};
+        auto queue = std::vector<ChangeHash>{};
+
+        for (const auto& h : target_heads) {
+            if (hash_idx.contains(h) && visited.insert(h).second) {
+                queue.push_back(h);
+            }
+        }
+
+        while (!queue.empty()) {
+            auto h = queue.back();
+            queue.pop_back();
+            auto it = hash_idx.find(h);
+            if (it == hash_idx.end()) continue;
+            for (const auto& dep : change_history[it->second].deps) {
+                if (visited.insert(dep).second) {
+                    queue.push_back(dep);
+                }
+            }
+        }
+
+        auto indices = std::vector<std::size_t>{};
+        for (const auto& h : visited) {
+            auto it = hash_idx.find(h);
+            if (it != hash_idx.end()) {
+                indices.push_back(it->second);
+            }
+        }
+        std::ranges::sort(indices);
+        return indices;
+    }
+
+    // Rebuild a fresh DocState by replaying only the changes visible at given heads.
+    auto rebuild_state_at(const std::vector<ChangeHash>& target_heads) const -> DocState {
+        auto indices = changes_visible_at(target_heads);
+        auto snapshot = DocState{};
+        snapshot.actor = actor;
+
+        for (auto idx : indices) {
+            for (const auto& op : change_history[idx].operations) {
+                snapshot.apply_op(op);
+            }
+        }
+        return snapshot;
+    }
+
+    // -- Cursor helpers (Phase 6) -----------------------------------------------
+
+    // Get the insert_id of the element at visible index in a list/text.
+    auto list_element_id_at(const ObjId& obj, std::size_t index) const
+        -> std::optional<OpId> {
+        const auto* state = get_object(obj);
+        if (!state) return std::nullopt;
+        auto real_idx = visible_index_to_real(*state, index);
+        if (real_idx >= state->list_elements.size()) return std::nullopt;
+        if (!state->list_elements[real_idx].visible) return std::nullopt;
+        return state->list_elements[real_idx].insert_id;
+    }
+
+    // Find the visible index of an element by its insert_id.
+    auto find_element_visible_index(const ObjId& obj, const OpId& id) const
+        -> std::optional<std::size_t> {
+        const auto* state = get_object(obj);
+        if (!state) return std::nullopt;
+        auto visible_count = std::size_t{0};
+        for (const auto& elem : state->list_elements) {
+            if (elem.insert_id == id) {
+                return elem.visible ? std::optional{visible_count} : std::nullopt;
+            }
+            if (elem.visible) ++visible_count;
+        }
+        return std::nullopt;
     }
 
     // -- Change hash computation (Phase 3 simple hash, SHA-256 in Phase 4) ----

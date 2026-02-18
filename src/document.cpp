@@ -1,4 +1,6 @@
 #include <automerge-cpp/document.hpp>
+#include <automerge-cpp/cursor.hpp>
+#include <automerge-cpp/patch.hpp>
 
 #include "doc_state.hpp"
 #include "storage/serializer.hpp"
@@ -724,6 +726,200 @@ void Document::receive_sync_message(SyncState& sync_state,
     sync_state.their_have_ = message.have;
     sync_state.their_heads_ = message.heads;
     sync_state.their_need_ = message.need;
+}
+
+// -- Phase 6: Patches ---------------------------------------------------------
+
+// Convert a sequence of ops (from a transaction) into patches.
+static auto ops_to_patches(const std::vector<Op>& ops) -> std::vector<Patch> {
+    auto patches = std::vector<Patch>{};
+    std::size_t i = 0;
+
+    while (i < ops.size()) {
+        const auto& op = ops[i];
+
+        // Coalesce list deletes (may be part of splice_text)
+        if (op.action == OpType::del && std::holds_alternative<std::size_t>(op.key)) {
+            auto obj = op.obj;
+            auto index = std::get<std::size_t>(op.key);
+            std::size_t count = 1;
+            while (i + count < ops.size() &&
+                   ops[i + count].action == OpType::del &&
+                   ops[i + count].obj == obj &&
+                   std::holds_alternative<std::size_t>(ops[i + count].key) &&
+                   std::get<std::size_t>(ops[i + count].key) == index) {
+                ++count;
+            }
+
+            // Check if followed by splice_text inserts (= splice_text call)
+            auto splice_start = i + count;
+            if (splice_start < ops.size() &&
+                ops[splice_start].action == OpType::splice_text &&
+                ops[splice_start].obj == obj) {
+                auto text = std::string{};
+                auto j = splice_start;
+                while (j < ops.size() &&
+                       ops[j].action == OpType::splice_text &&
+                       ops[j].obj == obj) {
+                    if (const auto* sv = std::get_if<ScalarValue>(&ops[j].value)) {
+                        if (const auto* s = std::get_if<std::string>(sv)) {
+                            text += *s;
+                        }
+                    }
+                    ++j;
+                }
+                patches.push_back(Patch{
+                    .obj = obj,
+                    .key = list_index(index),
+                    .action = PatchSpliceText{index, count, std::move(text)},
+                });
+                i = j;
+            } else {
+                patches.push_back(Patch{
+                    .obj = obj,
+                    .key = list_index(index),
+                    .action = PatchDelete{index, count},
+                });
+                i += count;
+            }
+            continue;
+        }
+
+        // Coalesce splice_text inserts (insert-only, no preceding deletes)
+        if (op.action == OpType::splice_text) {
+            auto obj = op.obj;
+            auto index = std::get<std::size_t>(op.key);
+            auto text = std::string{};
+            auto j = i;
+            while (j < ops.size() &&
+                   ops[j].action == OpType::splice_text &&
+                   ops[j].obj == obj) {
+                if (const auto* sv = std::get_if<ScalarValue>(&ops[j].value)) {
+                    if (const auto* s = std::get_if<std::string>(sv)) {
+                        text += *s;
+                    }
+                }
+                ++j;
+            }
+            patches.push_back(Patch{
+                .obj = obj,
+                .key = list_index(index),
+                .action = PatchSpliceText{index, 0, std::move(text)},
+            });
+            i = j;
+            continue;
+        }
+
+        // Single-op patches
+        if (op.action == OpType::put || op.action == OpType::make_object) {
+            patches.push_back(Patch{
+                .obj = op.obj,
+                .key = op.key,
+                .action = PatchPut{op.value, false},
+            });
+        } else if (op.action == OpType::insert) {
+            auto index = std::get<std::size_t>(op.key);
+            patches.push_back(Patch{
+                .obj = op.obj,
+                .key = op.key,
+                .action = PatchInsert{index, op.value},
+            });
+        } else if (op.action == OpType::del) {
+            // Map key deletion
+            patches.push_back(Patch{
+                .obj = op.obj,
+                .key = op.key,
+                .action = PatchDelete{0, 1},
+            });
+        } else if (op.action == OpType::increment) {
+            if (const auto* sv = std::get_if<ScalarValue>(&op.value)) {
+                if (const auto* c = std::get_if<Counter>(sv)) {
+                    patches.push_back(Patch{
+                        .obj = op.obj,
+                        .key = op.key,
+                        .action = PatchIncrement{c->value},
+                    });
+                }
+            }
+        }
+        ++i;
+    }
+
+    return patches;
+}
+
+auto Document::transact_with_patches(std::function<void(Transaction&)> fn)
+    -> std::vector<Patch> {
+    auto tx = Transaction{*state_};
+    fn(tx);
+
+    // Capture ops before commit moves them
+    auto ops = tx.pending_ops_;
+    tx.commit();
+
+    return ops_to_patches(ops);
+}
+
+// -- Phase 6: Historical reads ------------------------------------------------
+
+auto Document::get_at(const ObjId& obj, std::string_view key,
+                      const std::vector<ChangeHash>& heads) const -> std::optional<Value> {
+    auto snapshot = state_->rebuild_state_at(heads);
+    return snapshot.map_get(obj, std::string{key});
+}
+
+auto Document::get_at(const ObjId& obj, std::size_t index,
+                      const std::vector<ChangeHash>& heads) const -> std::optional<Value> {
+    auto snapshot = state_->rebuild_state_at(heads);
+    return snapshot.list_get(obj, index);
+}
+
+auto Document::keys_at(const ObjId& obj,
+                       const std::vector<ChangeHash>& heads) const -> std::vector<std::string> {
+    auto snapshot = state_->rebuild_state_at(heads);
+    return snapshot.map_keys(obj);
+}
+
+auto Document::values_at(const ObjId& obj,
+                         const std::vector<ChangeHash>& heads) const -> std::vector<Value> {
+    auto snapshot = state_->rebuild_state_at(heads);
+    auto type = snapshot.object_type(obj);
+    if (!type) return {};
+    switch (*type) {
+        case ObjType::map:
+        case ObjType::table:
+            return snapshot.map_values(obj);
+        case ObjType::list:
+        case ObjType::text:
+            return snapshot.list_values(obj);
+    }
+    return {};
+}
+
+auto Document::length_at(const ObjId& obj,
+                         const std::vector<ChangeHash>& heads) const -> std::size_t {
+    auto snapshot = state_->rebuild_state_at(heads);
+    return snapshot.object_length(obj);
+}
+
+auto Document::text_at(const ObjId& obj,
+                       const std::vector<ChangeHash>& heads) const -> std::string {
+    auto snapshot = state_->rebuild_state_at(heads);
+    return snapshot.text_content(obj);
+}
+
+// -- Phase 6: Cursors ---------------------------------------------------------
+
+auto Document::cursor(const ObjId& obj, std::size_t index) const
+    -> std::optional<Cursor> {
+    auto id = state_->list_element_id_at(obj, index);
+    if (!id) return std::nullopt;
+    return Cursor{*id};
+}
+
+auto Document::resolve_cursor(const ObjId& obj, const Cursor& cur) const
+    -> std::optional<std::size_t> {
+    return state_->find_element_visible_index(obj, cur.position);
 }
 
 }  // namespace automerge_cpp

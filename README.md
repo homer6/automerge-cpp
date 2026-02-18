@@ -10,7 +10,9 @@ replicated data type (CRDT) library for building collaborative applications.
 
 This is a **from-scratch** reimplementation, not a wrapper. It mirrors the upstream
 Automerge semantics while embracing idiomatic C++23: algebraic types, ranges pipelines,
-`std::expected` error handling, and APIs that make illegal states unrepresentable.
+strong types, and APIs that make illegal states unrepresentable.
+
+**195 tests passing** across 6 implementation phases.
 
 ## Quick Example
 
@@ -19,48 +21,62 @@ Automerge semantics while embracing idiomatic C++23: algebraic types, ranges pip
 namespace am = automerge_cpp;
 
 int main() {
-    // Create a document
     auto doc1 = am::Document{};
+    am::ObjId list_id;
 
-    doc1.transact([](auto& tx) {
-        tx.put(am::root, "title", "Shopping List");
-        auto list = tx.put_object(am::root, "items", am::ObjType::list);
-        tx.insert(list, 0, "Milk");
-        tx.insert(list, 1, "Eggs");
+    doc1.transact([&](auto& tx) {
+        tx.put(am::root, "title", std::string{"Shopping List"});
+        list_id = tx.put_object(am::root, "items", am::ObjType::list);
+        tx.insert(list_id, 0, std::string{"Milk"});
+        tx.insert(list_id, 1, std::string{"Eggs"});
     });
 
     // Fork and make concurrent edits
     auto doc2 = doc1.fork();
 
-    doc1.transact([](auto& tx) {
-        tx.insert(/* items list */ am::root, 2, "Bread");
+    doc1.transact([&](auto& tx) {
+        tx.insert(list_id, 2, std::string{"Bread"});
     });
 
-    doc2.transact([](auto& tx) {
-        tx.insert(/* items list */ am::root, 2, "Butter");
+    doc2.transact([&](auto& tx) {
+        tx.insert(list_id, 2, std::string{"Butter"});
     });
 
-    // Merge — both edits are preserved, no data loss
+    // Merge — both edits preserved, no data loss
     doc1.merge(doc2);
+    // list now contains: Milk, Eggs, Bread, Butter (deterministic order)
 
-    // Iterate with ranges
-    for (auto val : doc1.values(/* items list */)) {
-        std::println("{}", val);
-    }
-    // Output: Milk, Eggs, Bread, Butter (order is deterministic)
+    // Save to binary and reload
+    auto bytes = doc1.save();
+    auto loaded = am::Document::load(bytes);
+
+    // Time travel — read past state
+    auto heads_v1 = doc1.get_heads();
+    auto past = doc1.get_at(am::root, "title", heads_v1);
 }
 ```
 
 ## Features
 
-- **CRDT data types**: Map, List, Text, Counter, Table
-- **Conflict-free merging**: concurrent edits merge deterministically
-- **Rich text**: marks/annotations for formatting
-- **Sync protocol**: efficient peer-to-peer synchronization
-- **Time travel**: read document state at any historical point
-- **Binary format**: interoperable with Rust/JS Automerge implementations
-- **Ranges-first API**: all iteration composes with `std::ranges`
-- **Type-safe**: `std::variant`, `std::expected`, strong ID types
+### Implemented
+
+- **CRDT data types**: Map, List, Text, Counter
+- **Conflict-free merging**: concurrent edits merge deterministically (RGA for lists/text)
+- **Fork and merge**: create independent document copies, merge them back
+- **Binary serialization**: `save()` / `load()` with LEB128 variable-length encoding
+- **Sync protocol**: bloom filter-based peer-to-peer synchronization
+- **Patches**: incremental change notifications via `transact_with_patches()`
+- **Time travel**: read document state at any historical point (`get_at()`, `text_at()`, etc.)
+- **Cursors**: stable positions in lists/text that survive edits and merges
+- **Strong types**: `ActorId`, `ObjId`, `ChangeHash`, `OpId` never implicitly convert
+- **Type-safe values**: `std::variant`-based `ScalarValue` and `Value` types
+
+### Planned
+
+- Rich text marks (bold, italic, etc.)
+- Upstream Rust binary format interoperability
+- Columnar encoding and DEFLATE compression
+- Performance optimization and benchmarking
 
 ## Design Philosophy
 
@@ -68,9 +84,8 @@ Inspired by Ben Deane's approach to modern C++:
 
 - **Make illegal states unrepresentable** — algebraic types model the domain precisely
 - **Algorithms over raw loops** — `std::ranges` pipelines, folds, transforms
-- **CRDTs are monoids** — merge is associative with an identity element
+- **CRDTs are monoids** — merge is associative, commutative, and idempotent
 - **Strong types prevent mixups** — `ActorId`, `ObjId`, `ChangeHash` never interconvert
-- **Errors in the type system** — `std::expected` instead of exceptions
 - **Value semantics** — immutable outside transactions, explicit mutation boundaries
 
 ## Building
@@ -111,31 +126,40 @@ ctest --test-dir build --output-on-failure
 ```
 automerge-cpp/
   include/automerge-cpp/     # public headers
-    automerge.hpp             # umbrella header
-    document.hpp              # Document class
-    transaction.hpp           # Transaction class
-    types.hpp                 # ActorId, ObjId, OpId, ChangeHash, Prop
-    value.hpp                 # ScalarValue, Value, ObjType
-    change.hpp                # Change struct
-    op.hpp                    # Op, OpType
-    sync.hpp                  # SyncState
-    error.hpp                 # Error types
-    patch.hpp                 # Incremental change notifications
-    cursor.hpp                # Stable position tracking
-    marks.hpp                 # Rich text marks
+    automerge.hpp             #   umbrella header
+    document.hpp              #   Document class
+    transaction.hpp           #   Transaction class
+    types.hpp                 #   ActorId, ObjId, OpId, ChangeHash, Prop
+    value.hpp                 #   ScalarValue, Value, ObjType
+    change.hpp                #   Change struct
+    op.hpp                    #   Op, OpType
+    sync_state.hpp            #   SyncState, SyncMessage
+    patch.hpp                 #   Patch, PatchAction types
+    cursor.hpp                #   Cursor (stable position)
+    error.hpp                 #   Error, ErrorKind
   src/                        # implementation
+    document.cpp              #   Document methods
+    transaction.cpp           #   Transaction methods
+    doc_state.hpp             #   internal: DocState, ObjectState
+    encoding/                 #   LEB128 codec
+    storage/                  #   binary serializer/deserializer
+    sync/                     #   bloom filter for sync protocol
   tests/                      # unit and integration tests
   examples/                   # example programs
   benchmarks/                 # performance benchmarks
-  docs/plans/                 # architecture and roadmap
+  docs/                       # documentation
+    api.md                    #   API reference
+    style.md                  #   coding style guide
+    plans/                    #   architecture and roadmap
   upstream/automerge/         # upstream Rust reference (git submodule)
 ```
 
 ## Documentation
 
+- [API Reference](docs/api.md) — every public type, method, and usage examples
 - [Style Guide](docs/style.md) — coding style and conventions (Ben Deane's modern C++ principles)
 - [Architecture Plan](docs/plans/architecture.md) — design principles, core types, module layout
-- [Implementation Roadmap](docs/plans/roadmap.md) — phased development plan
+- [Implementation Roadmap](docs/plans/roadmap.md) — phased development plan with status
 
 ## License
 

@@ -1695,3 +1695,537 @@ TEST(Document, sync_with_deletes) {
     EXPECT_TRUE(doc2.get(root, "keep").has_value());
     EXPECT_FALSE(doc2.get(root, "remove").has_value());
 }
+
+// =============================================================================
+// Phase 6: Patches
+// =============================================================================
+
+TEST(Document, transact_with_patches_map_put) {
+    auto doc = Document{};
+    auto patches = doc.transact_with_patches([](auto& tx) {
+        tx.put(root, "name", std::string{"Alice"});
+        tx.put(root, "age", std::int64_t{30});
+    });
+
+    EXPECT_EQ(patches.size(), 2u);
+
+    // First patch: put "name"
+    EXPECT_EQ(patches[0].obj, root);
+    EXPECT_EQ(std::get<std::string>(patches[0].key), "name");
+    auto* put0 = std::get_if<PatchPut>(&patches[0].action);
+    ASSERT_NE(put0, nullptr);
+    auto* sv0 = std::get_if<ScalarValue>(&put0->value);
+    ASSERT_NE(sv0, nullptr);
+    EXPECT_EQ(std::get<std::string>(*sv0), "Alice");
+    EXPECT_FALSE(put0->conflict);
+
+    // Second patch: put "age"
+    auto* put1 = std::get_if<PatchPut>(&patches[1].action);
+    ASSERT_NE(put1, nullptr);
+    auto* sv1 = std::get_if<ScalarValue>(&put1->value);
+    ASSERT_NE(sv1, nullptr);
+    EXPECT_EQ(std::get<std::int64_t>(*sv1), 30);
+}
+
+TEST(Document, transact_with_patches_map_delete) {
+    auto doc = Document{};
+    doc.transact([](auto& tx) {
+        tx.put(root, "key", std::int64_t{1});
+    });
+
+    auto patches = doc.transact_with_patches([](auto& tx) {
+        tx.delete_key(root, "key");
+    });
+
+    EXPECT_EQ(patches.size(), 1u);
+    auto* del = std::get_if<PatchDelete>(&patches[0].action);
+    ASSERT_NE(del, nullptr);
+    EXPECT_EQ(del->count, 1u);
+    EXPECT_EQ(std::get<std::string>(patches[0].key), "key");
+}
+
+TEST(Document, transact_with_patches_list_insert) {
+    auto doc = Document{};
+    ObjId list_id;
+    doc.transact([&](auto& tx) {
+        list_id = tx.put_object(root, "items", ObjType::list);
+    });
+
+    auto patches = doc.transact_with_patches([&](auto& tx) {
+        tx.insert(list_id, 0, std::string{"a"});
+        tx.insert(list_id, 1, std::string{"b"});
+    });
+
+    EXPECT_EQ(patches.size(), 2u);
+    auto* ins0 = std::get_if<PatchInsert>(&patches[0].action);
+    ASSERT_NE(ins0, nullptr);
+    EXPECT_EQ(ins0->index, 0u);
+    auto* sv0 = std::get_if<ScalarValue>(&ins0->value);
+    ASSERT_NE(sv0, nullptr);
+    EXPECT_EQ(std::get<std::string>(*sv0), "a");
+
+    auto* ins1 = std::get_if<PatchInsert>(&patches[1].action);
+    ASSERT_NE(ins1, nullptr);
+    EXPECT_EQ(ins1->index, 1u);
+}
+
+TEST(Document, transact_with_patches_list_delete) {
+    auto doc = Document{};
+    ObjId list_id;
+    doc.transact([&](auto& tx) {
+        list_id = tx.put_object(root, "items", ObjType::list);
+        tx.insert(list_id, 0, std::string{"a"});
+        tx.insert(list_id, 1, std::string{"b"});
+    });
+
+    auto patches = doc.transact_with_patches([&](auto& tx) {
+        tx.delete_index(list_id, 0);
+    });
+
+    EXPECT_EQ(patches.size(), 1u);
+    auto* del = std::get_if<PatchDelete>(&patches[0].action);
+    ASSERT_NE(del, nullptr);
+    EXPECT_EQ(del->index, 0u);
+    EXPECT_EQ(del->count, 1u);
+}
+
+TEST(Document, transact_with_patches_splice_text_insert_only) {
+    auto doc = Document{};
+    ObjId text_id;
+    doc.transact([&](auto& tx) {
+        text_id = tx.put_object(root, "content", ObjType::text);
+    });
+
+    auto patches = doc.transact_with_patches([&](auto& tx) {
+        tx.splice_text(text_id, 0, 0, "Hello");
+    });
+
+    // Should coalesce into a single PatchSpliceText
+    EXPECT_EQ(patches.size(), 1u);
+    auto* splice = std::get_if<PatchSpliceText>(&patches[0].action);
+    ASSERT_NE(splice, nullptr);
+    EXPECT_EQ(splice->index, 0u);
+    EXPECT_EQ(splice->delete_count, 0u);
+    EXPECT_EQ(splice->text, "Hello");
+}
+
+TEST(Document, transact_with_patches_splice_text_replace) {
+    auto doc = Document{};
+    ObjId text_id;
+    doc.transact([&](auto& tx) {
+        text_id = tx.put_object(root, "content", ObjType::text);
+        tx.splice_text(text_id, 0, 0, "Hello World");
+    });
+
+    auto patches = doc.transact_with_patches([&](auto& tx) {
+        tx.splice_text(text_id, 5, 6, " C++23");
+    });
+
+    // Should coalesce: delete 6 + insert " C++23"
+    EXPECT_EQ(patches.size(), 1u);
+    auto* splice = std::get_if<PatchSpliceText>(&patches[0].action);
+    ASSERT_NE(splice, nullptr);
+    EXPECT_EQ(splice->index, 5u);
+    EXPECT_EQ(splice->delete_count, 6u);
+    EXPECT_EQ(splice->text, " C++23");
+
+    // Verify final text
+    EXPECT_EQ(doc.text(text_id), "Hello C++23");
+}
+
+TEST(Document, transact_with_patches_counter_increment) {
+    auto doc = Document{};
+    doc.transact([](auto& tx) {
+        tx.put(root, "views", Counter{0});
+    });
+
+    auto patches = doc.transact_with_patches([](auto& tx) {
+        tx.increment(root, "views", 5);
+    });
+
+    EXPECT_EQ(patches.size(), 1u);
+    auto* inc = std::get_if<PatchIncrement>(&patches[0].action);
+    ASSERT_NE(inc, nullptr);
+    EXPECT_EQ(inc->delta, 5);
+}
+
+TEST(Document, transact_with_patches_make_object) {
+    auto doc = Document{};
+    auto patches = doc.transact_with_patches([](auto& tx) {
+        tx.put_object(root, "nested", ObjType::map);
+    });
+
+    EXPECT_EQ(patches.size(), 1u);
+    auto* put = std::get_if<PatchPut>(&patches[0].action);
+    ASSERT_NE(put, nullptr);
+    auto* obj_type = std::get_if<ObjType>(&put->value);
+    ASSERT_NE(obj_type, nullptr);
+    EXPECT_EQ(*obj_type, ObjType::map);
+}
+
+TEST(Document, transact_with_patches_empty_transaction) {
+    auto doc = Document{};
+    auto patches = doc.transact_with_patches([](auto& /*tx*/) {
+        // no ops
+    });
+
+    EXPECT_TRUE(patches.empty());
+}
+
+// =============================================================================
+// Phase 6: Historical Reads (Time Travel)
+// =============================================================================
+
+TEST(Document, get_at_reads_past_map_value) {
+    auto doc = Document{};
+    doc.transact([](auto& tx) {
+        tx.put(root, "x", std::int64_t{1});
+    });
+
+    auto heads_v1 = doc.get_heads();
+
+    doc.transact([](auto& tx) {
+        tx.put(root, "x", std::int64_t{2});
+    });
+
+    // Current value is 2
+    auto current = doc.get(root, "x");
+    ASSERT_TRUE(current.has_value());
+    EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(*current)), 2);
+
+    // Value at v1 was 1
+    auto past = doc.get_at(root, "x", heads_v1);
+    ASSERT_TRUE(past.has_value());
+    EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(*past)), 1);
+}
+
+TEST(Document, get_at_reads_past_list_value) {
+    auto doc = Document{};
+    ObjId list_id;
+    doc.transact([&](auto& tx) {
+        list_id = tx.put_object(root, "items", ObjType::list);
+        tx.insert(list_id, 0, std::string{"first"});
+    });
+
+    auto heads_v1 = doc.get_heads();
+
+    doc.transact([&](auto& tx) {
+        tx.insert(list_id, 1, std::string{"second"});
+    });
+
+    // Current length is 2
+    EXPECT_EQ(doc.length(list_id), 2u);
+
+    // At v1, list index 0 had "first"
+    auto past = doc.get_at(list_id, std::size_t{0}, heads_v1);
+    ASSERT_TRUE(past.has_value());
+    EXPECT_EQ(std::get<std::string>(std::get<ScalarValue>(*past)), "first");
+}
+
+TEST(Document, keys_at_reads_past_keys) {
+    auto doc = Document{};
+    doc.transact([](auto& tx) {
+        tx.put(root, "a", std::int64_t{1});
+    });
+
+    auto heads_v1 = doc.get_heads();
+
+    doc.transact([](auto& tx) {
+        tx.put(root, "b", std::int64_t{2});
+    });
+
+    // Current keys: a, b
+    EXPECT_EQ(doc.keys(root).size(), 2u);
+
+    // At v1: only "a"
+    auto past_keys = doc.keys_at(root, heads_v1);
+    EXPECT_EQ(past_keys.size(), 1u);
+    EXPECT_EQ(past_keys[0], "a");
+}
+
+TEST(Document, values_at_reads_past_values) {
+    auto doc = Document{};
+    doc.transact([](auto& tx) {
+        tx.put(root, "x", std::int64_t{10});
+    });
+
+    auto heads_v1 = doc.get_heads();
+
+    doc.transact([](auto& tx) {
+        tx.put(root, "x", std::int64_t{20});
+    });
+
+    auto past_vals = doc.values_at(root, heads_v1);
+    EXPECT_EQ(past_vals.size(), 1u);
+    EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(past_vals[0])), 10);
+}
+
+TEST(Document, length_at_reads_past_length) {
+    auto doc = Document{};
+    ObjId list_id;
+    doc.transact([&](auto& tx) {
+        list_id = tx.put_object(root, "items", ObjType::list);
+        tx.insert(list_id, 0, std::string{"a"});
+    });
+
+    auto heads_v1 = doc.get_heads();
+
+    doc.transact([&](auto& tx) {
+        tx.insert(list_id, 1, std::string{"b"});
+        tx.insert(list_id, 2, std::string{"c"});
+    });
+
+    EXPECT_EQ(doc.length(list_id), 3u);
+    EXPECT_EQ(doc.length_at(list_id, heads_v1), 1u);
+}
+
+TEST(Document, text_at_reads_past_text) {
+    auto doc = Document{};
+    ObjId text_id;
+    doc.transact([&](auto& tx) {
+        text_id = tx.put_object(root, "content", ObjType::text);
+        tx.splice_text(text_id, 0, 0, "Hello");
+    });
+
+    auto heads_v1 = doc.get_heads();
+
+    doc.transact([&](auto& tx) {
+        tx.splice_text(text_id, 5, 0, " World");
+    });
+
+    EXPECT_EQ(doc.text(text_id), "Hello World");
+    EXPECT_EQ(doc.text_at(text_id, heads_v1), "Hello");
+}
+
+TEST(Document, get_at_missing_key_returns_nullopt) {
+    auto doc = Document{};
+    doc.transact([](auto& tx) {
+        tx.put(root, "x", std::int64_t{1});
+    });
+
+    auto heads = doc.get_heads();
+
+    auto result = doc.get_at(root, "nonexistent", heads);
+    EXPECT_FALSE(result.has_value());
+}
+
+TEST(Document, get_at_deleted_key_returns_nullopt) {
+    auto doc = Document{};
+    doc.transact([](auto& tx) {
+        tx.put(root, "x", std::int64_t{1});
+    });
+
+    doc.transact([](auto& tx) {
+        tx.delete_key(root, "x");
+    });
+
+    auto heads_after_delete = doc.get_heads();
+
+    auto result = doc.get_at(root, "x", heads_after_delete);
+    EXPECT_FALSE(result.has_value());
+}
+
+TEST(Document, historical_read_multiple_versions) {
+    auto doc = Document{};
+    doc.transact([](auto& tx) {
+        tx.put(root, "x", std::int64_t{1});
+    });
+    auto heads_v1 = doc.get_heads();
+
+    doc.transact([](auto& tx) {
+        tx.put(root, "x", std::int64_t{2});
+    });
+    auto heads_v2 = doc.get_heads();
+
+    doc.transact([](auto& tx) {
+        tx.put(root, "x", std::int64_t{3});
+    });
+
+    // Read each version
+    auto v1 = doc.get_at(root, "x", heads_v1);
+    ASSERT_TRUE(v1.has_value());
+    EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(*v1)), 1);
+
+    auto v2 = doc.get_at(root, "x", heads_v2);
+    ASSERT_TRUE(v2.has_value());
+    EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(*v2)), 2);
+
+    auto current = doc.get(root, "x");
+    ASSERT_TRUE(current.has_value());
+    EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(*current)), 3);
+}
+
+// =============================================================================
+// Phase 6: Cursors
+// =============================================================================
+
+TEST(Document, cursor_and_resolve_basic) {
+    auto doc = Document{};
+    ObjId list_id;
+    doc.transact([&](auto& tx) {
+        list_id = tx.put_object(root, "items", ObjType::list);
+        tx.insert(list_id, 0, std::string{"a"});
+        tx.insert(list_id, 1, std::string{"b"});
+        tx.insert(list_id, 2, std::string{"c"});
+    });
+
+    // Create cursor at index 1 ("b")
+    auto cur = doc.cursor(list_id, 1);
+    ASSERT_TRUE(cur.has_value());
+
+    // Resolve cursor — should be at index 1
+    auto idx = doc.resolve_cursor(list_id, *cur);
+    ASSERT_TRUE(idx.has_value());
+    EXPECT_EQ(*idx, 1u);
+}
+
+TEST(Document, cursor_survives_insert_before) {
+    auto doc = Document{};
+    ObjId list_id;
+    doc.transact([&](auto& tx) {
+        list_id = tx.put_object(root, "items", ObjType::list);
+        tx.insert(list_id, 0, std::string{"a"});
+        tx.insert(list_id, 1, std::string{"b"});
+        tx.insert(list_id, 2, std::string{"c"});
+    });
+
+    // Cursor at index 1 ("b")
+    auto cur = doc.cursor(list_id, 1);
+    ASSERT_TRUE(cur.has_value());
+
+    // Insert before "b"
+    doc.transact([&](auto& tx) {
+        tx.insert(list_id, 0, std::string{"z"});
+    });
+
+    // "b" is now at index 2
+    auto idx = doc.resolve_cursor(list_id, *cur);
+    ASSERT_TRUE(idx.has_value());
+    EXPECT_EQ(*idx, 2u);
+
+    // Verify the element at the cursor position is still "b"
+    auto val = doc.get(list_id, *idx);
+    ASSERT_TRUE(val.has_value());
+    EXPECT_EQ(std::get<std::string>(std::get<ScalarValue>(*val)), "b");
+}
+
+TEST(Document, cursor_survives_insert_after) {
+    auto doc = Document{};
+    ObjId list_id;
+    doc.transact([&](auto& tx) {
+        list_id = tx.put_object(root, "items", ObjType::list);
+        tx.insert(list_id, 0, std::string{"a"});
+        tx.insert(list_id, 1, std::string{"b"});
+        tx.insert(list_id, 2, std::string{"c"});
+    });
+
+    // Cursor at index 1 ("b")
+    auto cur = doc.cursor(list_id, 1);
+    ASSERT_TRUE(cur.has_value());
+
+    // Insert after "b"
+    doc.transact([&](auto& tx) {
+        tx.insert(list_id, 2, std::string{"z"});
+    });
+
+    // "b" is still at index 1
+    auto idx = doc.resolve_cursor(list_id, *cur);
+    ASSERT_TRUE(idx.has_value());
+    EXPECT_EQ(*idx, 1u);
+}
+
+TEST(Document, cursor_on_deleted_element_returns_nullopt) {
+    auto doc = Document{};
+    ObjId list_id;
+    doc.transact([&](auto& tx) {
+        list_id = tx.put_object(root, "items", ObjType::list);
+        tx.insert(list_id, 0, std::string{"a"});
+        tx.insert(list_id, 1, std::string{"b"});
+    });
+
+    auto cur = doc.cursor(list_id, 1);
+    ASSERT_TRUE(cur.has_value());
+
+    // Delete "b"
+    doc.transact([&](auto& tx) {
+        tx.delete_index(list_id, 1);
+    });
+
+    // Cursor should resolve to nullopt (element deleted)
+    auto idx = doc.resolve_cursor(list_id, *cur);
+    EXPECT_FALSE(idx.has_value());
+}
+
+TEST(Document, cursor_out_of_bounds_returns_nullopt) {
+    auto doc = Document{};
+    ObjId list_id;
+    doc.transact([&](auto& tx) {
+        list_id = tx.put_object(root, "items", ObjType::list);
+        tx.insert(list_id, 0, std::string{"a"});
+    });
+
+    auto cur = doc.cursor(list_id, 5);  // out of bounds
+    EXPECT_FALSE(cur.has_value());
+}
+
+TEST(Document, cursor_on_text) {
+    auto doc = Document{};
+    ObjId text_id;
+    doc.transact([&](auto& tx) {
+        text_id = tx.put_object(root, "content", ObjType::text);
+        tx.splice_text(text_id, 0, 0, "Hello");
+    });
+
+    // Cursor at position 2 ('l')
+    auto cur = doc.cursor(text_id, 2);
+    ASSERT_TRUE(cur.has_value());
+
+    // Insert at beginning
+    doc.transact([&](auto& tx) {
+        tx.splice_text(text_id, 0, 0, ">>> ");
+    });
+
+    // 'l' should now be at position 6
+    auto idx = doc.resolve_cursor(text_id, *cur);
+    ASSERT_TRUE(idx.has_value());
+    EXPECT_EQ(*idx, 6u);
+
+    EXPECT_EQ(doc.text(text_id), ">>> Hello");
+}
+
+TEST(Document, cursor_survives_merge) {
+    auto doc1 = Document{};
+    const std::uint8_t raw1[16] = {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+    doc1.set_actor_id(ActorId{raw1});
+
+    ObjId list_id;
+    doc1.transact([&](auto& tx) {
+        list_id = tx.put_object(root, "items", ObjType::list);
+        tx.insert(list_id, 0, std::string{"a"});
+        tx.insert(list_id, 1, std::string{"b"});
+        tx.insert(list_id, 2, std::string{"c"});
+    });
+
+    auto doc2 = doc1.fork();
+
+    // Create cursor at "b" (index 1) on doc1
+    auto cur = doc1.cursor(list_id, 1);
+    ASSERT_TRUE(cur.has_value());
+
+    // doc2 inserts at the beginning
+    doc2.transact([&](auto& tx) {
+        tx.insert(list_id, 0, std::string{"x"});
+        tx.insert(list_id, 1, std::string{"y"});
+    });
+
+    doc1.merge(doc2);
+
+    // After merge, "b" should have shifted to accommodate x, y
+    auto idx = doc1.resolve_cursor(list_id, *cur);
+    ASSERT_TRUE(idx.has_value());
+
+    // Verify cursor still points to "b"
+    auto val = doc1.get(list_id, *idx);
+    ASSERT_TRUE(val.has_value());
+    EXPECT_EQ(std::get<std::string>(std::get<ScalarValue>(*val)), "b");
+}

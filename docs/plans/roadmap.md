@@ -198,19 +198,43 @@
 ---
 
 ## Phase 6: Advanced Features
-**Goal**: Rich text marks, cursors, patches, time travel.
+**Status**: Complete — 195 tests passing (170 Phase 1-5 + 25 Phase 6)
 
 ### Deliverables
-- `marks.hpp` — rich text mark API
-- `cursor.hpp` — stable cursor positioning
-- `patch.hpp` — incremental change notifications
-- Time-travel reads: `get_at()`, `keys_at()`, etc.
+- [x] `patch.hpp` — Patch types: `PatchPut`, `PatchInsert`, `PatchDelete`, `PatchIncrement`, `PatchSpliceText`
+- [x] `cursor.hpp` — `Cursor` type backed by `OpId` for stable positioning
+- [x] `Document::transact_with_patches()` — mutation with change notifications
+- [x] Patch coalescing — consecutive `splice_text` ops grouped into single `PatchSpliceText`
+- [x] Historical reads: `get_at()`, `keys_at()`, `values_at()`, `length_at()`, `text_at()`
+- [x] Cursors: `cursor()`, `resolve_cursor()` — stable positions in lists/text
+- [ ] `marks.hpp` — rich text mark API (deferred)
 
-### Tests
-- Marks: apply, merge, query
-- Cursors: track position through edits and merges
-- Patches: verify correct diff after mutations and merges
-- Historical queries: read state at past heads
+### Design Decisions (implemented)
+- `Patch` contains `ObjId obj`, `Prop key`, and `PatchAction` variant
+- `PatchSpliceText` coalesces consecutive character insertions and deletions
+- Historical reads rebuild state by replaying only changes visible at given heads
+- `Cursor` wraps the `OpId` (insert_id) of the target element
+- Cursor survives insertions, deletions, and merges because it tracks by identity, not index
+
+### Tests (25 new)
+- [x] Patches: map put, map delete, list insert, list delete
+- [x] Patches: splice_text insert-only coalesces to PatchSpliceText
+- [x] Patches: splice_text replace coalesces deletes + inserts
+- [x] Patches: counter increment produces PatchIncrement
+- [x] Patches: make_object produces PatchPut with ObjType
+- [x] Patches: empty transaction produces no patches
+- [x] Historical: get_at reads past map and list values
+- [x] Historical: keys_at, values_at, length_at read past state
+- [x] Historical: text_at reads past text content
+- [x] Historical: missing/deleted key returns nullopt
+- [x] Historical: multiple versions all readable
+- [x] Cursors: basic create and resolve
+- [x] Cursors: survive insert before (index shifts)
+- [x] Cursors: survive insert after (index stable)
+- [x] Cursors: deleted element returns nullopt
+- [x] Cursors: out-of-bounds returns nullopt
+- [x] Cursors: work on text objects
+- [x] Cursors: survive merge with concurrent inserts
 
 ---
 

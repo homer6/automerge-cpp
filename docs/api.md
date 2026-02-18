@@ -564,3 +564,91 @@ for (int i = 0; i < 10; ++i) {
 doc_a.get(am::root, "from_b");  // 2
 doc_b.get(am::root, "from_a");  // 1
 ```
+
+### Patches — Mutation with Change Notifications
+
+```cpp
+auto patches = doc.transact_with_patches([](auto& tx) {
+    tx.put(am::root, "name", std::string{"Alice"});
+    tx.splice_text(text_id, 5, 6, " C++23");
+});
+
+for (const auto& patch : patches) {
+    if (auto* put = std::get_if<am::PatchPut>(&patch.action)) {
+        // put->value, put->conflict
+    } else if (auto* splice = std::get_if<am::PatchSpliceText>(&patch.action)) {
+        // splice->index, splice->delete_count, splice->text
+    }
+}
+```
+
+### Historical Reads — Time Travel
+
+```cpp
+doc.transact([](auto& tx) { tx.put(am::root, "x", std::int64_t{1}); });
+auto v1 = doc.get_heads();
+
+doc.transact([](auto& tx) { tx.put(am::root, "x", std::int64_t{2}); });
+
+doc.get_at(am::root, "x", v1);     // 1 (reads the past)
+doc.get(am::root, "x");            // 2 (current)
+
+doc.keys_at(am::root, v1);         // keys at v1
+doc.values_at(am::root, v1);       // values at v1
+doc.length_at(am::root, v1);       // length at v1
+doc.text_at(text_id, v1);          // text content at v1
+```
+
+### Cursors — Stable Positions
+
+```cpp
+auto cur = doc.cursor(list_id, 1);  // cursor at index 1
+
+doc.transact([&](auto& tx) {
+    tx.insert(list_id, 0, std::string{"new"});  // insert before cursor
+});
+
+auto idx = doc.resolve_cursor(list_id, *cur);
+// idx == 2 (cursor tracked the element, not the index)
+```
+
+---
+
+## Patch
+
+```cpp
+#include <automerge-cpp/patch.hpp>
+```
+
+```cpp
+using PathElement = std::variant<std::string, std::size_t>;
+using Path = std::vector<PathElement>;
+
+struct PatchPut { Value value; bool conflict; };
+struct PatchInsert { std::size_t index; Value value; };
+struct PatchDelete { std::size_t index; std::size_t count; };
+struct PatchIncrement { std::int64_t delta; };
+struct PatchSpliceText { std::size_t index; std::size_t delete_count; std::string text; };
+
+using PatchAction = std::variant<PatchPut, PatchInsert, PatchDelete, PatchIncrement, PatchSpliceText>;
+
+struct Patch {
+    ObjId obj;
+    Prop key;
+    PatchAction action;
+};
+```
+
+## Cursor
+
+```cpp
+#include <automerge-cpp/cursor.hpp>
+```
+
+```cpp
+struct Cursor {
+    OpId position;  // the OpId of the element this cursor points to
+};
+```
+
+Supports: `==`, `<=>`.
