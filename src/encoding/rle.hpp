@@ -37,8 +37,11 @@ public:
     }
 
     void append_null() {
-        flush_run();
-        flush_literals();
+        // Only flush pending run/literals — don't prematurely flush nulls
+        if (run_value_ || !literal_buffer_.empty()) {
+            flush_run();
+            flush_literals();
+        }
         ++null_count_;
     }
 

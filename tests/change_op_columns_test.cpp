@@ -490,3 +490,88 @@ TEST(ChangeOpColumns, increment_op_round_trip) {
     ASSERT_EQ(decoded->size(), 1u);
     EXPECT_EQ((*decoded)[0].action, OpType::increment);
 }
+
+TEST(ChangeOpColumns, insert_object_map_round_trip) {
+    auto actor = make_actor(1);
+    auto actor_table = std::vector<ActorId>{actor};
+    auto list_obj = ObjId{OpId{1, actor}};
+
+    auto ops = std::vector<Op>{
+        Op{
+            .id = OpId{2, actor},
+            .obj = list_obj,
+            .key = list_index(0),
+            .action = OpType::insert,
+            .value = Value{ObjType::map},
+            .pred = {},
+            .insert_after = std::nullopt,
+        },
+    };
+
+    auto columns = encode_change_ops(ops, actor_table);
+    auto decoded = decode_change_ops(columns, actor_table, actor, 2, 1);
+
+    ASSERT_TRUE(decoded.has_value());
+    ASSERT_EQ(decoded->size(), 1u);
+    EXPECT_EQ((*decoded)[0].action, OpType::insert);
+    ASSERT_TRUE(std::holds_alternative<ObjType>((*decoded)[0].value));
+    EXPECT_EQ(std::get<ObjType>((*decoded)[0].value), ObjType::map);
+}
+
+TEST(ChangeOpColumns, insert_object_list_round_trip) {
+    auto actor = make_actor(1);
+    auto actor_table = std::vector<ActorId>{actor};
+    auto list_obj = ObjId{OpId{1, actor}};
+
+    auto ops = std::vector<Op>{
+        Op{
+            .id = OpId{2, actor},
+            .obj = list_obj,
+            .key = list_index(0),
+            .action = OpType::insert,
+            .value = Value{ObjType::list},
+            .pred = {},
+            .insert_after = std::nullopt,
+        },
+    };
+
+    auto columns = encode_change_ops(ops, actor_table);
+    auto decoded = decode_change_ops(columns, actor_table, actor, 2, 1);
+
+    ASSERT_TRUE(decoded.has_value());
+    ASSERT_EQ(decoded->size(), 1u);
+    EXPECT_EQ((*decoded)[0].action, OpType::insert);
+    ASSERT_TRUE(std::holds_alternative<ObjType>((*decoded)[0].value));
+    EXPECT_EQ(std::get<ObjType>((*decoded)[0].value), ObjType::list);
+}
+
+TEST(ChangeOpColumns, multi_actor_op_fields_round_trip) {
+    auto actor1 = make_actor(1);
+    auto actor2 = make_actor(2);
+    auto actor3 = make_actor(3);
+    auto actor_table = std::vector<ActorId>{actor1, actor2, actor3};
+
+    auto ops = std::vector<Op>{
+        Op{
+            .id = OpId{5, actor1},
+            .obj = ObjId{OpId{2, actor2}},
+            .key = map_key("k"),
+            .action = OpType::put,
+            .value = Value{ScalarValue{std::int64_t{42}}},
+            .pred = {OpId{3, actor3}},
+        },
+    };
+
+    auto columns = encode_change_ops(ops, actor_table);
+    auto decoded = decode_change_ops(columns, actor_table, actor1, 5, 1);
+
+    ASSERT_TRUE(decoded.has_value());
+    ASSERT_EQ(decoded->size(), 1u);
+    EXPECT_FALSE((*decoded)[0].obj.is_root());
+    auto obj_op = std::get<OpId>((*decoded)[0].obj.inner);
+    EXPECT_EQ(obj_op.counter, 2u);
+    EXPECT_EQ(obj_op.actor, actor2);
+    ASSERT_EQ((*decoded)[0].pred.size(), 1u);
+    EXPECT_EQ((*decoded)[0].pred[0].counter, 3u);
+    EXPECT_EQ((*decoded)[0].pred[0].actor, actor3);
+}

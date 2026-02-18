@@ -62,9 +62,15 @@ inline auto op_to_action_code(const Op& op) -> std::uint64_t {
         case OpType::del:         return 3;
         case OpType::increment:   return 4;
         case OpType::mark:        return 5;
-        case OpType::insert:
+        case OpType::insert: {
+            // insert_object carries ObjType; encode like make_object
+            if (const auto* ot = std::get_if<ObjType>(&op.value)) {
+                return (*ot == ObjType::list || *ot == ObjType::text) ? 2 : 0;
+            }
+            return 1;  // scalar insert uses put action code
+        }
         case OpType::splice_text:
-            return 1;  // inserts use put action code + insert flag
+            return 1;
     }
     return 1;
 }
@@ -333,12 +339,26 @@ inline auto decode_change_ops(const std::vector<RawColumn>& columns,
 
         // Map action code + insert flag to OpType + Value
         if (is_insert) {
-            op.action = OpType::insert;
-            op.value = *value;
-            // Check if it's splice_text (insert of a string)
-            if (const auto* sv = std::get_if<ScalarValue>(&op.value)) {
-                if (std::holds_alternative<std::string>(*sv)) {
-                    op.action = OpType::splice_text;
+            if (action_code == 0 || action_code == 2) {
+                // insert_object: recover ObjType from encoded uint value
+                op.action = OpType::insert;
+                if (const auto* sv = std::get_if<ScalarValue>(&*value)) {
+                    if (const auto* v = std::get_if<std::uint64_t>(sv)) {
+                        op.value = Value{static_cast<ObjType>(*v)};
+                    } else {
+                        op.value = Value{action_code == 0 ? ObjType::map : ObjType::list};
+                    }
+                } else {
+                    op.value = Value{action_code == 0 ? ObjType::map : ObjType::list};
+                }
+            } else {
+                // Scalar insert or splice_text
+                op.action = OpType::insert;
+                op.value = *value;
+                if (const auto* sv = std::get_if<ScalarValue>(&op.value)) {
+                    if (std::holds_alternative<std::string>(*sv)) {
+                        op.action = OpType::splice_text;
+                    }
                 }
             }
         } else {

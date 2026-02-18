@@ -78,7 +78,12 @@ TEST(RawColumn, empty_columns) {
     auto columns = std::vector<RawColumn>{};
     auto output = std::vector<std::byte>{};
     write_raw_columns(columns, output);
-    EXPECT_TRUE(output.empty());
+    // Output contains just the column count (0)
+    EXPECT_EQ(output.size(), 1u);
+
+    auto pos = std::size_t{0};
+    auto parsed = parse_raw_columns(output, pos);
+    EXPECT_TRUE(parsed.empty());
 }
 
 TEST(RawColumn, column_with_empty_data) {

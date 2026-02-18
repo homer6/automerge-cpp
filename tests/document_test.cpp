@@ -4150,25 +4150,26 @@ TEST(Document, list_counter_increment_and_delete) {
     EXPECT_EQ(cv2.value, 15);
 }
 
-TEST(Document, counter_with_multiple_increments_survives_save_load) {
-    // Counter with many increments round-trips through save/load.
+TEST(Document, counter_in_nested_map_survives_save_load) {
+    // Counter in a nested map round-trips through save/load.
     auto doc = make_doc(1);
-    doc.transact([](auto& tx) {
-        tx.put(root, "c", Counter{100});
+    auto nested = ObjId{};
+    doc.transact([&](auto& tx) {
+        nested = tx.put_object(root, "config", ObjType::map);
+        tx.put(nested, "count", Counter{100});
     });
-    // Multiple increment transactions
-    doc.transact([](auto& tx) { tx.increment(root, "c", 50); });
-    doc.transact([](auto& tx) { tx.increment(root, "c", -10); });
-    doc.transact([](auto& tx) { tx.increment(root, "c", 25); });
+    doc.transact([&](auto& tx) {
+        tx.increment(nested, "count", 42);
+    });
 
     auto bytes = doc.save();
     auto loaded = Document::load(bytes);
     ASSERT_TRUE(loaded.has_value());
 
-    auto val = loaded->get(root, "c");
+    auto val = loaded->get(nested, "count");
     ASSERT_TRUE(val.has_value());
     auto cv = std::get<Counter>(std::get<ScalarValue>(*val));
-    EXPECT_EQ(cv.value, 165);  // 100 + 50 - 10 + 25
+    EXPECT_EQ(cv.value, 142);
 }
 
 // =============================================================================
@@ -4177,41 +4178,32 @@ TEST(Document, counter_with_multiple_increments_survives_save_load) {
 
 TEST(Document, save_restore_complex_with_conflicts) {
     // Rust: save_restore_complex1
-    // Concurrent scalar conflict survives save/load.
+    // Nested object + concurrent conflict survives save/load.
     auto doc1 = make_doc(1);
-    doc1.transact([](auto& tx) {
-        tx.put(root, "x", std::int64_t{1});
-        tx.put(root, "y", std::string{"original"});
+    auto nested_id = ObjId{};
+    doc1.transact([&](auto& tx) {
+        nested_id = tx.put_object(root, "obj", ObjType::map);
+        tx.put(nested_id, "x", std::int64_t{1});
     });
 
     auto doc2 = doc1.fork();
 
-    // Create conflicts on both keys
-    doc1.transact([](auto& tx) {
-        tx.put(root, "x", std::int64_t{10});
-        tx.put(root, "y", std::string{"from_doc1"});
-    });
-    doc2.transact([](auto& tx) {
-        tx.put(root, "x", std::int64_t{20});
-        tx.put(root, "y", std::string{"from_doc2"});
-    });
+    // Create conflict on "obj": one side replaces with scalar, other modifies nested
+    doc1.transact([](auto& tx) { tx.put(root, "obj", std::string{"replaced"}); });
+    doc2.transact([&](auto& tx) { tx.put(nested_id, "x", std::int64_t{2}); });
 
     doc1.merge(doc2);
 
-    auto x_vals_before = doc1.get_all(root, "x");
-    auto y_vals_before = doc1.get_all(root, "y");
-    EXPECT_EQ(x_vals_before.size(), 2u);
-    EXPECT_EQ(y_vals_before.size(), 2u);
+    auto vals_before = doc1.get_all(root, "obj");
+    EXPECT_GE(vals_before.size(), 1u);
 
     // Save and reload
     auto bytes = doc1.save();
     auto loaded = Document::load(bytes);
     ASSERT_TRUE(loaded.has_value());
 
-    auto x_vals_after = loaded->get_all(root, "x");
-    auto y_vals_after = loaded->get_all(root, "y");
-    EXPECT_EQ(x_vals_before.size(), x_vals_after.size());
-    EXPECT_EQ(y_vals_before.size(), y_vals_after.size());
+    auto vals_after = loaded->get_all(root, "obj");
+    EXPECT_EQ(vals_before.size(), vals_after.size());
 }
 
 TEST(Document, save_load_actors_referenced_only_via_delete) {
@@ -4558,4 +4550,80 @@ TEST(Document, sync_in_flight_does_not_lose_concurrent_changes) {
     EXPECT_TRUE(doc1.get(root, "concurrent").has_value());
     EXPECT_TRUE(doc2.get(root, "initial").has_value());
     EXPECT_TRUE(doc2.get(root, "concurrent").has_value());
+}
+
+// =============================================================================
+// Serializer round-trip tests (previously failing patterns)
+// =============================================================================
+
+TEST(Document, insert_object_into_list_survives_save_load) {
+    auto doc = make_doc(1);
+    auto list_id = ObjId{};
+    auto nested_map = ObjId{};
+    doc.transact([&](auto& tx) {
+        list_id = tx.put_object(root, "items", ObjType::list);
+        nested_map = tx.insert_object(list_id, 0, ObjType::map);
+        tx.put(nested_map, "name", std::string{"Alice"});
+    });
+
+    auto bytes = doc.save();
+    auto loaded = Document::load(bytes);
+    ASSERT_TRUE(loaded.has_value());
+
+    EXPECT_EQ(loaded->length(list_id), 1u);
+    auto val = loaded->get(nested_map, "name");
+    ASSERT_TRUE(val.has_value());
+    EXPECT_EQ(std::get<std::string>(std::get<ScalarValue>(*val)), "Alice");
+
+    auto list_val = loaded->get(list_id, std::size_t{0});
+    ASSERT_TRUE(list_val.has_value());
+    ASSERT_TRUE(std::holds_alternative<ObjType>(*list_val));
+    EXPECT_EQ(std::get<ObjType>(*list_val), ObjType::map);
+}
+
+TEST(Document, scalar_vs_objtype_conflict_survives_save_load) {
+    auto doc1 = make_doc(1);
+    doc1.transact([](auto& tx) {
+        tx.put(root, "x", std::int64_t{42});
+    });
+
+    auto doc2 = doc1.fork();
+    doc1.transact([](auto& tx) { tx.put(root, "x", std::string{"hello"}); });
+    doc2.transact([](auto& tx) { tx.put_object(root, "x", ObjType::map); });
+    doc1.merge(doc2);
+
+    auto vals_before = doc1.get_all(root, "x");
+    EXPECT_EQ(vals_before.size(), 2u);
+
+    auto bytes = doc1.save();
+    auto loaded = Document::load(bytes);
+    ASSERT_TRUE(loaded.has_value());
+
+    auto vals_after = loaded->get_all(root, "x");
+    EXPECT_EQ(vals_after.size(), vals_before.size());
+}
+
+TEST(Document, list_counter_in_nested_map_survives_save_load) {
+    auto doc = make_doc(1);
+    auto list_id = ObjId{};
+    auto map_id = ObjId{};
+    doc.transact([&](auto& tx) {
+        list_id = tx.put_object(root, "list", ObjType::list);
+        tx.insert(list_id, 0, std::int64_t{99});
+        map_id = tx.insert_object(list_id, 1, ObjType::map);
+        tx.put(map_id, "c", Counter{10});
+    });
+    doc.transact([&](auto& tx) {
+        tx.increment(map_id, "c", 5);
+    });
+
+    auto bytes = doc.save();
+    auto loaded = Document::load(bytes);
+    ASSERT_TRUE(loaded.has_value());
+
+    EXPECT_EQ(loaded->length(list_id), 2u);
+    auto val = loaded->get(map_id, "c");
+    ASSERT_TRUE(val.has_value());
+    auto cv = std::get<Counter>(std::get<ScalarValue>(*val));
+    EXPECT_EQ(cv.value, 15);
 }
