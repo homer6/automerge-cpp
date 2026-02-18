@@ -11,8 +11,15 @@ jobs:
       with:
         submodules: recursive
 
+    - name: Install zlib with vcpkg
+      run: |
+        git clone https://github.com/microsoft/vcpkg.git
+        .\vcpkg\bootstrap-vcpkg.bat
+        .\vcpkg\vcpkg.exe install zlib
+        echo "VCPKG_ROOT=${{github.workspace}}/vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Append
+
     - name: Configure
-      run: cmake -B build -DAUTOMERGE_CPP_BUILD_TESTS=ON -DAUTOMERGE_CPP_BUILD_EXAMPLES=ON -DAUTOMERGE_CPP_BUILD_BENCHMARKS=ON
+      run: cmake -B build -DAUTOMERGE_CPP_BUILD_TESTS=ON -DAUTOMERGE_CPP_BUILD_EXAMPLES=ON -DAUTOMERGE_CPP_BUILD_BENCHMARKS=ON -DCMAKE_TOOLCHAIN_FILE=${{github.workspace}}/vcpkg/scripts/buildsystems/vcpkg.cmake
 
     - name: Build
       run: cmake --build build --config Release
