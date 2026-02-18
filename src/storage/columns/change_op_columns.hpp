@@ -36,6 +36,7 @@
 #include "../../encoding/leb128.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -78,6 +79,7 @@ inline auto encode_change_ops(const std::vector<Op>& ops,
         for (std::size_t i = 0; i < actor_table.size(); ++i) {
             if (actor_table[i] == actor) return static_cast<std::uint64_t>(i);
         }
+        assert(false && "actor not found in actor_table");
         return 0;
     };
 
@@ -302,7 +304,7 @@ inline auto decode_change_ops(const std::vector<RawColumn>& columns,
         if (*key_string_val) {
             op.key = Prop{**key_string_val};
         } else {
-            op.key = Prop{std::size_t{0}};  // placeholder index, resolved later
+            op.key = Prop{std::size_t{0}};  // list element key; position resolved via insert_after
         }
 
         // INSERT

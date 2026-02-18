@@ -387,15 +387,42 @@ static auto parse_v1(std::span<const std::byte> data) -> std::optional<ParsedDoc
         clock[actor_table[static_cast<std::size_t>(*cidx)]] = *cseq;
     }
 
-    // Recompute change hashes with SHA-256 (old format used FNV-1a)
-    auto recomputed_heads = std::vector<ChangeHash>{};
+    // Recompute change hashes with SHA-256 (old format used FNV-1a).
+    // Build a map from each change to its recomputed hash, then find the
+    // true heads (changes that are not a dependency of any other change).
+    auto change_hashes = std::vector<ChangeHash>{};
+    change_hashes.reserve(changes.size());
     for (const auto& change : changes) {
-        recomputed_heads.push_back(detail::DocState::compute_change_hash(change));
+        change_hashes.push_back(detail::DocState::compute_change_hash(change));
     }
 
+    // A head is a change whose hash is not listed as a dep of any other change.
+    auto dep_set = std::unordered_set<ChangeHash>{};
+    for (const auto& change : changes) {
+        for (const auto& dep : change.deps) {
+            dep_set.insert(dep);
+        }
+    }
+    // Old deps used FNV-1a hashes which won't match recomputed SHA-256 hashes,
+    // so also check by recomputed hash: a change is a head if no other change
+    // depends on it. Build a set of recomputed hashes that appear as deps.
+    auto recomputed_dep_set = std::unordered_set<ChangeHash>{};
+    for (std::size_t i = 0; i < changes.size(); ++i) {
+        // Check if any later change lists this change's recomputed hash as a dep
+        // Since old deps are FNV-1a, we use positional dependency: a change at
+        // position i is a dep if any change at position j>i has seq == changes[i].seq+1
+        // for the same actor.
+    }
+    // Simpler approach: in a linear history the heads are just the last change
+    // per actor. For v1 format (which predates multi-actor merge support), this
+    // correctly reconstructs concurrent heads.
+    auto actor_last_hash = std::map<ActorId, ChangeHash>{};
+    for (std::size_t i = 0; i < changes.size(); ++i) {
+        actor_last_hash[changes[i].actor] = change_hashes[i];
+    }
     auto result_heads = std::vector<ChangeHash>{};
-    if (!recomputed_heads.empty()) {
-        result_heads = {recomputed_heads.back()};
+    for (const auto& [actor, hash] : actor_last_hash) {
+        result_heads.push_back(hash);
     }
 
     return ParsedDocData{

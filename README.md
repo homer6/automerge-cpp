@@ -73,7 +73,7 @@ int main() {
 - **Type-safe values**: `std::variant`-based `ScalarValue` and `Value` types
 
 - **Columnar encoding**: upstream-compatible columnar op encoding with RLE, delta, and boolean encoders
-- **DEFLATE compression**: zlib-based compression for columns exceeding 256 bytes
+- **DEFLATE compression**: raw DEFLATE (no zlib/gzip header) for columns exceeding 256 bytes, matching upstream Rust format
 - **SHA-256 checksums**: chunk envelope with SHA-256 integrity validation
 - **Backward compatibility**: v1 format loading with automatic format detection
 
@@ -115,7 +115,7 @@ Inspired by Ben Deane's approach to modern C++:
 
 - C++23 compiler (GCC 14+, Clang 18+, MSVC 19.38+)
 - CMake 3.28+
-- zlib (for DEFLATE compression)
+- zlib (for raw DEFLATE compression)
 
 ### Build
 

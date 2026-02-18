@@ -42,7 +42,7 @@ automerge-cpp/
 │   │   └── columns/                        #     columnar encoding
 │   │       ├── column_spec.hpp             #       column type enum and spec bitfield
 │   │       ├── raw_column.hpp              #       raw column parse/write
-│   │       ├── compression.hpp             #       DEFLATE compress/decompress via zlib
+│   │       ├── compression.hpp             #       raw DEFLATE compress/decompress via zlib (no header, windowBits=-15)
 │   │       ├── value_encoding.hpp          #       value metadata encoding (type tag + length)
 │   │       └── change_op_columns.hpp       #       op column encoding/decoding (14 parallel columns)
 │   └── sync/                               #   Sync protocol internals
@@ -105,6 +105,16 @@ ctest --test-dir build --output-on-failure
 ./build/benchmarks/automerge_cpp_benchmarks
 ```
 
+## Development Workflow
+
+**Always pass all tests before committing.** No exceptions. Run:
+
+```bash
+cmake --build build && ctest --test-dir build --output-on-failure
+```
+
+before every `git commit`. If tests fail, fix them first.
+
 ## Code Style
 
 **All code must follow [docs/style.md](docs/style.md)** — the project's comprehensive
@@ -156,7 +166,7 @@ See [docs/plans/architecture.md](docs/plans/architecture.md) for the full design
 | `DocState` (internal) | Object store, op log, change history, RGA merge, time travel |
 | `SyncState` | Per-peer synchronization state machine |
 | `BloomFilter` (internal) | Probabilistic set for sync protocol change discovery |
-| `storage/` (internal) | Columnar binary format (chunk envelope, op columns, DEFLATE compression) |
+| `storage/` (internal) | Columnar binary format (chunk envelope, op columns, raw DEFLATE compression) |
 | `crypto/` (internal) | SHA-256 for change hashes and chunk checksums |
 | `encoding/` (internal) | Codecs: LEB128, RLE, delta, boolean encoders |
 | `Patch` | Incremental change notifications from transactions |
@@ -250,7 +260,7 @@ See [docs/benchmark-results.md](docs/benchmark-results.md) for full results.
 - **Test**: Google Test (fetched via CMake FetchContent)
 - **Bench**: Google Benchmark (fetched via CMake FetchContent)
 - **Crypto**: SHA-256 (vendored or system)
-- **Compression**: zlib / libdeflate
+- **Compression**: zlib (raw DEFLATE, no header)
 
 ## Upstream Reference
 

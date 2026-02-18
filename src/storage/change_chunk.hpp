@@ -19,6 +19,7 @@
 #include "../encoding/leb128.hpp"
 
 #include <cstddef>
+#include <cassert>
 #include <cstdint>
 #include <cstring>
 #include <optional>
@@ -37,12 +38,15 @@ inline auto serialize_change_body(const Change& change,
 
     // Find actor index
     auto actor_idx = std::uint64_t{0};
+    bool actor_found = false;
     for (std::size_t i = 0; i < actor_table.size(); ++i) {
         if (actor_table[i] == change.actor) {
             actor_idx = static_cast<std::uint64_t>(i);
+            actor_found = true;
             break;
         }
     }
+    assert(actor_found && "change actor not found in actor_table");
 
     // Actor index
     encoding::encode_uleb128(actor_idx, body);

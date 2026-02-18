@@ -2,7 +2,8 @@
 
 // DEFLATE compression/decompression for column data.
 //
-// Columns larger than the threshold are compressed using zlib DEFLATE.
+// Columns larger than the threshold are compressed using raw DEFLATE
+// (no zlib/gzip header), matching the upstream Rust implementation.
 // The deflate bit in the ColumnSpec indicates whether a column is compressed.
 //
 // Internal header — not installed.
@@ -18,30 +19,36 @@ namespace automerge_cpp::storage {
 // Columns smaller than this are not compressed.
 inline constexpr std::size_t deflate_threshold = 256;
 
-// Compress data using zlib DEFLATE (raw deflate, no header).
+// Compress data using raw DEFLATE (no zlib/gzip header).
 inline auto deflate_compress(const std::vector<std::byte>& input)
     -> std::optional<std::vector<std::byte>> {
 
     if (input.empty()) return std::vector<std::byte>{};
 
-    auto bound = ::compressBound(static_cast<uLong>(input.size()));
-    auto output = std::vector<std::byte>(bound);
-    auto dest_len = static_cast<uLongf>(bound);
-
-    auto ret = ::compress2(
-        reinterpret_cast<Bytef*>(output.data()),
-        &dest_len,
-        reinterpret_cast<const Bytef*>(input.data()),
-        static_cast<uLong>(input.size()),
-        Z_DEFAULT_COMPRESSION);
-
+    auto stream = z_stream{};
+    // windowBits = -15 for raw deflate (negative = no header)
+    auto ret = ::deflateInit2(&stream, Z_DEFAULT_COMPRESSION, Z_DEFLATED,
+                              -15, 8, Z_DEFAULT_STRATEGY);
     if (ret != Z_OK) return std::nullopt;
 
-    output.resize(static_cast<std::size_t>(dest_len));
+    auto bound = ::deflateBound(&stream, static_cast<uLong>(input.size()));
+    auto output = std::vector<std::byte>(bound);
+
+    stream.next_in = const_cast<Bytef*>(reinterpret_cast<const Bytef*>(input.data()));
+    stream.avail_in = static_cast<uInt>(input.size());
+    stream.next_out = reinterpret_cast<Bytef*>(output.data());
+    stream.avail_out = static_cast<uInt>(bound);
+
+    ret = ::deflate(&stream, Z_FINISH);
+    ::deflateEnd(&stream);
+
+    if (ret != Z_STREAM_END) return std::nullopt;
+
+    output.resize(stream.total_out);
     return output;
 }
 
-// Decompress zlib-compressed data.
+// Decompress raw DEFLATE data (no zlib/gzip header).
 // max_output_size limits decompressed output to prevent memory bombs.
 inline auto deflate_decompress(const std::vector<std::byte>& input,
                                 std::size_t max_output_size = 64 * 1024 * 1024)
@@ -59,7 +66,8 @@ inline auto deflate_decompress(const std::vector<std::byte>& input,
     stream.next_out = reinterpret_cast<Bytef*>(output.data());
     stream.avail_out = static_cast<uInt>(output_size);
 
-    auto ret = ::inflateInit(&stream);
+    // windowBits = -15 for raw deflate (negative = no header)
+    auto ret = ::inflateInit2(&stream, -15);
     if (ret != Z_OK) return std::nullopt;
 
     ret = ::inflate(&stream, Z_FINISH);

@@ -316,7 +316,8 @@ See [docs/benchmark-results.md](../benchmark-results.md) for full results.
 - Format detection: try v2 first, fall back to v1 (backward compatible)
 - Column layout: OBJ(0), KEY(1), INSERT(3), ACTION(4), VAL(5), PRED(7), EXPAND(9), MARK_NAME(10)
 - Action codes: make_map/table=0, put=1, make_list/text=2, del=3, increment=4, mark=5
-- DEFLATE compression applied per-column when data exceeds 256 bytes
+- Raw DEFLATE compression (no zlib/gzip header, `windowBits=-15`) applied per-column when data exceeds 256 bytes, matching upstream Rust format
+- v1 heads recomputation tracks last hash per actor to preserve concurrent heads from merged documents
 
 ### Tests (67 new)
 - [x] RLE: empty, single value, runs, literal runs, null runs, mixed, string values (10 tests)
