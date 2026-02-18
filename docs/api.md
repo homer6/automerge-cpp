@@ -23,7 +23,7 @@ mutations through transactions.
 ### Construction
 
 ```cpp
-auto doc = Document{};                                       // default: hardware_concurrency() threads
+auto doc = Document{};                                       // default (no pool for max simplicity)
 auto doc = Document{8u};                                     // explicit 8-thread pool
 auto doc = Document{1u};                                     // single-threaded, no pool, zero overhead
 auto doc = Document{pool};                                   // shared pool (std::shared_ptr<thread_pool>)
@@ -45,13 +45,42 @@ All mutations go through `transact()`. The document is conceptually immutable
 outside of a transaction.
 
 ```cpp
+// Void transaction (std::function overload)
 doc.transact([](Transaction& tx) {
-    tx.put(root, "key", std::int64_t{42});
+    tx.put(root, "key", 42);
+});
+
+// Void transaction (generic lambda — template overload)
+doc.transact([](auto& tx) {
+    tx.put(root, "key", 42);
+});
+
+// Return-value transaction — lambda return type is deduced
+auto list_id = doc.transact([](Transaction& tx) {
+    return tx.put_object(root, "items", ObjType::list);
+});
+
+// Return-value transaction with patches
+auto [obj_id, patches] = doc.transact_with_patches([](Transaction& tx) {
+    return tx.put_object(root, "data", ObjType::map);
+});
+
+// Void transaction with patches
+auto patches = doc.transact_with_patches([](auto& tx) {
+    tx.put(root, "x", 42);
 });
 ```
 
 ```cpp
-doc.transact(std::function<void(Transaction&)> fn) -> void
+// Signatures
+void transact(const std::function<void(Transaction&)>& fn);
+
+template <typename Fn> auto transact(Fn&& fn) -> std::invoke_result_t<Fn, Transaction&>;
+template <typename Fn> void transact(Fn&& fn);  // void-returning template overload
+
+auto transact_with_patches(const std::function<void(Transaction&)>& fn) -> std::vector<Patch>;
+template <typename Fn> auto transact_with_patches(Fn&& fn)
+    -> std::pair<std::invoke_result_t<Fn, Transaction&>, std::vector<Patch>>;
 ```
 
 ### Reading — Maps
@@ -65,6 +94,60 @@ doc.get_all(ObjId, std::string_view key)   -> std::vector<Value>   // all confli
 
 ```cpp
 doc.get(ObjId, std::size_t index)          -> std::optional<Value>
+```
+
+### Typed get\<T\>()
+
+Like [nlohmann/json's `get<T>()`](https://json.nlohmann.me/api/basic_json/get/),
+returns `optional<T>` directly with no variant unwrapping:
+
+```cpp
+auto name  = doc.get<std::string>(root, "name");       // optional<string>
+auto age   = doc.get<std::int64_t>(root, "age");        // optional<int64_t>
+auto score = doc.get<double>(root, "score");             // optional<double>
+auto ok    = doc.get<bool>(root, "active");              // optional<bool>
+auto hits  = doc.get<Counter>(root, "hits");             // optional<Counter>
+auto ts    = doc.get<Timestamp>(root, "created");        // optional<Timestamp>
+
+// From lists
+auto item  = doc.get<std::string>(list_id, std::size_t{0});
+```
+
+Returns `nullopt` if the key/index doesn't exist **or** if the value is a different type.
+
+```cpp
+// Signatures
+template <typename T> auto get(const ObjId&, std::string_view) const -> std::optional<T>;
+template <typename T> auto get(const ObjId&, std::size_t) const -> std::optional<T>;
+```
+
+### operator[]
+
+Quick root map access:
+
+```cpp
+auto val = doc["key"];   // equivalent to doc.get(root, "key")
+```
+
+```cpp
+auto operator[](std::string_view key) const -> std::optional<Value>;
+```
+
+### get_path()
+
+Variadic nested access — each argument is a string (map key) or `size_t` (list index):
+
+```cpp
+auto port  = doc.get_path("config", "database", "port");
+auto title = doc.get_path("todos", std::size_t{0}, "title");
+auto deep  = doc.get_path("a", "b", "c", "d");
+```
+
+Returns `nullopt` if any intermediate path element doesn't exist or isn't an object.
+
+```cpp
+template <typename... Props> requires (sizeof...(Props) > 0)
+auto get_path(Props&&... props) const -> std::optional<Value>;
 ```
 
 ### Reading — Ranges
@@ -91,39 +174,58 @@ doc.object_type(ObjId) -> std::optional<ObjType>     // map, list, text, table
 
 ```cpp
 doc.fork()                                  -> Document              // deep copy with unique actor
-doc.merge(const Document&)                  -> void                  // apply unseen changes from other
+doc.merge(const Document&)                  -> void                  // apply unseen changes
 doc.get_changes()                           -> std::vector<Change>   // full change history
 doc.apply_changes(std::vector<Change>)      -> void                  // apply remote changes
-doc.get_heads()                             -> std::vector<ChangeHash>  // current DAG leaf hashes
+doc.get_heads()                             -> std::vector<ChangeHash>  // current DAG leaves
 ```
 
 ### Binary Serialization
 
 ```cpp
-doc.save()                                  -> std::vector<std::byte>         // serialize to binary
-Document::load(std::span<const std::byte>)  -> std::optional<Document>        // deserialize from binary
+doc.save()                                  -> std::vector<std::byte>
+Document::load(std::span<const std::byte>)  -> std::optional<Document>
 ```
 
 ### Sync Protocol
 
 ```cpp
-doc.generate_sync_message(SyncState&)       -> std::optional<SyncMessage>     // next message to send (nullopt = synced)
-doc.receive_sync_message(SyncState&, const SyncMessage&) -> void              // process received message
+doc.generate_sync_message(SyncState&)       -> std::optional<SyncMessage>
+doc.receive_sync_message(SyncState&, const SyncMessage&) -> void
+```
+
+### Historical Reads — Time Travel
+
+```cpp
+doc.get_at(ObjId, std::string_view key, const std::vector<ChangeHash>& heads) -> std::optional<Value>
+doc.get_at(ObjId, std::size_t index, const std::vector<ChangeHash>& heads)    -> std::optional<Value>
+doc.keys_at(ObjId, heads)    -> std::vector<std::string>
+doc.values_at(ObjId, heads)  -> std::vector<Value>
+doc.length_at(ObjId, heads)  -> std::size_t
+doc.text_at(ObjId, heads)    -> std::string
+```
+
+### Cursors — Stable Positions
+
+```cpp
+doc.cursor(ObjId, std::size_t index)           -> std::optional<Cursor>
+doc.resolve_cursor(ObjId, const Cursor&)       -> std::optional<std::size_t>
+```
+
+### Rich Text Marks
+
+```cpp
+doc.marks(ObjId)                               -> std::vector<Mark>
+doc.marks_at(ObjId, const std::vector<ChangeHash>&) -> std::vector<Mark>
 ```
 
 ### Thread Pool
 
 ```cpp
-doc.get_thread_pool()  -> std::shared_ptr<thread_pool>   // may be nullptr if sequential
+doc.get_thread_pool()  -> std::shared_ptr<thread_pool>   // may be nullptr
 ```
 
 ### Locking Control
-
-`Document` is thread-safe by default — read methods acquire a shared lock,
-write methods acquire an exclusive lock.
-
-For maximum read throughput when no writers are active, disable read locking
-to eliminate `shared_mutex` cache-line contention across cores:
 
 ```cpp
 doc.set_read_locking(bool enabled) -> void    // default: true
@@ -132,76 +234,8 @@ doc.read_locking()                 -> bool
 
 ```cpp
 doc.set_read_locking(false);  // caller guarantees no concurrent writers
-// ... parallel reads via pool->parallelize_loop() ...
+// ... parallel reads ...
 doc.set_read_locking(true);   // re-enable before writes
-```
-
----
-
-## thread_pool
-
-Barak Shoshany's BS::thread_pool — a header-only work-stealing thread pool.
-Documents use it internally and expose it for user-level parallelism.
-
-```cpp
-#include <automerge-cpp/thread_pool.hpp>
-```
-
-```cpp
-// Create a shared pool
-auto pool = std::make_shared<am::thread_pool>(std::thread::hardware_concurrency());
-pool->sleep_duration = 0;  // yield instead of 500us sleep for low latency
-
-pool->get_thread_count()  -> uint32_t
-
-// Parallel loop: partitions [first, last) into blocks across threads
-pool->parallelize_loop(first, last, [](auto start, auto end) {
-    for (auto i = start; i < end; ++i) { /* work */ }
-});
-
-// Async task submission
-auto future = pool->submit([]() { return 42; });
-auto result = future.get();  // 42
-```
-
----
-
-## SyncState
-
-Per-peer synchronization state machine. Create one `SyncState` per peer.
-
-```cpp
-#include <automerge-cpp/sync_state.hpp>
-```
-
-```cpp
-auto state = SyncState{};                   // fresh state for a new peer
-
-state.shared_heads()       -> const std::vector<ChangeHash>&   // what both sides have
-state.last_sent_heads()    -> const std::vector<ChangeHash>&   // what we last told them
-
-state.encode()             -> std::vector<std::byte>           // persist for reconnection
-SyncState::decode(span)    -> std::optional<SyncState>         // restore persisted state
-```
-
-## SyncMessage
-
-```cpp
-struct SyncMessage {
-    std::vector<ChangeHash> heads;     // sender's current heads
-    std::vector<ChangeHash> need;      // hashes sender explicitly needs
-    std::vector<Have> have;            // bloom filter summaries
-    std::vector<Change> changes;       // changes to apply
-};
-```
-
-## Have
-
-```cpp
-struct Have {
-    std::vector<ChangeHash> last_sync;  // snapshot point
-    std::vector<std::byte> bloom_bytes; // serialized bloom filter
-};
 ```
 
 ---
@@ -217,38 +251,201 @@ Created internally by `Document::transact()`. Provides all mutation operations.
 ### Map Operations
 
 ```cpp
-tx.put(ObjId, std::string_view key, ScalarValue val)            -> void
-tx.put_object(ObjId, std::string_view key, ObjType type)        -> ObjId   // returns new object
-tx.delete_key(ObjId, std::string_view key)                      -> void
+tx.put(ObjId, std::string_view key, ScalarValue val) -> void
+tx.put_object(ObjId, std::string_view key, ObjType)  -> ObjId
+tx.delete_key(ObjId, std::string_view key)            -> void
+```
+
+### Scalar Convenience Overloads (Map)
+
+`put()` accepts native C++ types — no need to wrap in `ScalarValue{}`:
+
+```cpp
+tx.put(root, "name", "Alice");                     // const char*
+tx.put(root, "name", std::string{"Alice"});        // std::string
+tx.put(root, "name", std::string_view{"Alice"});   // string_view
+tx.put(root, "age", 30);                           // int → int64_t
+tx.put(root, "age", std::int64_t{30});             // int64_t
+tx.put(root, "big", std::uint64_t{999});           // uint64_t
+tx.put(root, "pi", 3.14);                          // double
+tx.put(root, "ok", true);                          // bool
+tx.put(root, "empty", Null{});                     // Null
+tx.put(root, "views", Counter{0});                 // Counter
+tx.put(root, "created", Timestamp{1700000000000}); // Timestamp
 ```
 
 ### List Operations
 
 ```cpp
-tx.insert(ObjId, std::size_t index, ScalarValue val)            -> void
-tx.insert_object(ObjId, std::size_t index, ObjType type)        -> ObjId
-tx.set(ObjId, std::size_t index, ScalarValue val)               -> void
-tx.delete_index(ObjId, std::size_t index)                       -> void
+tx.insert(ObjId, std::size_t index, ScalarValue val)  -> void
+tx.insert_object(ObjId, std::size_t index, ObjType)   -> ObjId
+tx.set(ObjId, std::size_t index, ScalarValue val)      -> void
+tx.delete_index(ObjId, std::size_t index)              -> void
+```
+
+### Scalar Convenience Overloads (List)
+
+`insert()` and `set()` also accept native types:
+
+```cpp
+tx.insert(list, 0, "hello");                // const char*
+tx.insert(list, 0, std::string{"hello"});   // std::string
+tx.insert(list, 0, 42);                     // int → int64_t
+tx.insert(list, 0, 3.14);                   // double
+tx.insert(list, 0, true);                   // bool
+
+tx.set(list, 0, "updated");                 // same overloads for set()
+```
+
+### Batch Operations
+
+```cpp
+// Batch insert from initializer list
+tx.insert_all(ObjId, std::size_t start, std::initializer_list<ScalarValue> values);
+
+// Batch put key-value pairs from initializer list
+tx.put_all(ObjId, std::initializer_list<std::pair<std::string_view, ScalarValue>> entries);
+
+// Populate from any associative container (std::map, std::unordered_map, etc.)
+template <typename Map>
+tx.put_map(ObjId, const Map& map);
+
+// Insert from any range of ScalarValue-convertible values
+template <std::ranges::input_range R>
+tx.insert_range(ObjId, std::size_t start, R&& range);
+```
+
+#### Batch Examples
+
+```cpp
+// Initializer list — batch put
+tx.put_all(root, {
+    {"name", ScalarValue{std::string{"Alice"}}},
+    {"age",  ScalarValue{std::int64_t{30}}},
+    {"active", ScalarValue{true}},
+});
+
+// Initializer list — batch insert
+tx.insert_all(list, 0, {
+    ScalarValue{std::int64_t{1}},
+    ScalarValue{std::int64_t{2}},
+    ScalarValue{std::int64_t{3}},
+});
+
+// From std::map
+auto data = std::map<std::string, ScalarValue>{
+    {"x", ScalarValue{std::int64_t{10}}},
+    {"y", ScalarValue{std::int64_t{20}}},
+};
+tx.put_map(root, data);
+
+// From std::vector (or any range)
+auto vals = std::vector<ScalarValue>{
+    ScalarValue{std::int64_t{100}},
+    ScalarValue{std::int64_t{200}},
+};
+tx.insert_range(list, 0, vals);
 ```
 
 ### Text Operations
 
 ```cpp
 tx.splice_text(ObjId, std::size_t pos, std::size_t del,
-               std::string_view text)                           -> void
+               std::string_view text) -> void
 ```
 
 ### Counter Operations
 
 ```cpp
-tx.increment(ObjId, std::string_view key, std::int64_t delta)   -> void
+tx.increment(ObjId, std::string_view key, std::int64_t delta) -> void
 ```
 
 ### Mark Operations (Rich Text)
 
 ```cpp
 tx.mark(ObjId, std::size_t start, std::size_t end,
-        std::string_view name, ScalarValue value)               -> void
+        std::string_view name, ScalarValue value) -> void
+```
+
+---
+
+## Values
+
+```cpp
+#include <automerge-cpp/value.hpp>
+```
+
+### ObjType
+
+```cpp
+enum class ObjType : uint8_t { map, list, text, table };
+
+to_string_view(ObjType) -> std::string_view
+```
+
+### Scalar Tag Types
+
+```cpp
+struct Null {};                                          // ==, <=>
+struct Counter { std::int64_t value; };                   // ==, <=>
+struct Timestamp { std::int64_t millis_since_epoch; };    // ==, <=>
+using Bytes = std::vector<std::byte>;
+```
+
+### ScalarValue
+
+Closed variant — no extension point.
+
+```cpp
+using ScalarValue = std::variant<
+    Null, bool, std::int64_t, std::uint64_t, double,
+    Counter, Timestamp, std::string, Bytes
+>;
+```
+
+### Value
+
+A value in the document tree: either a nested object or a scalar.
+
+```cpp
+using Value = std::variant<ObjType, ScalarValue>;
+
+is_scalar(const Value&) -> bool
+is_object(const Value&) -> bool
+```
+
+### overload Helper
+
+Ad-hoc variant visitor from lambdas:
+
+```cpp
+template <typename... Ts>
+struct overload : Ts... { using Ts::operator()...; };
+
+// Usage
+std::visit(overload{
+    [](std::string s)  { printf("%s\n", s.c_str()); },
+    [](std::int64_t i) { printf("%ld\n", i); },
+    [](auto&&)         { printf("other\n"); },
+}, some_variant);
+```
+
+### get_scalar\<T\>()
+
+Extract a typed scalar from a `Value` or `optional<Value>`:
+
+```cpp
+template <typename T>
+auto get_scalar(const Value& v) -> std::optional<T>;
+
+template <typename T>
+auto get_scalar(const std::optional<Value>& v) -> std::optional<T>;
+```
+
+```cpp
+auto val = doc.get(root, "name");
+auto name = get_scalar<std::string>(val);   // optional<string>
+auto num  = get_scalar<std::int64_t>(val);  // optional<int64_t> — nullopt if wrong type
 ```
 
 ---
@@ -266,7 +463,7 @@ tx.mark(ObjId, std::size_t start, std::size_t end,
 ```cpp
 ActorId{}                             // all zeros
 ActorId{std::array<std::byte, 16>}    // from byte array
-ActorId{uint8_t[16]}                  // from raw bytes (convenience)
+ActorId{uint8_t[16]}                  // from raw bytes
 
 id.is_zero()    -> bool
 id.bytes        -> std::array<std::byte, 16>
@@ -330,55 +527,48 @@ A key into a map or index into a list.
 ```cpp
 using Prop = std::variant<std::string, std::size_t>;
 
-map_key("name")     -> Prop    // string alternative
-list_index(3)       -> Prop    // size_t alternative
+map_key("name")     -> Prop
+list_index(3)       -> Prop
 ```
 
 ---
 
-## Values
+## SyncState
+
+Per-peer synchronization state machine. Create one `SyncState` per peer.
 
 ```cpp
-#include <automerge-cpp/value.hpp>
+#include <automerge-cpp/sync_state.hpp>
 ```
 
-### ObjType
-
 ```cpp
-enum class ObjType : uint8_t { map, list, text, table };
+auto state = SyncState{};
 
-to_string_view(ObjType) -> std::string_view
+state.shared_heads()       -> const std::vector<ChangeHash>&
+state.last_sent_heads()    -> const std::vector<ChangeHash>&
+
+state.encode()             -> std::vector<std::byte>
+SyncState::decode(span)    -> std::optional<SyncState>
 ```
 
-### Scalar Tag Types
+### SyncMessage
 
 ```cpp
-struct Null {};                                          // ==, <=>
-struct Counter { std::int64_t value; };                   // ==, <=>
-struct Timestamp { std::int64_t millis_since_epoch; };    // ==, <=>
-using Bytes = std::vector<std::byte>;
+struct SyncMessage {
+    std::vector<ChangeHash> heads;
+    std::vector<ChangeHash> need;
+    std::vector<Have> have;
+    std::vector<Change> changes;
+};
 ```
 
-### ScalarValue
-
-Closed variant — no extension point.
+### Have
 
 ```cpp
-using ScalarValue = std::variant<
-    Null, bool, std::int64_t, std::uint64_t, double,
-    Counter, Timestamp, std::string, Bytes
->;
-```
-
-### Value
-
-A value in the document tree: either a nested object or a scalar.
-
-```cpp
-using Value = std::variant<ObjType, ScalarValue>;
-
-is_scalar(const Value&) -> bool
-is_object(const Value&) -> bool
+struct Have {
+    std::vector<ChangeHash> last_sync;
+    std::vector<std::byte> bloom_bytes;
+};
 ```
 
 ---
@@ -412,8 +602,6 @@ struct Op {
 };
 ```
 
-Supports: `==`.
-
 ---
 
 ## Change
@@ -434,6 +622,66 @@ struct Change {
 };
 ```
 
+---
+
+## Patch
+
+```cpp
+#include <automerge-cpp/patch.hpp>
+```
+
+```cpp
+struct PatchPut { Value value; bool conflict; };
+struct PatchInsert { std::size_t index; Value value; };
+struct PatchDelete { std::size_t index; std::size_t count; };
+struct PatchIncrement { std::int64_t delta; };
+struct PatchSpliceText { std::size_t index; std::size_t delete_count; std::string text; };
+
+using PatchAction = std::variant<PatchPut, PatchInsert, PatchDelete, PatchIncrement, PatchSpliceText>;
+
+struct Patch {
+    ObjId obj;
+    Prop key;
+    PatchAction action;
+};
+```
+
+---
+
+## Cursor
+
+```cpp
+#include <automerge-cpp/cursor.hpp>
+```
+
+```cpp
+struct Cursor {
+    OpId position;  // the OpId of the element this cursor points to
+};
+```
+
+Supports: `==`, `<=>`.
+
+---
+
+## Mark
+
+```cpp
+#include <automerge-cpp/mark.hpp>
+```
+
+```cpp
+struct Mark {
+    std::size_t start;      // start index (inclusive)
+    std::size_t end;        // end index (exclusive)
+    std::string name;       // e.g. "bold", "italic", "link"
+    ScalarValue value;      // e.g. true, "https://..."
+};
+```
+
+Marks are anchored to element OpIds internally — indices are resolved at read time
+and survive insertions, deletions, and merges.
+
 Supports: `==`.
 
 ---
@@ -444,8 +692,6 @@ Supports: `==`.
 #include <automerge-cpp/error.hpp>
 ```
 
-### ErrorKind
-
 ```cpp
 enum class ErrorKind : uint8_t {
     invalid_document, invalid_change, invalid_obj_id,
@@ -453,19 +699,36 @@ enum class ErrorKind : uint8_t {
 };
 
 to_string_view(ErrorKind) -> std::string_view
-```
 
-### Error
-
-```cpp
 struct Error {
     ErrorKind kind;
     std::string message;
 };
 ```
 
-Used with `std::expected<T, Error>` for fallible operations (planned for
-Phase 3+).
+---
+
+## thread_pool
+
+Barak Shoshany's BS::thread_pool — a header-only work-stealing thread pool.
+
+```cpp
+#include <automerge-cpp/thread_pool.hpp>
+```
+
+```cpp
+auto pool = std::make_shared<am::thread_pool>(std::thread::hardware_concurrency());
+pool->sleep_duration = 0;  // yield instead of 500us sleep
+
+pool->get_thread_count()  -> uint32_t
+
+pool->parallelize_loop(first, last, [](auto start, auto end) {
+    for (auto i = start; i < end; ++i) { /* work */ }
+});
+
+auto future = pool->submit([]() { return 42; });
+auto result = future.get();  // 42
+```
 
 ---
 
@@ -478,40 +741,42 @@ namespace am = automerge_cpp;
 
 auto doc = am::Document{};
 doc.transact([](auto& tx) {
-    tx.put(am::root, "name", std::string{"Alice"});
-    tx.put(am::root, "age", std::int64_t{30});
+    tx.put(am::root, "name", "Alice");
+    tx.put(am::root, "age", 30);
     tx.put(am::root, "active", true);
 });
 
-auto name = doc.get(am::root, "name");    // optional<Value>
-auto keys = doc.keys(am::root);           // {"active", "age", "name"}
+auto name = doc.get<std::string>(am::root, "name");   // optional<string>{"Alice"}
+auto age  = doc.get<std::int64_t>(am::root, "age");    // optional<int64_t>{30}
+auto keys = doc.keys(am::root);                         // {"active", "age", "name"}
 ```
 
 ### Nested Objects
 
 ```cpp
 auto doc = am::Document{};
-am::ObjId list_id;
-
-doc.transact([&](auto& tx) {
-    list_id = tx.put_object(am::root, "items", am::ObjType::list);
-    tx.insert(list_id, 0, std::string{"Milk"});
-    tx.insert(list_id, 1, std::string{"Eggs"});
+auto list_id = doc.transact([](am::Transaction& tx) {
+    auto list = tx.put_object(am::root, "items", am::ObjType::list);
+    tx.insert(list, 0, "Milk");
+    tx.insert(list, 1, "Eggs");
+    return list;
 });
 
-doc.length(list_id);              // 2
-doc.get(list_id, std::size_t{0}); // "Milk"
+doc.length(list_id);                            // 2
+doc.get<std::string>(list_id, std::size_t{0});  // "Milk"
+
+// Or use get_path
+doc.get_path("items", std::size_t{0});          // Value{"Milk"}
 ```
 
 ### Text Editing
 
 ```cpp
 auto doc = am::Document{};
-am::ObjId text_id;
-
-doc.transact([&](auto& tx) {
-    text_id = tx.put_object(am::root, "content", am::ObjType::text);
-    tx.splice_text(text_id, 0, 0, "Hello World");
+auto text_id = doc.transact([](am::Transaction& tx) {
+    auto t = tx.put_object(am::root, "content", am::ObjType::text);
+    tx.splice_text(t, 0, 0, "Hello World");
+    return t;
 });
 
 doc.text(text_id);  // "Hello World"
@@ -533,85 +798,43 @@ doc.transact([](auto& tx) {
 doc.transact([](auto& tx) {
     tx.increment(am::root, "views", 1);
 });
-// Counter value is now 1
+
+auto views = doc.get<am::Counter>(am::root, "views");
+// views->value == 1
 ```
 
 ### Fork and Merge
 
 ```cpp
-namespace am = automerge_cpp;
-
 auto doc1 = am::Document{};
-doc1.transact([](auto& tx) {
-    tx.put(am::root, "x", std::int64_t{1});
-});
+doc1.transact([](auto& tx) { tx.put(am::root, "x", 1); });
 
-auto doc2 = doc1.fork();  // independent copy, unique actor
+auto doc2 = doc1.fork();
 
-// Concurrent edits
-doc1.transact([](auto& tx) {
-    tx.put(am::root, "a", std::string{"from doc1"});
-});
-doc2.transact([](auto& tx) {
-    tx.put(am::root, "b", std::string{"from doc2"});
-});
+doc1.transact([](auto& tx) { tx.put(am::root, "a", "from doc1"); });
+doc2.transact([](auto& tx) { tx.put(am::root, "b", "from doc2"); });
 
 doc1.merge(doc2);
-// doc1 now has keys: "a", "b", "x"
-
-// Conflict detection
-auto all = doc1.get_all(am::root, "x");
-// all.size() == 1 (no conflict — same value from before fork)
+// doc1 has keys: "a", "b", "x"
 ```
 
 ### Save and Load
 
 ```cpp
-namespace am = automerge_cpp;
-
-auto doc = am::Document{};
-doc.transact([](auto& tx) {
-    tx.put(am::root, "key", std::string{"value"});
-});
-
-// Serialize to binary
 auto bytes = doc.save();
-
-// Deserialize — returns nullopt on invalid data
-auto loaded = am::Document::load(bytes);
-if (loaded) {
-    auto val = loaded->get(am::root, "key");  // "value"
-
-    // Loaded documents can continue editing and merging
-    loaded->transact([](auto& tx) {
-        tx.put(am::root, "new_key", std::int64_t{42});
-    });
+if (auto loaded = am::Document::load(bytes)) {
+    auto val = loaded->get<std::string>(am::root, "key");
 }
 ```
 
 ### Sync Protocol
 
 ```cpp
-namespace am = automerge_cpp;
-
-auto doc_a = am::Document{};
-doc_a.transact([](auto& tx) {
-    tx.put(am::root, "from_a", std::int64_t{1});
-});
-
-auto doc_b = am::Document{};
-doc_b.transact([](auto& tx) {
-    tx.put(am::root, "from_b", std::int64_t{2});
-});
-
-// Each peer gets its own SyncState
 auto state_a = am::SyncState{};
 auto state_b = am::SyncState{};
 
-// Exchange messages until synced
 for (int i = 0; i < 10; ++i) {
     bool progress = false;
-
     if (auto msg = doc_a.generate_sync_message(state_a)) {
         doc_b.receive_sync_message(state_b, *msg);
         progress = true;
@@ -620,63 +843,46 @@ for (int i = 0; i < 10; ++i) {
         doc_a.receive_sync_message(state_a, *msg);
         progress = true;
     }
-
-    if (!progress) break;  // fully synced
+    if (!progress) break;
 }
-
-// Both documents now have both keys
-doc_a.get(am::root, "from_b");  // 2
-doc_b.get(am::root, "from_a");  // 1
 ```
 
-### Rich Text Marks
+### Patches
 
 ```cpp
-doc.marks(ObjId)                            -> std::vector<Mark>
-doc.marks_at(ObjId, std::vector<ChangeHash>) -> std::vector<Mark>
-```
-
-### Patches — Mutation with Change Notifications
-
-```cpp
-auto patches = doc.transact_with_patches([](auto& tx) {
-    tx.put(am::root, "name", std::string{"Alice"});
+auto patches = doc.transact_with_patches([&](auto& tx) {
+    tx.put(am::root, "name", "Alice");
     tx.splice_text(text_id, 5, 6, " C++23");
 });
 
 for (const auto& patch : patches) {
-    if (auto* put = std::get_if<am::PatchPut>(&patch.action)) {
-        // put->value, put->conflict
-    } else if (auto* splice = std::get_if<am::PatchSpliceText>(&patch.action)) {
-        // splice->index, splice->delete_count, splice->text
-    }
+    std::visit(am::overload{
+        [](const am::PatchPut& p) { /* p.value, p.conflict */ },
+        [](const am::PatchSpliceText& s) { /* s.index, s.text */ },
+        [](auto&&) { /* other patch types */ },
+    }, patch.action);
 }
 ```
 
-### Historical Reads — Time Travel
+### Time Travel
 
 ```cpp
-doc.transact([](auto& tx) { tx.put(am::root, "x", std::int64_t{1}); });
+doc.transact([](auto& tx) { tx.put(am::root, "x", 1); });
 auto v1 = doc.get_heads();
 
-doc.transact([](auto& tx) { tx.put(am::root, "x", std::int64_t{2}); });
+doc.transact([](auto& tx) { tx.put(am::root, "x", 2); });
 
-doc.get_at(am::root, "x", v1);     // 1 (reads the past)
+doc.get_at(am::root, "x", v1);     // 1 (past)
 doc.get(am::root, "x");            // 2 (current)
-
-doc.keys_at(am::root, v1);         // keys at v1
-doc.values_at(am::root, v1);       // values at v1
-doc.length_at(am::root, v1);       // length at v1
-doc.text_at(text_id, v1);          // text content at v1
 ```
 
-### Cursors — Stable Positions
+### Cursors
 
 ```cpp
-auto cur = doc.cursor(list_id, 1);  // cursor at index 1
+auto cur = doc.cursor(list_id, 1);
 
 doc.transact([&](auto& tx) {
-    tx.insert(list_id, 0, std::string{"new"});  // insert before cursor
+    tx.insert(list_id, 0, "new");  // insert before cursor
 });
 
 auto idx = doc.resolve_cursor(list_id, *cur);
@@ -686,90 +892,18 @@ auto idx = doc.resolve_cursor(list_id, *cur);
 ### Rich Text Marks
 
 ```cpp
-am::ObjId text_id;
-doc.transact([&](auto& tx) {
-    text_id = tx.put_object(am::root, "content", am::ObjType::text);
-    tx.splice_text(text_id, 0, 0, "Hello World");
+auto text_id = doc.transact([](am::Transaction& tx) {
+    auto t = tx.put_object(am::root, "content", am::ObjType::text);
+    tx.splice_text(t, 0, 0, "Hello World");
+    return t;
 });
 
-// Mark "Hello" as bold
 doc.transact([&](auto& tx) {
     tx.mark(text_id, 0, 5, "bold", true);
-});
-
-// Mark "World" as a link
-doc.transact([&](auto& tx) {
     tx.mark(text_id, 6, 11, "link", std::string{"https://example.com"});
 });
 
 auto marks = doc.marks(text_id);
 // marks[0]: {start=0, end=5, name="bold", value=true}
 // marks[1]: {start=6, end=11, name="link", value="https://example.com"}
-
-// Marks survive insertions — indices adjust automatically
-doc.transact([&](auto& tx) {
-    tx.splice_text(text_id, 0, 0, ">>> ");
-});
-// "bold" mark is now at {start=4, end=9}
 ```
-
----
-
-## Patch
-
-```cpp
-#include <automerge-cpp/patch.hpp>
-```
-
-```cpp
-using PathElement = std::variant<std::string, std::size_t>;
-using Path = std::vector<PathElement>;
-
-struct PatchPut { Value value; bool conflict; };
-struct PatchInsert { std::size_t index; Value value; };
-struct PatchDelete { std::size_t index; std::size_t count; };
-struct PatchIncrement { std::int64_t delta; };
-struct PatchSpliceText { std::size_t index; std::size_t delete_count; std::string text; };
-
-using PatchAction = std::variant<PatchPut, PatchInsert, PatchDelete, PatchIncrement, PatchSpliceText>;
-
-struct Patch {
-    ObjId obj;
-    Prop key;
-    PatchAction action;
-};
-```
-
-## Cursor
-
-```cpp
-#include <automerge-cpp/cursor.hpp>
-```
-
-```cpp
-struct Cursor {
-    OpId position;  // the OpId of the element this cursor points to
-};
-```
-
-Supports: `==`, `<=>`.
-
-## Mark
-
-```cpp
-#include <automerge-cpp/mark.hpp>
-```
-
-```cpp
-struct Mark {
-    std::size_t start;      // start index (inclusive)
-    std::size_t end;        // end index (exclusive)
-    std::string name;       // e.g. "bold", "italic", "link"
-    ScalarValue value;      // e.g. true, "https://..."
-};
-```
-
-Marks are anchored to element OpIds internally, so they survive insertions,
-deletions, and merges — indices are resolved at read time.
-
-Supports: `==`.

@@ -15,7 +15,7 @@ automerge-cpp/
 │   ├── document.hpp                        #   Document class
 │   ├── transaction.hpp                     #   Transaction class
 │   ├── types.hpp                           #   ActorId, ObjId, OpId, ChangeHash, Prop
-│   ├── value.hpp                           #   ScalarValue, Value, ObjType
+│   ├── value.hpp                           #   ScalarValue, Value, ObjType, overload, get_scalar
 │   ├── change.hpp                          #   Change struct
 │   ├── op.hpp                              #   Op, OpType
 │   ├── sync_state.hpp                      #   SyncState, SyncMessage, Have
@@ -48,7 +48,7 @@ automerge-cpp/
 │   │       └── change_op_columns.hpp       #       op column encoding/decoding (14 parallel columns)
 │   └── sync/                               #   Sync protocol internals
 │       └── bloom_filter.hpp                #     bloom filter (10 bits/entry, 7 probes)
-├── tests/                                  # TESTS (Google Test) — 347 tests
+├── tests/                                  # TESTS (Google Test) — 453 tests
 │   ├── CMakeLists.txt
 │   ├── error_test.cpp
 │   ├── types_test.cpp
@@ -70,7 +70,8 @@ automerge-cpp/
 │   ├── text_editor.cpp
 │   ├── sync_demo.cpp
 │   ├── thread_safe_demo.cpp
-│   └── parallel_perf_demo.cpp
+│   ├── parallel_perf_demo.cpp
+│   └── json_interop_demo.cpp
 ├── benchmarks/                             # BENCHMARKS (Google Benchmark)
 │   ├── CMakeLists.txt
 │   └── placeholder_benchmark.cpp
@@ -87,7 +88,8 @@ automerge-cpp/
 │   ├── style.md                            #   coding style guide (Ben Deane)
 │   └── plans/
 │       ├── architecture.md                 #   design & module decomposition
-│       ├── roadmap.md                      #   phased implementation plan (Phases 0-11 in progress)
+│       ├── roadmap.md                      #   phased implementation plan (Phases 0-12A complete, 11/12B in progress)
+│       ├── nlohmann-json-interop.md        #   nlohmann/json integration design
 │       ├── phase8-10-plan.md               #   Phase 8-10 detailed plan
 │       ├── v0.4.0-performance.md           #   Phase 11 performance release plan
 │       └── profiling-analysis.md           #   v0.3.0 bottleneck profiling and parallelization
@@ -97,7 +99,8 @@ automerge-cpp/
 │   ├── macos.yml                           #   Apple Clang
 │   ├── windows.yml                         #   MSVC
 │   └── freebsd.yml                         #   Clang (VM)
-└── upstream/automerge/                     # UPSTREAM REFERENCE (git submodule)
+├── upstream/automerge/                     # UPSTREAM REFERENCE (git submodule)
+└── upstream/json/                         # nlohmann/json (git submodule)
 ```
 
 ## Build Commands
@@ -222,7 +225,7 @@ See [docs/plans/architecture.md](docs/plans/architecture.md) for the full design
 
 ## Testing
 
-347 tests across 13 test files. Uses Google Test (fetched via CMake FetchContent).
+453 tests across 13 test files. Uses Google Test (fetched via CMake FetchContent).
 
 | Test File | Count | Covers |
 |-----------|-------|--------|
@@ -231,14 +234,14 @@ See [docs/plans/architecture.md](docs/plans/architecture.md) for the full design
 | `value_test.cpp` | 14 | ScalarValue, Value, ObjType, Null, Counter, Timestamp |
 | `op_test.cpp` | 4 | Op, OpType |
 | `change_test.cpp` | 4 | Change |
-| `document_test.cpp` | 205 | Document core, merge, serialization, sync, patches, time travel, cursors, marks, thread safety, conflict resolution, list concurrency, counters, save/load edge cases, large data stress, text/marks, sync protocol |
+| `document_test.cpp` | 246 | Document core, merge, serialization, sync, patches, time travel, cursors, marks, thread safety, conflict resolution, list concurrency, counters, save/load edge cases, large data stress, text/marks, sync protocol, typed get<T>(), scalar overloads, batch ops, operator[], get_path, get_scalar, overload helper |
 | `leb128_test.cpp` | 22 | LEB128 encode/decode |
-| `rle_test.cpp` | 10 | RLE encoder/decoder round-trips |
+| `rle_test.cpp` | 69 | RLE encoder/decoder round-trips |
 | `delta_encoder_test.cpp` | 11 | Delta encoder/decoder round-trips |
 | `sha256_test.cpp` | 7 | SHA-256 NIST test vectors |
 | `column_spec_test.cpp` | 8 | Column spec encoding/decoding |
-| `chunk_test.cpp` | 10 | Chunk envelope, checksum validation |
-| `change_op_columns_test.cpp` | 21 | Op column encode/decode, all op types including marks |
+| `chunk_test.cpp` | 17 | Chunk envelope, checksum validation |
+| `change_op_columns_test.cpp` | 25 | Op column encode/decode, all op types including marks |
 
 - **Property tests**: verify CRDT algebraic properties (commutativity, associativity, idempotency)
 - **Naming**: `TEST(ModuleName, descriptive_behavior_name)`
@@ -257,16 +260,17 @@ TEST(Document, put_and_get_round_trips) {
 
 ## Examples
 
-Six example programs in `examples/`:
+Seven example programs in `examples/`:
 
 | Example | Description |
 |---------|-------------|
-| `basic_usage` | Create doc, put/get values, counters, save/load |
+| `basic_usage` | Create doc, typed get<T>(), operator[], get_path, counters, save/load |
 | `collaborative_todo` | Two actors concurrently editing a shared todo list |
 | `text_editor` | Text editing with patches, cursors, and time travel |
 | `sync_demo` | Peer-to-peer sync with SyncState |
 | `thread_safe_demo` | Multi-threaded concurrent reads and writes on a single Document |
 | `parallel_perf_demo` | Monoid-powered fork/merge parallelism, parallel save/load/sync |
+| `json_interop_demo` | nlohmann/json import/export, fork/merge round-trip |
 
 ## Benchmarks
 
@@ -295,13 +299,15 @@ See [docs/benchmark-results.md](docs/benchmark-results.md) for full results.
 | Benchmark Results | [docs/benchmark-results.md](docs/benchmark-results.md) | Performance measurements |
 | Style Guide | [docs/style.md](docs/style.md) | Coding conventions (Ben Deane principles) |
 | Architecture | [docs/plans/architecture.md](docs/plans/architecture.md) | Design, types, modules, data model |
-| Roadmap | [docs/plans/roadmap.md](docs/plans/roadmap.md) | Phased implementation plan (Phases 0-9 complete) |
+| Roadmap | [docs/plans/roadmap.md](docs/plans/roadmap.md) | Phased implementation plan (Phases 0-12A complete) |
+| nlohmann/json Interop | [docs/plans/nlohmann-json-interop.md](docs/plans/nlohmann-json-interop.md) | JSON integration design |
 | Profiling Analysis | [docs/plans/profiling-analysis.md](docs/plans/profiling-analysis.md) | v0.3.0 bottleneck profiling (sample/perf), parallelization opportunities |
 | v0.4.0 Performance Plan | [docs/plans/v0.4.0-performance.md](docs/plans/v0.4.0-performance.md) | Phase 11 performance release plan (Fenwick tree, hash cache, thread pool, ARM SHA-256) |
 
 ## Dependencies
 
 - **Build**: CMake 3.28+, C++23 compiler
+- **JSON**: nlohmann/json (header-only, git submodule at `upstream/json/`)
 - **Test**: Google Test (fetched via CMake FetchContent)
 - **Bench**: Google Benchmark (fetched via CMake FetchContent)
 - **Parallelism**: Barak Shoshany's BS::thread_pool (header-only, fetched via CMake FetchContent)

@@ -22,6 +22,11 @@ option(AUTOMERGE_CPP_BUILD_FUZZ "Build fuzz targets (requires Clang)" OFF)
 find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED)
 
+# nlohmann/json (header-only, from upstream submodule)
+set(JSON_BuildTests OFF CACHE INTERNAL "")
+set(JSON_Install OFF CACHE INTERNAL "")
+add_subdirectory(upstream/json)
+
 # Library
 add_library(automerge-cpp)
 add_library(automerge-cpp::automerge-cpp ALIAS automerge-cpp)

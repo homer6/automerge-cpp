@@ -15,3 +15,6 @@ target_link_libraries(thread_safe_demo PRIVATE automerge-cpp::automerge-cpp)
 
 add_executable(parallel_perf_demo parallel_perf_demo.cpp)
 target_link_libraries(parallel_perf_demo PRIVATE automerge-cpp::automerge-cpp)
+
+add_executable(json_interop_demo json_interop_demo.cpp)
+target_link_libraries(json_interop_demo PRIVATE automerge-cpp::automerge-cpp nlohmann_json::nlohmann_json)
