@@ -1,0 +1,21 @@
+name: Windows
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    name: MSVC
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Configure
+      run: cmake -B build -DAUTOMERGE_CPP_BUILD_TESTS=ON -DAUTOMERGE_CPP_BUILD_EXAMPLES=ON -DAUTOMERGE_CPP_BUILD_BENCHMARKS=ON
+
+    - name: Build
+      run: cmake --build build --config Release
+
+    - name: Test
+      run: ctest --test-dir build -C Release --output-on-failure
