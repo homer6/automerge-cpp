@@ -5,6 +5,52 @@
 automerge-cpp is a from-scratch C++23 implementation of the Automerge CRDT library.
 It mirrors the upstream Rust Automerge semantics with a modern, declarative C++ API.
 
+## Repository Tree
+
+```
+automerge-cpp/
+├── CMakeLists.txt                          # root build — library + optional targets
+├── include/automerge-cpp/                  # PUBLIC HEADERS (installed)
+│   ├── automerge.hpp                       #   umbrella header
+│   ├── document.hpp                        #   Document class
+│   ├── transaction.hpp                     #   Transaction class
+│   ├── types.hpp                           #   ActorId, ObjId, OpId, ChangeHash, Prop
+│   ├── value.hpp                           #   ScalarValue, Value, ObjType
+│   ├── change.hpp                          #   Change struct
+│   ├── op.hpp                              #   Op, OpType
+│   └── error.hpp                           #   Error, ErrorKind
+├── src/                                    # IMPLEMENTATION
+│   ├── doc_state.hpp                       #   internal: DocState, ObjectState, MapEntry, ListElement
+│   ├── document.cpp                        #   Document methods
+│   └── transaction.cpp                     #   Transaction methods
+├── tests/                                  # TESTS (Google Test)
+│   ├── CMakeLists.txt
+│   ├── error_test.cpp
+│   ├── types_test.cpp
+│   ├── value_test.cpp
+│   ├── op_test.cpp
+│   ├── change_test.cpp
+│   └── document_test.cpp
+├── examples/                               # EXAMPLES
+│   ├── CMakeLists.txt
+│   └── basic_usage.cpp
+├── benchmarks/                             # BENCHMARKS (Google Benchmark)
+│   ├── CMakeLists.txt
+│   └── placeholder_benchmark.cpp
+├── docs/                                   # DOCUMENTATION
+│   ├── api.md                              #   API reference
+│   ├── style.md                            #   coding style guide (Ben Deane)
+│   └── plans/
+│       ├── architecture.md                 #   design & module decomposition
+│       └── roadmap.md                      #   phased implementation plan
+├── .github/workflows/                      # CI
+│   ├── linux.yml                           #   GCC + Clang
+│   ├── macos.yml                           #   Apple Clang
+│   ├── windows.yml                         #   MSVC
+│   └── freebsd.yml                         #   Clang (VM)
+└── upstream/automerge/                     # UPSTREAM REFERENCE (git submodule)
+```
+
 ## Build Commands
 
 ```bash
@@ -105,6 +151,15 @@ TEST(DocumentTest, put_and_get_round_trips) {
     EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(*val)), 42);
 }
 ```
+
+## Documentation
+
+| Document | Path | Description |
+|----------|------|-------------|
+| API Reference | [docs/api.md](docs/api.md) | Every public type, method, and usage examples |
+| Style Guide | [docs/style.md](docs/style.md) | Coding conventions (Ben Deane principles) |
+| Architecture | [docs/plans/architecture.md](docs/plans/architecture.md) | Design, types, modules, data model |
+| Roadmap | [docs/plans/roadmap.md](docs/plans/roadmap.md) | Phased implementation plan with status |
 
 ## Dependencies
 
