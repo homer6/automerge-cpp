@@ -1,7 +1,11 @@
-#pragma once
+/// @file automerge.hpp
+/// @brief Umbrella header for the automerge-cpp library.
+///
+/// Include this single header for access to all public types:
+/// Document, Transaction, ActorId, ObjId, Value, Change, Patch,
+/// SyncState, Cursor, Mark, and Error.
 
-// automerge-cpp umbrella header
-// Include this single header for access to all public types.
+#pragma once
 
 #include <automerge-cpp/change.hpp>
 #include <automerge-cpp/cursor.hpp>

@@ -76,11 +76,12 @@ automerge-cpp/
 │   ├── generate_seeds.cpp                  #   helper to generate seed corpus
 │   └── corpus/                             #   seed corpus (upstream crashers + valid docs)
 ├── docs/                                   # DOCUMENTATION
+│   ├── Doxyfile                            #   Doxygen configuration
 │   ├── api.md                              #   API reference
 │   ├── style.md                            #   coding style guide (Ben Deane)
 │   └── plans/
 │       ├── architecture.md                 #   design & module decomposition
-│       ├── roadmap.md                      #   phased implementation plan (Phases 0-9 complete)
+│       ├── roadmap.md                      #   phased implementation plan (Phases 0-10 complete)
 │       └── phase8-10-plan.md               #   Phase 8-10 detailed plan
 ├── .clang-tidy                             # clang-tidy configuration
 ├── .github/workflows/                      # CI

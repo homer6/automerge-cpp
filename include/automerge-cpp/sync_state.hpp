@@ -1,3 +1,6 @@
+/// @file sync_state.hpp
+/// @brief Sync protocol types: SyncState, SyncMessage, Have.
+
 #pragma once
 
 #include <automerge-cpp/change.hpp>
@@ -12,45 +15,55 @@
 
 namespace automerge_cpp {
 
-// A summary of what a peer has: a snapshot point plus a bloom filter
-// of all changes since that point.
+/// A summary of what a peer has: a snapshot point plus a bloom filter
+/// of all changes since that point.
 struct Have {
-    std::vector<ChangeHash> last_sync;
-    std::vector<std::byte> bloom_bytes;  // serialized bloom filter
+    std::vector<ChangeHash> last_sync;    ///< The heads at the last sync point.
+    std::vector<std::byte> bloom_bytes;   ///< Serialized bloom filter of changes since last_sync.
 
     auto operator==(const Have&) const -> bool = default;
 };
 
-// A sync message exchanged between peers.
+/// A sync message exchanged between peers.
+///
+/// The sync protocol exchanges messages containing heads, explicit
+/// needs, bloom filter summaries, and changes. See Document::generate_sync_message()
+/// and Document::receive_sync_message().
 struct SyncMessage {
-    std::vector<ChangeHash> heads;      // sender's current heads
-    std::vector<ChangeHash> need;       // hashes the sender explicitly needs
-    std::vector<Have> have;             // bloom filter summaries of what sender has
-    std::vector<Change> changes;        // changes for the recipient to apply
+    std::vector<ChangeHash> heads;    ///< Sender's current DAG heads.
+    std::vector<ChangeHash> need;     ///< Hashes the sender explicitly needs.
+    std::vector<Have> have;           ///< Bloom filter summaries of what the sender has.
+    std::vector<Change> changes;      ///< Changes for the recipient to apply.
 
     auto operator==(const SyncMessage&) const -> bool = default;
 };
 
-// Per-peer synchronization state machine.
-// Create one SyncState per peer you are synchronizing with.
+/// Per-peer synchronization state machine.
+///
+/// Create one SyncState per peer you are synchronizing with.
+/// Pass it to Document::generate_sync_message() and
+/// Document::receive_sync_message() to drive the sync protocol.
+///
+/// SyncState can be persisted with encode()/decode() for resumable sync.
 class SyncState {
 public:
     SyncState() = default;
 
-    // The hashes which we know both peers share.
+    /// The hashes which we know both peers share.
     auto shared_heads() const -> const std::vector<ChangeHash>& {
         return shared_heads_;
     }
 
-    // The heads we last sent to this peer.
+    /// The heads we last sent to this peer.
     auto last_sent_heads() const -> const std::vector<ChangeHash>& {
         return last_sent_heads_;
     }
 
-    // Encode persistent state (only shared_heads) for storage.
+    /// Encode persistent state (shared_heads only) for storage.
     auto encode() const -> std::vector<std::byte>;
 
-    // Decode persistent state from storage.
+    /// Decode persistent state from storage.
+    /// @return The decoded SyncState, or nullopt if the data is invalid.
     static auto decode(std::span<const std::byte> data) -> std::optional<SyncState>;
 
 private:
