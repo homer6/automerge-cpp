@@ -12,7 +12,7 @@ This is a **from-scratch** reimplementation, not a wrapper. It mirrors the upstr
 Automerge semantics while embracing idiomatic C++23: algebraic types, ranges pipelines,
 strong types, and an API inspired by [nlohmann/json](https://github.com/nlohmann/json).
 
-**453 tests passing** across 13 test files. [nlohmann/json](https://github.com/nlohmann/json) interoperability included.
+**461 tests passing** across 13 test files. [nlohmann/json](https://github.com/nlohmann/json) interoperability included.
 
 ## Quick Example
 
@@ -23,27 +23,19 @@ namespace am = automerge_cpp;
 int main() {
     auto doc = am::Document{};
 
-    // transact() returns values — no external ObjId declarations needed
+    // Initializer lists — like nlohmann/json
     auto list_id = doc.transact([](am::Transaction& tx) {
-        tx.put(am::root, "title", "Shopping List");    // direct string literal
-        tx.put(am::root, "count", 0);                  // int promotes to int64
-
-        auto items = tx.put(am::root, "items", am::ObjType::list);
-        tx.insert(items, 0, "Milk");
-        tx.insert(items, 1, "Eggs");
-        tx.insert(items, 2, "Bread");
-        return items;
+        tx.put(am::root, "title", "Shopping List");
+        tx.put(am::root, "count", 0);
+        return tx.put(am::root, "items", am::List{"Milk", "Eggs", "Bread"});
     });
 
-    // Typed get<T>() — like nlohmann/json, returns std::optional<T>
+    // Typed get<T>() — returns std::optional<T>
     auto title = doc.get<std::string>(am::root, "title");   // optional<string>
     auto count = doc.get<std::int64_t>(am::root, "count");  // optional<int64_t>
 
-    // operator[] for root access
-    auto val = doc["title"];  // optional<Value>
-
     // get_path() for nested access
-    auto first = doc.get_path("items", std::size_t{0});  // optional<Value>
+    auto first = doc.get_path("items", std::size_t{0});     // optional<Value>
 
     // Fork and make concurrent edits
     auto doc2 = doc.fork();
@@ -53,7 +45,6 @@ int main() {
 
     // Merge — both edits preserved, no data loss
     doc.merge(doc2);
-    // list: Milk, Eggs, Bread, Butter, Cheese (deterministic order)
 
     // Save to binary and reload
     auto bytes = doc.save();
@@ -102,34 +93,27 @@ auto [obj_id, patches] = doc.transact_with_patches([](Transaction& tx) {
 });
 ```
 
-### Batch operations
+### Initializer lists — like nlohmann/json
 
 ```cpp
 doc.transact([](auto& tx) {
-    // Batch put via initializer list
-    tx.put_all(root, {
-        {"name", ScalarValue{std::string{"Alice"}}},
-        {"age",  ScalarValue{std::int64_t{30}}},
+    // Create a populated list in one call
+    auto items = tx.put(root, "items", List{"Milk", "Eggs", "Bread"});
+
+    // Create a populated map in one call
+    auto config = tx.put(root, "config", Map{
+        {"port", 8080},
+        {"host", "localhost"},
+        {"debug", false},
     });
 
-    // Batch insert into lists
-    auto list = tx.put(root, "nums", ObjType::list);
-    tx.insert_all(list, 0, {
-        ScalarValue{std::int64_t{1}},
-        ScalarValue{std::int64_t{2}},
-        ScalarValue{std::int64_t{3}},
-    });
+    // Mixed types work naturally
+    auto mixed = tx.put(root, "data", List{1, "hello", 3.14, true});
 
-    // From STL containers
-    auto data = std::map<std::string, ScalarValue>{
-        {"x", ScalarValue{std::int64_t{10}}},
-        {"y", ScalarValue{std::int64_t{20}}},
-    };
-    tx.put_map(root, data);
-
-    // From ranges
-    auto values = std::vector<ScalarValue>{...};
-    tx.insert_range(list, 0, values);
+    // Insert populated objects into lists
+    auto records = tx.put(root, "records", ObjType::list);
+    tx.insert(records, 0, Map{{"name", "Alice"}, {"role", "admin"}});
+    tx.insert(records, 1, Map{{"name", "Bob"}, {"role", "editor"}});
 });
 ```
 

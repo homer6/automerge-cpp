@@ -251,9 +251,12 @@ Created internally by `Document::transact()`. Provides all mutation operations.
 ### Map Operations
 
 ```cpp
-tx.put(ObjId, std::string_view key, ScalarValue val) -> void
-tx.put_object(ObjId, std::string_view key, ObjType)  -> ObjId
-tx.delete_key(ObjId, std::string_view key)            -> void
+tx.put(ObjId, std::string_view key, ScalarValue val)  -> void
+tx.put(ObjId, std::string_view key, ObjType type)     -> ObjId   // create empty object
+tx.put(ObjId, std::string_view key, List{...})         -> ObjId   // create populated list
+tx.put(ObjId, std::string_view key, Map{...})          -> ObjId   // create populated map
+tx.put_object(ObjId, std::string_view key, ObjType)    -> ObjId   // alias for put(ObjType)
+tx.delete_key(ObjId, std::string_view key)             -> void
 ```
 
 ### Scalar Convenience Overloads (Map)
@@ -277,10 +280,13 @@ tx.put(root, "created", Timestamp{1700000000000}); // Timestamp
 ### List Operations
 
 ```cpp
-tx.insert(ObjId, std::size_t index, ScalarValue val)  -> void
-tx.insert_object(ObjId, std::size_t index, ObjType)   -> ObjId
-tx.set(ObjId, std::size_t index, ScalarValue val)      -> void
-tx.delete_index(ObjId, std::size_t index)              -> void
+tx.insert(ObjId, std::size_t index, ScalarValue val)   -> void
+tx.insert(ObjId, std::size_t index, ObjType type)      -> ObjId   // create empty object
+tx.insert(ObjId, std::size_t index, List{...})          -> ObjId   // create populated list
+tx.insert(ObjId, std::size_t index, Map{...})           -> ObjId   // create populated map
+tx.insert_object(ObjId, std::size_t index, ObjType)     -> ObjId   // alias for insert(ObjType)
+tx.set(ObjId, std::size_t index, ScalarValue val)       -> void
+tx.delete_index(ObjId, std::size_t index)               -> void
 ```
 
 ### Scalar Convenience Overloads (List)
@@ -295,6 +301,59 @@ tx.insert(list, 0, 3.14);                   // double
 tx.insert(list, 0, true);                   // bool
 
 tx.set(list, 0, "updated");                 // same overloads for set()
+```
+
+### Initializer Lists (`List{}`, `Map{}`)
+
+Create and populate nested objects in a single call — like nlohmann/json's
+`json::array()` and `json::object()`:
+
+```cpp
+#include <automerge-cpp/value.hpp>  // List, Map
+```
+
+#### Signatures
+
+```cpp
+// Create a populated list at a map key
+tx.put(ObjId, std::string_view key, List{values...}) -> ObjId
+
+// Create a populated map at a map key
+tx.put(ObjId, std::string_view key, Map{{"k1", v1}, {"k2", v2}}) -> ObjId
+
+// Insert a populated list into a list
+tx.insert(ObjId, std::size_t index, List{values...}) -> ObjId
+
+// Insert a populated map into a list
+tx.insert(ObjId, std::size_t index, Map{{"k1", v1}, {"k2", v2}}) -> ObjId
+```
+
+#### Examples
+
+```cpp
+doc.transact([](auto& tx) {
+    // Create a list with initial values
+    auto items = tx.put(root, "items", List{"Milk", "Eggs", "Bread"});
+
+    // Create a map with initial entries
+    auto config = tx.put(root, "config", Map{
+        {"port", 8080},
+        {"host", "localhost"},
+        {"debug", false},
+    });
+
+    // Mixed types work — int, string, double, bool
+    auto mixed = tx.put(root, "data", List{1, "hello", 3.14, true});
+
+    // Empty containers
+    auto empty_list = tx.put(root, "log", List{});
+    auto empty_map = tx.put(root, "meta", Map{});
+
+    // Insert into lists
+    auto records = tx.put(root, "users", ObjType::list);
+    tx.insert(records, 0, Map{{"name", "Alice"}, {"role", "admin"}});
+    tx.insert(records, 1, Map{{"name", "Bob"}, {"role", "editor"}});
+});
 ```
 
 ### Batch Operations
@@ -413,6 +472,26 @@ using Value = std::variant<ObjType, ScalarValue>;
 is_scalar(const Value&) -> bool
 is_object(const Value&) -> bool
 ```
+
+### List / Map Initializer Types
+
+Wrapper types for creating populated nested objects via `put()` and `insert()`:
+
+```cpp
+struct List {
+    std::vector<ScalarValue> values;
+    List() = default;
+    List(std::initializer_list<ScalarValue> v);
+};
+
+struct Map {
+    std::vector<std::pair<std::string, ScalarValue>> entries;
+    Map() = default;
+    Map(std::initializer_list<std::pair<std::string_view, ScalarValue>> e);
+};
+```
+
+Native types convert implicitly: `"hello"` -> string, `42` -> int64, `3.14` -> double, `true` -> bool.
 
 ### overload Helper
 

@@ -5071,3 +5071,101 @@ TEST(Document, overload_helper_multi_type) {
     EXPECT_EQ(check(ScalarValue{true}), "true");
     EXPECT_EQ(check(ScalarValue{3.14}), "other");
 }
+
+// -- List / Map initializer list tests ----------------------------------------
+
+TEST(Document, put_list_initializer_creates_populated_list) {
+    auto doc = Document{};
+    auto items = doc.transact([](auto& tx) {
+        return tx.put(root, "items", List{"Milk", "Eggs", "Bread"});
+    });
+    EXPECT_EQ(doc.length(items), 3u);
+    EXPECT_EQ(doc.get<std::string>(items, std::size_t{0}), "Milk");
+    EXPECT_EQ(doc.get<std::string>(items, std::size_t{1}), "Eggs");
+    EXPECT_EQ(doc.get<std::string>(items, std::size_t{2}), "Bread");
+}
+
+TEST(Document, put_list_empty_creates_empty_list) {
+    auto doc = Document{};
+    auto items = doc.transact([](auto& tx) {
+        return tx.put(root, "items", List{});
+    });
+    EXPECT_EQ(doc.length(items), 0u);
+    auto type = doc.object_type(items);
+    ASSERT_TRUE(type.has_value());
+    EXPECT_EQ(*type, ObjType::list);
+}
+
+TEST(Document, put_map_initializer_creates_populated_map) {
+    auto doc = Document{};
+    auto config = doc.transact([](auto& tx) {
+        return tx.put(root, "config", Map{{"port", 8080}, {"host", "localhost"}});
+    });
+    EXPECT_EQ(doc.get<std::int64_t>(config, "port"), 8080);
+    EXPECT_EQ(doc.get<std::string>(config, "host"), "localhost");
+}
+
+TEST(Document, put_map_empty_creates_empty_map) {
+    auto doc = Document{};
+    auto m = doc.transact([](auto& tx) {
+        return tx.put(root, "data", Map{});
+    });
+    EXPECT_EQ(doc.length(m), 0u);
+    auto type = doc.object_type(m);
+    ASSERT_TRUE(type.has_value());
+    EXPECT_EQ(*type, ObjType::map);
+}
+
+TEST(Document, insert_list_initializer_into_list) {
+    auto doc = Document{};
+    auto outer = doc.transact([](auto& tx) {
+        auto outer = tx.put(root, "outer", ObjType::list);
+        tx.insert(outer, 0, List{"a", "b", "c"});
+        return outer;
+    });
+    // outer[0] is a nested list
+    auto nested_val = doc.get(outer, std::size_t{0});
+    ASSERT_TRUE(nested_val.has_value());
+    EXPECT_TRUE(is_object(*nested_val));
+}
+
+TEST(Document, insert_map_initializer_into_list) {
+    auto doc = Document{};
+    auto outer = doc.transact([](auto& tx) {
+        auto outer = tx.put(root, "records", ObjType::list);
+        tx.insert(outer, 0, Map{{"name", "Alice"}, {"age", 30}});
+        return outer;
+    });
+    EXPECT_EQ(doc.length(outer), 1u);
+    if (auto name = doc.get_path("records", std::size_t{0}, "name")) {
+        EXPECT_EQ(get_scalar<std::string>(*name), "Alice");
+    }
+}
+
+TEST(Document, list_initializer_mixed_types) {
+    auto doc = Document{};
+    auto items = doc.transact([](auto& tx) {
+        return tx.put(root, "mixed", List{1, "hello", 3.14, true});
+    });
+    EXPECT_EQ(doc.length(items), 4u);
+    EXPECT_EQ(doc.get<std::int64_t>(items, std::size_t{0}), 1);
+    EXPECT_EQ(doc.get<std::string>(items, std::size_t{1}), "hello");
+    EXPECT_EQ(doc.get<double>(items, std::size_t{2}), 3.14);
+    EXPECT_EQ(doc.get<bool>(items, std::size_t{3}), true);
+}
+
+TEST(Document, list_initializer_survives_save_load) {
+    auto doc = Document{};
+    doc.transact([](auto& tx) {
+        tx.put(root, "tags", List{"crdt", "cpp", "collaborative"});
+    });
+    auto bytes = doc.save();
+    auto loaded = Document::load(bytes);
+    ASSERT_TRUE(loaded.has_value());
+    if (auto tag = loaded->get_path("tags", std::size_t{0})) {
+        EXPECT_EQ(get_scalar<std::string>(*tag), "crdt");
+    }
+    if (auto tag = loaded->get_path("tags", std::size_t{2})) {
+        EXPECT_EQ(get_scalar<std::string>(*tag), "collaborative");
+    }
+}

@@ -89,6 +89,35 @@ constexpr auto is_object(const Value& v) -> bool {
     return std::holds_alternative<ObjType>(v);
 }
 
+// -- Initializer list helpers -------------------------------------------------
+
+/// Initializer for creating populated lists via `put` or `insert`.
+///
+/// @code
+/// auto items = tx.put(root, "items", List{"Milk", "Eggs", "Bread"});
+/// auto empty = tx.put(root, "data", List{});
+/// @endcode
+struct List {
+    std::vector<ScalarValue> values;
+    List() = default;
+    List(std::initializer_list<ScalarValue> v) : values(v) {}
+};
+
+/// Initializer for creating populated maps via `put` or `insert`.
+///
+/// @code
+/// auto config = tx.put(root, "config", Map{{"port", 8080}, {"host", "localhost"}});
+/// auto empty = tx.put(root, "data", Map{});
+/// @endcode
+struct Map {
+    std::vector<std::pair<std::string, ScalarValue>> entries;
+    Map() = default;
+    Map(std::initializer_list<std::pair<std::string_view, ScalarValue>> e) {
+        entries.reserve(e.size());
+        for (const auto& [k, v] : e) entries.emplace_back(std::string{k}, v);
+    }
+};
+
 // -- Variant visitor helper ---------------------------------------------------
 
 /// Helper for constructing ad-hoc visitors from lambdas.

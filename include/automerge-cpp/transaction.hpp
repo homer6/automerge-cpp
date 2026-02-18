@@ -193,12 +193,46 @@ public:
     }
 
     /// Insert a nested object into a list (convenience overload for insert_object).
-    /// @param obj The list object to modify.
-    /// @param index The position to insert at.
-    /// @param type The type of nested object to create (ObjType::map, ObjType::list, etc.).
-    /// @return The ObjId of the newly created object.
     auto insert(const ObjId& obj, std::size_t index, ObjType type) -> ObjId {
         return insert_object(obj, index, type);
+    }
+
+    // -- Initializer list overloads (List / Map) ------------------------------
+
+    /// Create a list at a map key and populate it with initial values.
+    /// @code
+    /// auto items = tx.put(root, "items", List{"Milk", "Eggs", "Bread"});
+    /// @endcode
+    auto put(const ObjId& obj, std::string_view key, List init) -> ObjId {
+        auto list = put_object(obj, key, ObjType::list);
+        std::size_t idx = 0;
+        for (const auto& val : init.values) insert(list, idx++, val);
+        return list;
+    }
+
+    /// Create a map at a map key and populate it with initial entries.
+    /// @code
+    /// auto config = tx.put(root, "config", Map{{"port", 8080}, {"host", "localhost"}});
+    /// @endcode
+    auto put(const ObjId& obj, std::string_view key, Map init) -> ObjId {
+        auto map = put_object(obj, key, ObjType::map);
+        for (const auto& [k, v] : init.entries) put(map, std::string_view{k}, v);
+        return map;
+    }
+
+    /// Insert a list at a list index and populate it with initial values.
+    auto insert(const ObjId& obj, std::size_t index, List init) -> ObjId {
+        auto list = insert_object(obj, index, ObjType::list);
+        std::size_t idx = 0;
+        for (const auto& val : init.values) insert(list, idx++, val);
+        return list;
+    }
+
+    /// Insert a map at a list index and populate it with initial entries.
+    auto insert(const ObjId& obj, std::size_t index, Map init) -> ObjId {
+        auto map = insert_object(obj, index, ObjType::map);
+        for (const auto& [k, v] : init.entries) put(map, std::string_view{k}, v);
+        return map;
     }
 
     // -- Scalar convenience overloads (list set) ------------------------------
