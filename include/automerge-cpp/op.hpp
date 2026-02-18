@@ -1,3 +1,6 @@
+/// @file op.hpp
+/// @brief Operation types for the CRDT log.
+
 #pragma once
 
 #include <automerge-cpp/types.hpp>
@@ -10,19 +13,18 @@
 
 namespace automerge_cpp {
 
-// -- OpType -------------------------------------------------------------------
-// The kind of mutation an operation represents.
-
+/// The kind of mutation an operation represents.
 enum class OpType : std::uint8_t {
-    put,           // set a value at a key/index
-    del,           // delete a key/index
-    insert,        // insert into a sequence
-    make_object,   // create a nested object
-    increment,     // increment a counter
-    splice_text,   // splice text content
-    mark,          // apply a rich-text mark
+    put,           ///< Set a value at a key or index.
+    del,           ///< Delete a key or index.
+    insert,        ///< Insert into a sequence (list or text).
+    make_object,   ///< Create a nested object (map, list, text, table).
+    increment,     ///< Increment a counter value.
+    splice_text,   ///< Splice text content (insert/delete characters).
+    mark,          ///< Apply a rich-text mark annotation.
 };
 
+/// Convert an OpType to its string representation.
 constexpr auto to_string_view(OpType type) noexcept -> std::string_view {
     switch (type) {
         case OpType::put:         return "put";
@@ -36,17 +38,19 @@ constexpr auto to_string_view(OpType type) noexcept -> std::string_view {
     return "unknown";
 }
 
-// -- Op -----------------------------------------------------------------------
-// A single operation in the CRDT log.
-
+/// A single operation in the CRDT op log.
+///
+/// Operations are the fundamental unit of change in Automerge. Each
+/// operation has a globally unique OpId, targets an object and property,
+/// and carries a value. Operations are immutable once created.
 struct Op {
-    OpId id;
-    ObjId obj;
-    Prop key;
-    OpType action;
-    Value value;
-    std::vector<OpId> pred;              // predecessor ops (for conflict tracking)
-    std::optional<OpId> insert_after{};  // for insert/splice: the element inserted after
+    OpId id;                                 ///< Globally unique operation identifier.
+    ObjId obj;                               ///< The object this operation targets.
+    Prop key;                                ///< The property (map key or list index).
+    OpType action;                           ///< The type of mutation.
+    Value value;                             ///< The value being set/inserted.
+    std::vector<OpId> pred;                  ///< Predecessor ops (for conflict tracking).
+    std::optional<OpId> insert_after{};      ///< For insert/splice: the element to insert after.
 
     auto operator==(const Op&) const -> bool = default;
 };

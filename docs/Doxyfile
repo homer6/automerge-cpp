@@ -1,0 +1,58 @@
+# Doxyfile for automerge-cpp
+# Generate with: doxygen docs/Doxyfile
+
+PROJECT_NAME           = "automerge-cpp"
+PROJECT_NUMBER         = 0.2.0
+PROJECT_BRIEF          = "A modern C++23 implementation of the Automerge CRDT library"
+
+OUTPUT_DIRECTORY       = docs
+HTML_OUTPUT            = html
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+
+INPUT                  = include/automerge-cpp
+FILE_PATTERNS          = *.hpp
+RECURSIVE              = NO
+
+# C++23 support
+EXTENSION_MAPPING      = hpp=C++
+
+# Extract everything, including undocumented members
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = YES
+
+# Show source code
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = NO
+
+# Sort members alphabetically
+SORT_MEMBER_DOCS       = YES
+SORT_BRIEF_DOCS        = YES
+
+# Preprocessor
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = NO
+
+# Diagrams
+HAVE_DOT               = NO
+CLASS_DIAGRAMS         = YES
+COLLABORATION_GRAPH    = NO
+INCLUDE_GRAPH          = YES
+INCLUDED_BY_GRAPH      = YES
+
+# Warnings
+WARN_IF_UNDOCUMENTED   = YES
+WARN_IF_DOC_ERROR      = YES
+WARN_NO_PARAMDOC       = NO
+
+# Layout
+DISABLE_INDEX          = NO
+GENERATE_TREEVIEW      = YES
+FULL_SIDEBAR           = NO
+
+# Markdown support
+MARKDOWN_SUPPORT       = YES
+
+# Use standard library type display
+BUILTIN_STL_SUPPORT    = YES

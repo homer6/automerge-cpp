@@ -350,3 +350,30 @@ See [docs/benchmark-results.md](../benchmark-results.md) for full results.
 - ASan+UBSan runs in Debug mode (unoptimized) for maximum sensitivity
 - clang-tidy checks are conservative: bugprone-*, clang-analyzer-*, performance-*, select modernize/readability
 - WarningsAsErrors empty in .clang-tidy (local dev sees warnings); CI uses --warnings-as-errors='*'
+
+---
+
+## Phase 10: Doxygen API Documentation
+**Status**: Complete — all 12 public headers annotated
+
+### Deliverables
+- [x] `docs/Doxyfile` — Doxygen configuration (input=`include/automerge-cpp/`, output=`docs/html/`)
+- [x] `/// @file` and `/// @brief` on all 12 public headers
+- [x] `///` doc comments on all classes, structs, enums, methods, and fields
+- [x] `@param` and `@return` annotations on Transaction and Document methods
+- [x] `@code` examples in Document and Transaction class docs
+- [x] `.gitignore` updated with `docs/html/`
+
+### Headers Annotated
+- `automerge.hpp` — umbrella header file docs
+- `document.hpp` — Document class, all methods
+- `transaction.hpp` — Transaction class, all mutation methods
+- `types.hpp` — ActorId, ChangeHash, OpId, ObjId, Root, Prop
+- `value.hpp` — ScalarValue, Value, ObjType, Null, Counter, Timestamp
+- `op.hpp` — Op, OpType
+- `change.hpp` — Change
+- `sync_state.hpp` — SyncState, SyncMessage, Have
+- `patch.hpp` — Patch, PatchAction, PatchPut/Insert/Delete/Increment/SpliceText
+- `cursor.hpp` — Cursor
+- `mark.hpp` — Mark
+- `error.hpp` — Error, ErrorKind

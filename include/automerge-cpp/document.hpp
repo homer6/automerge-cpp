@@ -1,3 +1,6 @@
+/// @file document.hpp
+/// @brief The Document class -- the primary API for automerge-cpp.
+
 #pragma once
 
 #include <automerge-cpp/change.hpp>
@@ -22,80 +25,204 @@ namespace automerge_cpp {
 
 namespace detail { struct DocState; }
 
+/// A CRDT document that supports concurrent editing and deterministic merge.
+///
+/// Document is the primary user-facing type in automerge-cpp. It owns the
+/// CRDT state (objects, operations, change history) and provides a
+/// transactional mutation API. Documents can be forked, merged, saved to
+/// binary, loaded from binary, and synchronized with peers.
+///
+/// All mutations go through Transaction objects obtained via transact()
+/// or transact_with_patches(). Reads can be performed directly on the
+/// Document.
+///
+/// @code
+/// auto doc = Document{};
+/// doc.transact([](auto& tx) {
+///     tx.put(root, "greeting", std::string{"hello"});
+/// });
+/// auto val = doc.get(root, "greeting");
+/// @endcode
 class Document {
 public:
+    /// Construct a new empty document with a random actor ID.
     Document();
     ~Document();
 
     Document(Document&&) noexcept;
     auto operator=(Document&&) noexcept -> Document&;
 
+    /// Deep-copy a document. The copy is independent and shares no state.
     Document(const Document&);
+    /// Deep-copy assignment.
     auto operator=(const Document&) -> Document&;
 
-    // Identity
+    // -- Identity -------------------------------------------------------------
+
+    /// Get the actor ID of this document.
     auto actor_id() const -> const ActorId&;
+
+    /// Set the actor ID. Must be called before any mutations.
     void set_actor_id(ActorId id);
 
-    // Mutation via transaction
+    // -- Mutation -------------------------------------------------------------
+
+    /// Execute a function within a transaction.
+    ///
+    /// All operations performed on the Transaction are applied atomically
+    /// when the function returns. If the function throws, the transaction
+    /// is rolled back.
+    /// @param fn A function that receives a Transaction reference.
     void transact(std::function<void(Transaction&)> fn);
 
-    // Reading — map operations
+    // -- Reading: map operations ----------------------------------------------
+
+    /// Get the winning value at a map key.
+    /// @param obj The map object to read from.
+    /// @param key The key to look up.
+    /// @return The value, or nullopt if the key doesn't exist.
     auto get(const ObjId& obj, std::string_view key) const -> std::optional<Value>;
+
+    /// Get all concurrent values at a map key (for conflict inspection).
+    /// @param obj The map object to read from.
+    /// @param key The key to look up.
+    /// @return All values at this key (empty if key doesn't exist).
     auto get_all(const ObjId& obj, std::string_view key) const -> std::vector<Value>;
 
-    // Reading — list operations
+    // -- Reading: list operations ---------------------------------------------
+
+    /// Get the value at a list index.
+    /// @param obj The list object to read from.
+    /// @param index The index to look up.
+    /// @return The value, or nullopt if the index is out of bounds.
     auto get(const ObjId& obj, std::size_t index) const -> std::optional<Value>;
 
-    // Reading — ranges
+    // -- Reading: ranges ------------------------------------------------------
+
+    /// Get all keys in a map, sorted lexicographically.
     auto keys(const ObjId& obj) const -> std::vector<std::string>;
+
+    /// Get all values in a map (in key order) or list (in index order).
     auto values(const ObjId& obj) const -> std::vector<Value>;
+
+    /// Get the number of entries in a map or elements in a list/text.
     auto length(const ObjId& obj) const -> std::size_t;
 
-    // Reading — text
+    // -- Reading: text --------------------------------------------------------
+
+    /// Get the text content of a text object as a string.
     auto text(const ObjId& obj) const -> std::string;
 
-    // Object type query
+    // -- Object type query ----------------------------------------------------
+
+    /// Get the type of an object (map, list, text, table).
+    /// @return The object type, or nullopt if the object doesn't exist.
     auto object_type(const ObjId& obj) const -> std::optional<ObjType>;
 
-    // Phase 3: Fork and Merge
+    // -- Fork and Merge -------------------------------------------------------
+
+    /// Create an independent copy with a new actor ID.
     auto fork() const -> Document;
+
+    /// Merge another document's unseen changes into this one.
+    ///
+    /// Merge is commutative, associative, and idempotent.
     void merge(const Document& other);
+
+    /// Get all changes in this document's history.
     auto get_changes() const -> std::vector<Change>;
+
+    /// Apply a set of changes from another document.
     void apply_changes(const std::vector<Change>& changes);
+
+    /// Get the current DAG leaf hashes (heads).
     auto get_heads() const -> std::vector<ChangeHash>;
 
-    // Phase 4: Binary Serialization
+    // -- Binary Serialization -------------------------------------------------
+
+    /// Serialize the document to binary format.
+    /// @return The serialized bytes (v2 chunk-based format).
     auto save() const -> std::vector<std::byte>;
+
+    /// Load a document from binary data.
+    ///
+    /// Supports both v2 (chunk-based) and v1 (row-based) formats with
+    /// automatic detection.
+    /// @param data The binary data to load from.
+    /// @return The loaded document, or nullopt if the data is invalid.
     static auto load(std::span<const std::byte> data) -> std::optional<Document>;
 
-    // Phase 5: Sync Protocol
+    // -- Sync Protocol --------------------------------------------------------
+
+    /// Generate the next sync message to send to a peer.
+    /// @param sync_state The per-peer sync state (modified in place).
+    /// @return The message to send, or nullopt if no message is needed.
     auto generate_sync_message(SyncState& sync_state) const -> std::optional<SyncMessage>;
+
+    /// Process a sync message received from a peer.
+    /// @param sync_state The per-peer sync state (modified in place).
+    /// @param message The received message to process.
     void receive_sync_message(SyncState& sync_state, const SyncMessage& message);
 
-    // Phase 6: Patches — mutation with change notifications
+    // -- Patches --------------------------------------------------------------
+
+    /// Execute a transaction and return patches describing the changes.
+    ///
+    /// Patches describe the externally visible effects of the transaction
+    /// (puts, inserts, deletes, increments, text splices).
+    /// @param fn A function that receives a Transaction reference.
+    /// @return The patches produced by the transaction.
     auto transact_with_patches(std::function<void(Transaction&)> fn) -> std::vector<Patch>;
 
-    // Phase 6: Historical reads — time travel
+    // -- Historical reads (time travel) ---------------------------------------
+
+    /// Get a map value as it was at a given point in history.
+    /// @param obj The map object.
+    /// @param key The key to look up.
+    /// @param heads The DAG heads defining the point in time.
     auto get_at(const ObjId& obj, std::string_view key,
                 const std::vector<ChangeHash>& heads) const -> std::optional<Value>;
+
+    /// Get a list value as it was at a given point in history.
     auto get_at(const ObjId& obj, std::size_t index,
                 const std::vector<ChangeHash>& heads) const -> std::optional<Value>;
+
+    /// Get map keys at a given point in history.
     auto keys_at(const ObjId& obj,
                  const std::vector<ChangeHash>& heads) const -> std::vector<std::string>;
+
+    /// Get values at a given point in history.
     auto values_at(const ObjId& obj,
                    const std::vector<ChangeHash>& heads) const -> std::vector<Value>;
+
+    /// Get length at a given point in history.
     auto length_at(const ObjId& obj,
                    const std::vector<ChangeHash>& heads) const -> std::size_t;
+
+    /// Get text content at a given point in history.
     auto text_at(const ObjId& obj,
                  const std::vector<ChangeHash>& heads) const -> std::string;
 
-    // Phase 6: Cursors — stable positions
+    // -- Cursors --------------------------------------------------------------
+
+    /// Create a cursor at a position in a list or text.
+    /// @param obj The list or text object.
+    /// @param index The current index to anchor the cursor to.
+    /// @return A Cursor, or nullopt if the index is out of bounds.
     auto cursor(const ObjId& obj, std::size_t index) const -> std::optional<Cursor>;
+
+    /// Resolve a cursor to its current index.
+    /// @param obj The list or text object.
+    /// @param cursor The cursor to resolve.
+    /// @return The current index, or nullopt if the element was deleted.
     auto resolve_cursor(const ObjId& obj, const Cursor& cursor) const -> std::optional<std::size_t>;
 
-    // Rich text marks
+    // -- Rich text marks ------------------------------------------------------
+
+    /// Get all marks on a text or list object.
     auto marks(const ObjId& obj) const -> std::vector<Mark>;
+
+    /// Get marks at a given point in history.
     auto marks_at(const ObjId& obj,
                   const std::vector<ChangeHash>& heads) const -> std::vector<Mark>;
 
