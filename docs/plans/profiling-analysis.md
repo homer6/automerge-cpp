@@ -2,6 +2,8 @@
 
 ## Methodology
 
+### macOS (Apple Silicon)
+
 - **Platform:** Apple M3 Max (16 cores), macOS 14.6.1, Apple Clang
 - **Build:** RelWithDebInfo (`-O2 -g`) for symbol visibility with optimization
 - **Tool:** macOS `sample` (sampling profiler, 1ms intervals, 3s duration per benchmark)
@@ -10,7 +12,19 @@
 Each benchmark was run in a separate process. The profiler sampled the call stack ~2000-3000
 times per run. Sample counts below reflect relative time spent in each function.
 
-## Per-Benchmark Profiles
+### Linux (x86_64 Server)
+
+- **Platform:** Intel Xeon Platinum 8358 (30 cores @ 2.60 GHz), Linux 6.11.0, GCC 13.3.0
+- **CPU features:** AVX-512, SHA-NI (hardware SHA-256), 32 KiB L1d, 4 MiB L2, 16 MiB L3
+- **Build:** Release (`-O3`) with `-fno-omit-frame-pointer -g` for profiling
+- **Tool:** `perf record -g --call-graph dwarf` + `perf report --stdio`
+- **Benchmarks:** Google Benchmark with `--benchmark_min_time=3s` for statistical stability
+
+Profiles captured with `perf_event_paranoid=-1`. Samples reflect CPU cycle attribution.
+
+---
+
+## Per-Benchmark Profiles (macOS)
 
 ### text_splice_bulk (3.7ms/iter — slowest benchmark)
 
@@ -114,6 +128,162 @@ Reads a value at a historical point (10 changes in history).
 for all 10 changes. With only 10 changes this is 93.8% of the time. At 1000 changes this
 would be catastrophic.
 
+---
+
+## Per-Benchmark Profiles (Linux — Intel Xeon Platinum 8358, 30 cores)
+
+### Baseline Results (Release build, single-threaded)
+
+| Benchmark | Time/iter | Throughput | vs macOS |
+|-----------|-----------|------------|----------|
+| text_splice_bulk | 13.0 ms | 7.7 K chars/s | 3.5x slower (no NEON) |
+| list_insert_append | 252 µs | 4.0 K ops/s | 3.1x slower |
+| list_insert_front | 74 µs | 13.5 K ops/s | comparable |
+| sync_full_round_trip | 234 µs | 4.3 K ops/s | comparable |
+| save (100 keys) | 77 µs | 13.2 K ops/s | 2.9x slower |
+| save_large (1000 items) | 142 µs | 427 B/s | 1.7x slower |
+| get_at | 8.3 µs | 120 K ops/s | comparable |
+| map_put | 1.14 µs | 876 K ops/s | comparable |
+| map_get | 37 ns | 27.1 M ops/s | comparable |
+| merge | 3.9 µs | 258 K ops/s | comparable |
+| cursor_resolve | 489 ns | 2.0 M ops/s | 3x slower |
+
+### text_splice_bulk (13.0ms/iter — slowest benchmark)
+
+| Function | % Cycles | Notes |
+|----------|----------|-------|
+| `DocState::list_insert` (via `visible_index_to_real`) | **98.35%** | O(n) linear scan per character |
+| `Transaction::splice_text` overhead | 1.11% | Op construction |
+
+**Confirms macOS finding:** `visible_index_to_real()` dominates at 98.35% (vs 98.2% on macOS).
+IPC is only 1.13 — the linear scan thrashes L1 data cache (5.1 billion L1d misses in 12.5s).
+
+### list_insert_append (252µs/iter)
+
+| Function | % Cycles | Notes |
+|----------|----------|-------|
+| `DocState::list_insert` | **49.17%** | O(n) scan to find end |
+| `Transaction::insert` | 49.13% | Parent frame (includes list_insert) |
+
+**Confirms macOS finding:** `list_insert` (containing `visible_index_to_real`) is the bottleneck.
+The two entries represent self vs inclusive time of the same call chain.
+
+### sync_full_round_trip (234µs/iter)
+
+| Function | % Cycles | Notes |
+|----------|----------|-------|
+| `crypto::sha256` | **56.66%** | Software SHA-256 dominates |
+| `malloc` | 5.94% | Heap alloc in SHA-256 padding + vectors |
+| `DocState::compute_change_hash` | 5.90% | Wrapper around sha256 |
+| `_int_free` | 4.04% | Heap dealloc |
+| `__memcmp_evex_movbe` | 3.59% | Hash comparison |
+| `cfree` | 2.10% | More dealloc |
+| `_int_malloc` | 1.83% | More alloc |
+| `vector::_M_range_insert` | 1.20% | Serialization buffer copies |
+| `Document::generate_sync_message` | 1.10% | |
+| `__memmove_evex_unaligned_erms` | 1.02% | Buffer moves |
+| `operator new` | 1.00% | |
+
+**Confirms macOS finding:** SHA-256 at 56.66% (vs 87.3% on macOS). Lower % because heap
+allocation is more visible on Linux (malloc/free total ~14%). IPC is excellent at 3.68 —
+the SHA-256 computation is well-pipelined but algorithmically redundant (recomputes every call).
+
+**New insight:** malloc/free overhead is **14% of sync** on Linux. The SHA-256 padding buffer
+heap allocation (11B.4) and serialization vector copies (11B.3) are more impactful here than
+on macOS. This is because macOS's allocator (magazine malloc) is faster for small allocations.
+
+### save (100 keys, 77µs/iter)
+
+| Function | % Cycles | Notes |
+|----------|----------|-------|
+| `[kernel]` (page faults, syscalls) | 9.57% | Kernel overhead |
+| `zlib deflate` | 9.55% | DEFLATE compression |
+| `crypto::sha256` | **7.32%** | Much lower than macOS (55.9%) |
+| `__memset_evex_unaligned_erms` | 3.37% | Buffer zeroing |
+| `encode_change_ops` | 3.06% | Column encoding |
+| `Hashtable::_M_insert_unique` (ActorId) | 2.84% | Actor table construction |
+| `encode_uleb128` | 2.48% | LEB128 variable-length ints |
+| `encode_sleb128` | 1.93% | Signed LEB128 |
+| `RleEncoder::flush_literals` | 1.64% | RLE encoding |
+| `zlib` | 1.34% | More DEFLATE |
+| `malloc` | 1.24% | |
+| `zlib` | 1.23% | |
+| `RleEncoder::flush_run` | 1.10% | RLE encoding |
+
+**Key difference from macOS:** SHA-256 is only **7.32%** on Linux (vs 55.9% on macOS). This is
+because Linux GCC optimizes the software SHA-256 more aggressively with AVX2/SSE4.2 (though not
+using SHA-NI intrinsics). The bottleneck shifts to zlib DEFLATE (~12%) and column encoding (~10%).
+
+**New insight:** Actor table hash insertion is **2.84%** — the `build_actor_table()` function
+uses `std::unordered_set<ActorId>` and rebuilds it on every save. Caching would help.
+
+### save_large (1000 items, 142µs/iter)
+
+| Function | % Cycles | Notes |
+|----------|----------|-------|
+| `encode_change_ops` | **20.79%** | Column encoding dominates |
+| `Hashtable::_M_insert_unique` (ActorId) | **15.58%** | Actor table rebuild per save! |
+| `crypto::sha256` | 5.40% | Lower than macOS (25.9%) |
+| `encode_sleb128` | 4.80% | Signed LEB128 |
+| `encode_uleb128` | 4.65% | Unsigned LEB128 |
+| `RleEncoder<string>::flush_run` | 4.52% | RLE string column |
+| `zlib deflate` | ~6.1% | DEFLATE across multiple entries |
+| `RleEncoder<long>::append` | 2.85% | |
+| `RleEncoder<unsigned long>::append` | 2.69% | |
+| `__memset_evex_unaligned_erms` | 2.15% | |
+
+**Key difference from macOS:** Actor table hash insertion is **15.58%** — second highest cost!
+With 1000 ops, `build_actor_table()` iterates all ops and inserts each ActorId into an
+`unordered_set`. This is a new finding not visible on macOS (likely hidden by SHA-256 cost).
+
+**New optimization target:** Cache the actor table. It only changes when new actors appear
+(which happens at merge/load, not during normal single-actor transactions).
+
+### get_at / time travel (8.3µs/iter)
+
+| Function | % Cycles | Notes |
+|----------|----------|-------|
+| `crypto::sha256` | **73.24%** | Still dominates |
+| `DocState::compute_change_hash` | 4.46% | Wrapper |
+| `malloc` | 3.96% | SHA-256 padding alloc |
+| `__memcmp_evex_movbe` | 3.34% | Hash comparison |
+| `_int_free` | 2.77% | |
+| `cfree` | 1.49% | |
+| `DocState::change_hash_index` | 1.48% | Rebuilds full index per call |
+| `vector::_M_range_insert` | 1.08% | |
+
+**Confirms macOS finding:** SHA-256 at 73.24% (vs 93.8% on macOS). Hash caching (11A.3)
+would eliminate nearly all of this — `change_hash_index()` recomputes all hashes every call.
+
+### Hardware Counter Analysis (perf stat)
+
+| Benchmark | IPC | L1d Misses | Cache Misses | Branch Misses |
+|-----------|-----|------------|--------------|---------------|
+| text_splice_bulk | **1.13** | 5.1 B | 2.7 M | 464 K |
+| sync_full_round_trip | **3.68** | 31 M | 154 K | 30.6 M |
+| save_large | **3.67** | 442 M | 119 K | 6.5 M |
+
+**Key observations:**
+- **text_splice_bulk IPC of 1.13** — the linear scan is memory-bound, not compute-bound.
+  The 5.1 billion L1d misses confirm the working set exceeds L1 cache. A Fenwick tree would
+  dramatically reduce cache pressure by accessing O(log n) elements instead of O(n).
+- **sync and save IPC of 3.67-3.68** — these are compute-bound (SHA-256, RLE encoding).
+  The CPU pipeline is well-utilized. Speedup comes from algorithmic changes (hash caching)
+  and hardware acceleration (SHA-NI), not from cache optimization.
+- **sync branch misses: 30.6M** — the SHA-256 implementation has unpredictable branches
+  in the compression function. SHA-NI intrinsics would eliminate these entirely.
+
+### SHA-NI Opportunity
+
+This Xeon Platinum 8358 supports **SHA-NI** (Intel SHA Extensions). The current software
+SHA-256 takes 7-73% of cycles across benchmarks. SHA-NI provides ~3-5x speedup for SHA-256
+on x86_64, similar to ARM Crypto Extensions on Apple Silicon. The v0.4.0 plan's 11D.1 should
+include x86 SHA-NI alongside ARM Crypto Extensions.
+
+**Detection:** `#if defined(__SHA__) || (defined(__x86_64__) && defined(__SSE4_2__))`
+
+---
+
 ## Summary: The Three Dominant Costs
 
 ### 1. `visible_index_to_real()` — O(n) linear scan (98% of list/text operations)
@@ -159,10 +329,12 @@ call and is itself called multiple times per sync round trip and time travel ope
 **Fixes (multiplicative):**
 1. **Cache the hash index** — compute once, invalidate on append. Eliminates redundant
    recomputation. Expected 5-10x for sync, get_at.
-2. **ARM SHA-256 intrinsics** — `vsha256hq_u32` etc. on Apple Silicon / ARMv8.2+.
-   Expected 5-10x per hash.
+2. **Hardware SHA-256 intrinsics** — ARM Crypto Extensions (`vsha256hq_u32` etc.) on Apple
+   Silicon / ARMv8.2+; x86 SHA-NI (`_mm_sha256rnds2_epu32` etc.) on Intel Xeon / AMD Zen.
+   Expected 3-10x per hash depending on platform.
 3. **Stack-allocated padding buffer** — avoid heap allocation in SHA-256 for small inputs
-   (< 247 bytes, which covers typical change hashing).
+   (< 247 bytes, which covers typical change hashing). Especially impactful on Linux where
+   malloc/free is 14% of sync.
 4. **Parallel hash computation** — when rebuilding hash cache on load, hash all changes
    across cores via Taskflow. Expected min(N_changes, cores)x.
 
@@ -237,17 +409,18 @@ benchmarks with 100-1000 changes to show meaningful speedups.
 
 ## Optimization Priority (by measured impact)
 
-| Priority | Optimization | Measured Bottleneck | Expected Speedup | Effort |
-|----------|-------------|--------------------|--------------------|--------|
-| **P0** | Fenwick tree for visible_index_to_real | 98% of list/text ops | 7-25x | 2 hr |
-| **P0** | Cache change hash index | 87-94% of sync/time-travel | 5-10x | 30 min |
-| **P1** | ARM SHA-256 intrinsics | 56-94% of save/sync/get_at | 5-10x per hash | 2 hr |
-| **P1** | SHA-256 stack buffer | Same as above | 10-20% per hash | 30 min |
-| **P2** | Parallel change serialization (Taskflow) | 40% of save_large | min(N,cores)x | 45 min |
-| **P2** | Parallel chunk parsing (Taskflow) | load hot path | min(N,cores)x | 45 min |
-| **P2** | Parallel hash computation (Taskflow) | hash cache rebuild | min(N,cores)x | 30 min |
-| **P3** | Buffer pre-sizing (reserve) | RLE encoder allocs | 1.5x save | 15 min |
-| **P3** | Parallel DEFLATE compress/decompress | 0.5% of save (small docs) | 2-4x per change | 30 min |
+| Priority | Optimization | macOS Bottleneck | Linux Bottleneck | Expected Speedup | Effort |
+|----------|-------------|-----------------|-----------------|-------------------|--------|
+| **P0** | Fenwick tree for visible_index_to_real | 98% of list/text | 98% of list/text | 7-25x | 2 hr |
+| **P0** | Cache change hash index | 87-94% of sync/time-travel | 57-73% of sync/time-travel | 5-10x | 30 min |
+| **P1** | Hardware SHA-256 (ARM Crypto + x86 SHA-NI) | 56-94% of save/sync | 7-73% of save/sync | 3-10x per hash | 2 hr |
+| **P1** | SHA-256 stack buffer | (included above) | 14% malloc/free in sync | 10-20% per hash | 30 min |
+| **P1** | Cache actor table | <1% (hidden by SHA-256) | **15.6% of save_large** | 1.2-1.5x save | 30 min |
+| **P2** | Parallel change serialization (Taskflow) | 40% of save_large | 21% of save_large | min(N,cores)x | 45 min |
+| **P2** | Parallel chunk parsing (Taskflow) | load hot path | load hot path | min(N,cores)x | 45 min |
+| **P2** | Parallel hash computation (Taskflow) | hash cache rebuild | hash cache rebuild | min(N,cores)x | 30 min |
+| **P3** | Buffer pre-sizing (reserve) | RLE encoder allocs | RLE encoder allocs | 1.5x save | 15 min |
+| **P3** | Parallel DEFLATE compress/decompress | 0.5% of save | ~12% of save | 2-4x per change | 30 min |
 
 ## Reproducing This Analysis
 
@@ -277,31 +450,38 @@ grep -E "^\s+(automerge|storage|crypto)" /tmp/profile_splice.txt | head -20
 ### Linux (perf)
 
 ```bash
-# Build with debug symbols and frame pointers
-cmake -B build-profile -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-    -DCMAKE_CXX_FLAGS="-fno-omit-frame-pointer" \
+# Build Release with frame pointers and debug symbols for profiling
+cmake -B build-profile -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_CXX_FLAGS="-fno-omit-frame-pointer -g" \
     -DAUTOMERGE_CPP_BUILD_BENCHMARKS=ON -DAUTOMERGE_CPP_BUILD_TESTS=OFF
 
-cmake --build build-profile
+cmake --build build-profile -j$(nproc)
 
-# Record with perf (run as root or with perf_event_paranoid=1)
-perf record -g --call-graph dwarf \
+# Enable perf for non-root users (requires sudo)
+sudo sysctl kernel.perf_event_paranoid=-1
+
+# Record with perf (dwarf call graphs for full stack traces)
+perf record -g --call-graph dwarf -o /tmp/perf_splice.data -- \
     ./build-profile/benchmarks/automerge_cpp_benchmarks \
-    --benchmark_filter=bm_text_splice_bulk --benchmark_min_time=5s
+    --benchmark_filter=bm_text_splice_bulk --benchmark_min_time=3s
 
-# View flame graph
-perf report --hierarchy --sort=dso,symbol
+# View flat hotspot report (top functions by self time)
+perf report -i /tmp/perf_splice.data --stdio --no-children -g none --percent-limit 1
+
+# View hierarchical call tree
+perf report -i /tmp/perf_splice.data --hierarchy --sort=dso,symbol
 
 # Or generate a flame graph SVG (requires FlameGraph tools):
-perf script | stackcollapse-perf.pl | flamegraph.pl > splice_bulk.svg
+perf script -i /tmp/perf_splice.data | stackcollapse-perf.pl | flamegraph.pl > splice_bulk.svg
 
-# Profile all benchmarks at once:
-perf stat -d ./build-profile/benchmarks/automerge_cpp_benchmarks
-
-# Per-benchmark perf stat (cache misses, branch misses, IPC):
-perf stat -e cycles,instructions,cache-misses,branch-misses,L1-dcache-load-misses \
+# Per-benchmark hardware counters (IPC, cache misses, branch misses):
+perf stat -e cycles,instructions,cache-misses,branch-misses,L1-dcache-load-misses -- \
     ./build-profile/benchmarks/automerge_cpp_benchmarks \
-    --benchmark_filter=bm_sync_full_round_trip --benchmark_min_time=5s
+    --benchmark_filter=bm_sync_full_round_trip --benchmark_min_time=3s
+
+# Save JSON baseline for before/after comparison
+./build-profile/benchmarks/automerge_cpp_benchmarks \
+    --benchmark_format=json --benchmark_out=linux-baseline.json
 ```
 
 ### Comparing before/after
