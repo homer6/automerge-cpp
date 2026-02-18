@@ -93,6 +93,13 @@ doc.apply_changes(std::vector<Change>)      -> void                  // apply re
 doc.get_heads()                             -> std::vector<ChangeHash>  // current DAG leaf hashes
 ```
 
+### Binary Serialization
+
+```cpp
+doc.save()                                  -> std::vector<std::byte>         // serialize to binary
+Document::load(std::span<const std::byte>)  -> std::optional<Document>        // deserialize from binary
+```
+
 ---
 
 ## Transaction
@@ -444,4 +451,29 @@ doc1.merge(doc2);
 // Conflict detection
 auto all = doc1.get_all(am::root, "x");
 // all.size() == 1 (no conflict — same value from before fork)
+```
+
+### Save and Load
+
+```cpp
+namespace am = automerge_cpp;
+
+auto doc = am::Document{};
+doc.transact([](auto& tx) {
+    tx.put(am::root, "key", std::string{"value"});
+});
+
+// Serialize to binary
+auto bytes = doc.save();
+
+// Deserialize — returns nullopt on invalid data
+auto loaded = am::Document::load(bytes);
+if (loaded) {
+    auto val = loaded->get(am::root, "key");  // "value"
+
+    // Loaded documents can continue editing and merging
+    loaded->transact([](auto& tx) {
+        tx.put(am::root, "new_key", std::int64_t{42});
+    });
+}
 ```

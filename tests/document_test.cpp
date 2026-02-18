@@ -887,3 +887,445 @@ TEST(Document, get_heads_tracks_dag) {
     // Sequential changes: still 1 head (the latest)
     EXPECT_EQ(doc.get_heads().size(), 1u);
 }
+
+// -- Phase 4: Binary Serialization --------------------------------------------
+
+TEST(Document, save_and_load_empty_document) {
+    auto doc = make_doc(1);
+    auto bytes = doc.save();
+    EXPECT_FALSE(bytes.empty());
+
+    auto loaded = Document::load(bytes);
+    ASSERT_TRUE(loaded.has_value());
+    EXPECT_EQ(loaded->actor_id(), doc.actor_id());
+    EXPECT_EQ(loaded->length(root), 0u);
+}
+
+TEST(Document, save_and_load_int_value) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "x", std::int64_t{42});
+    });
+
+    auto bytes = doc.save();
+    auto loaded = Document::load(bytes);
+    ASSERT_TRUE(loaded.has_value());
+
+    auto val = loaded->get(root, "x");
+    ASSERT_TRUE(val.has_value());
+    EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(*val)), 42);
+}
+
+TEST(Document, save_and_load_string_value) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "name", std::string{"Alice"});
+    });
+
+    auto loaded = Document::load(doc.save());
+    ASSERT_TRUE(loaded.has_value());
+    EXPECT_EQ(get_str(loaded->get(root, "name")), "Alice");
+}
+
+TEST(Document, save_and_load_bool_value) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "flag", true);
+    });
+
+    auto loaded = Document::load(doc.save());
+    ASSERT_TRUE(loaded.has_value());
+    auto val = loaded->get(root, "flag");
+    ASSERT_TRUE(val.has_value());
+    EXPECT_TRUE(std::get<bool>(std::get<ScalarValue>(*val)));
+}
+
+TEST(Document, save_and_load_double_value) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "pi", 3.14159);
+    });
+
+    auto loaded = Document::load(doc.save());
+    ASSERT_TRUE(loaded.has_value());
+    auto val = loaded->get(root, "pi");
+    ASSERT_TRUE(val.has_value());
+    EXPECT_DOUBLE_EQ(std::get<double>(std::get<ScalarValue>(*val)), 3.14159);
+}
+
+TEST(Document, save_and_load_null_value) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "nothing", Null{});
+    });
+
+    auto loaded = Document::load(doc.save());
+    ASSERT_TRUE(loaded.has_value());
+    auto val = loaded->get(root, "nothing");
+    ASSERT_TRUE(val.has_value());
+    EXPECT_TRUE(std::holds_alternative<Null>(std::get<ScalarValue>(*val)));
+}
+
+TEST(Document, save_and_load_uint64_value) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "big", std::uint64_t{18446744073709551615ULL});
+    });
+
+    auto loaded = Document::load(doc.save());
+    ASSERT_TRUE(loaded.has_value());
+    auto val = loaded->get(root, "big");
+    ASSERT_TRUE(val.has_value());
+    EXPECT_EQ(std::get<std::uint64_t>(std::get<ScalarValue>(*val)),
+              18446744073709551615ULL);
+}
+
+TEST(Document, save_and_load_counter_value) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "count", Counter{100});
+    });
+    doc.transact([](auto& tx) {
+        tx.increment(root, "count", 7);
+    });
+
+    auto loaded = Document::load(doc.save());
+    ASSERT_TRUE(loaded.has_value());
+    auto val = loaded->get(root, "count");
+    ASSERT_TRUE(val.has_value());
+    EXPECT_EQ(std::get<Counter>(std::get<ScalarValue>(*val)).value, 107);
+}
+
+TEST(Document, save_and_load_timestamp_value) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "when", Timestamp{1700000000000});
+    });
+
+    auto loaded = Document::load(doc.save());
+    ASSERT_TRUE(loaded.has_value());
+    auto val = loaded->get(root, "when");
+    ASSERT_TRUE(val.has_value());
+    EXPECT_EQ(std::get<Timestamp>(std::get<ScalarValue>(*val)).millis_since_epoch,
+              1700000000000);
+}
+
+TEST(Document, save_and_load_bytes_value) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        auto data = Bytes{std::byte{0xDE}, std::byte{0xAD}, std::byte{0xBE}, std::byte{0xEF}};
+        tx.put(root, "binary", std::move(data));
+    });
+
+    auto loaded = Document::load(doc.save());
+    ASSERT_TRUE(loaded.has_value());
+    auto val = loaded->get(root, "binary");
+    ASSERT_TRUE(val.has_value());
+    auto& b = std::get<Bytes>(std::get<ScalarValue>(*val));
+    ASSERT_EQ(b.size(), 4u);
+    EXPECT_EQ(b[0], std::byte{0xDE});
+    EXPECT_EQ(b[3], std::byte{0xEF});
+}
+
+TEST(Document, save_and_load_multiple_keys) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "a", std::int64_t{1});
+        tx.put(root, "b", std::string{"hello"});
+        tx.put(root, "c", true);
+        tx.put(root, "d", 2.5);
+    });
+
+    auto loaded = Document::load(doc.save());
+    ASSERT_TRUE(loaded.has_value());
+    EXPECT_EQ(loaded->length(root), 4u);
+    EXPECT_EQ(get_int(loaded->get(root, "a")), 1);
+    EXPECT_EQ(get_str(loaded->get(root, "b")), "hello");
+    EXPECT_TRUE(std::get<bool>(std::get<ScalarValue>(*loaded->get(root, "c"))));
+    EXPECT_DOUBLE_EQ(std::get<double>(std::get<ScalarValue>(*loaded->get(root, "d"))), 2.5);
+}
+
+TEST(Document, save_and_load_nested_map) {
+    auto doc = make_doc(1);
+    auto nested_id = ObjId{};
+    doc.transact([&](auto& tx) {
+        nested_id = tx.put_object(root, "config", ObjType::map);
+        tx.put(nested_id, "version", std::int64_t{3});
+        tx.put(nested_id, "name", std::string{"test"});
+    });
+
+    auto loaded = Document::load(doc.save());
+    ASSERT_TRUE(loaded.has_value());
+
+    auto config_val = loaded->get(root, "config");
+    ASSERT_TRUE(config_val.has_value());
+    EXPECT_EQ(std::get<ObjType>(*config_val), ObjType::map);
+
+    // Access nested values
+    EXPECT_EQ(loaded->length(nested_id), 2u);
+    EXPECT_EQ(get_int(loaded->get(nested_id, "version")), 3);
+    EXPECT_EQ(get_str(loaded->get(nested_id, "name")), "test");
+}
+
+TEST(Document, save_and_load_list) {
+    auto doc = make_doc(1);
+    auto list_id = ObjId{};
+    doc.transact([&](auto& tx) {
+        list_id = tx.put_object(root, "items", ObjType::list);
+        tx.insert(list_id, 0, std::int64_t{10});
+        tx.insert(list_id, 1, std::int64_t{20});
+        tx.insert(list_id, 2, std::int64_t{30});
+    });
+
+    auto loaded = Document::load(doc.save());
+    ASSERT_TRUE(loaded.has_value());
+    EXPECT_EQ(loaded->length(list_id), 3u);
+
+    auto vals = loaded->values(list_id);
+    ASSERT_EQ(vals.size(), 3u);
+    EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(vals[0])), 10);
+    EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(vals[1])), 20);
+    EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(vals[2])), 30);
+}
+
+TEST(Document, save_and_load_text) {
+    auto doc = make_doc(1);
+    auto text_id = ObjId{};
+    doc.transact([&](auto& tx) {
+        text_id = tx.put_object(root, "content", ObjType::text);
+        tx.splice_text(text_id, 0, 0, "Hello World");
+    });
+
+    auto loaded = Document::load(doc.save());
+    ASSERT_TRUE(loaded.has_value());
+    EXPECT_EQ(loaded->text(text_id), "Hello World");
+}
+
+TEST(Document, save_and_load_multiple_transactions) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "x", std::int64_t{1});
+    });
+    doc.transact([](auto& tx) {
+        tx.put(root, "x", std::int64_t{2});
+    });
+    doc.transact([](auto& tx) {
+        tx.put(root, "y", std::int64_t{3});
+    });
+
+    auto loaded = Document::load(doc.save());
+    ASSERT_TRUE(loaded.has_value());
+    EXPECT_EQ(get_int(loaded->get(root, "x")), 2);
+    EXPECT_EQ(get_int(loaded->get(root, "y")), 3);
+
+    auto changes = loaded->get_changes();
+    EXPECT_EQ(changes.size(), 3u);
+}
+
+TEST(Document, save_and_load_preserves_actor_id) {
+    const std::uint8_t raw[16] = {0xAA, 0xBB, 0xCC, 0xDD, 1, 2, 3, 4,
+                                   5, 6, 7, 8, 9, 10, 11, 12};
+    auto doc = Document{};
+    doc.set_actor_id(ActorId{raw});
+    doc.transact([](auto& tx) {
+        tx.put(root, "x", std::int64_t{1});
+    });
+
+    auto loaded = Document::load(doc.save());
+    ASSERT_TRUE(loaded.has_value());
+    EXPECT_EQ(loaded->actor_id(), doc.actor_id());
+}
+
+TEST(Document, save_and_load_preserves_heads) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "x", std::int64_t{1});
+    });
+    doc.transact([](auto& tx) {
+        tx.put(root, "y", std::int64_t{2});
+    });
+
+    auto heads_before = doc.get_heads();
+    auto loaded = Document::load(doc.save());
+    ASSERT_TRUE(loaded.has_value());
+    EXPECT_EQ(loaded->get_heads(), heads_before);
+}
+
+TEST(Document, save_and_load_preserves_change_history) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "a", std::int64_t{1});
+    });
+    doc.transact([](auto& tx) {
+        tx.put(root, "b", std::int64_t{2});
+    });
+
+    auto changes_before = doc.get_changes();
+    auto loaded = Document::load(doc.save());
+    ASSERT_TRUE(loaded.has_value());
+    auto changes_after = loaded->get_changes();
+    ASSERT_EQ(changes_after.size(), changes_before.size());
+
+    for (std::size_t i = 0; i < changes_before.size(); ++i) {
+        EXPECT_EQ(changes_after[i].actor, changes_before[i].actor);
+        EXPECT_EQ(changes_after[i].seq, changes_before[i].seq);
+        EXPECT_EQ(changes_after[i].start_op, changes_before[i].start_op);
+        EXPECT_EQ(changes_after[i].operations.size(),
+                  changes_before[i].operations.size());
+    }
+}
+
+TEST(Document, save_and_load_after_merge) {
+    auto doc1 = make_doc(1);
+    doc1.transact([](auto& tx) {
+        tx.put(root, "x", std::int64_t{1});
+    });
+
+    auto doc2 = doc1.fork();
+    doc2.transact([](auto& tx) {
+        tx.put(root, "y", std::int64_t{2});
+    });
+
+    doc1.merge(doc2);
+
+    auto loaded = Document::load(doc1.save());
+    ASSERT_TRUE(loaded.has_value());
+    EXPECT_EQ(loaded->length(root), 2u);
+    EXPECT_EQ(get_int(loaded->get(root, "x")), 1);
+    EXPECT_EQ(get_int(loaded->get(root, "y")), 2);
+}
+
+TEST(Document, save_and_load_can_continue_editing) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "x", std::int64_t{1});
+    });
+
+    auto loaded = Document::load(doc.save());
+    ASSERT_TRUE(loaded.has_value());
+
+    // Continue editing after load
+    loaded->transact([](auto& tx) {
+        tx.put(root, "y", std::int64_t{2});
+    });
+
+    EXPECT_EQ(loaded->length(root), 2u);
+    EXPECT_EQ(get_int(loaded->get(root, "x")), 1);
+    EXPECT_EQ(get_int(loaded->get(root, "y")), 2);
+}
+
+TEST(Document, save_and_load_can_merge_after_load) {
+    auto doc1 = make_doc(1);
+    doc1.transact([](auto& tx) {
+        tx.put(root, "x", std::int64_t{1});
+    });
+
+    auto saved = doc1.save();
+    auto loaded = Document::load(saved);
+    ASSERT_TRUE(loaded.has_value());
+
+    // Create a separate doc and merge with loaded
+    auto doc2 = make_doc(2);
+    doc2.transact([](auto& tx) {
+        tx.put(root, "y", std::int64_t{2});
+    });
+
+    loaded->merge(doc2);
+    EXPECT_EQ(loaded->length(root), 2u);
+    EXPECT_EQ(get_int(loaded->get(root, "x")), 1);
+    EXPECT_EQ(get_int(loaded->get(root, "y")), 2);
+}
+
+TEST(Document, save_and_load_deeply_nested) {
+    auto doc = make_doc(1);
+    auto level1 = ObjId{};
+    auto level2 = ObjId{};
+    doc.transact([&](auto& tx) {
+        level1 = tx.put_object(root, "l1", ObjType::map);
+        level2 = tx.put_object(level1, "l2", ObjType::map);
+        tx.put(level2, "deep", std::int64_t{42});
+    });
+
+    auto loaded = Document::load(doc.save());
+    ASSERT_TRUE(loaded.has_value());
+    EXPECT_EQ(get_int(loaded->get(level2, "deep")), 42);
+}
+
+TEST(Document, save_and_load_with_delete) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "keep", std::int64_t{1});
+        tx.put(root, "remove", std::int64_t{2});
+    });
+    doc.transact([](auto& tx) {
+        tx.delete_key(root, "remove");
+    });
+
+    auto loaded = Document::load(doc.save());
+    ASSERT_TRUE(loaded.has_value());
+    EXPECT_EQ(loaded->length(root), 1u);
+    EXPECT_TRUE(loaded->get(root, "keep").has_value());
+    EXPECT_FALSE(loaded->get(root, "remove").has_value());
+}
+
+TEST(Document, save_and_load_negative_int) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "neg", std::int64_t{-999});
+    });
+
+    auto loaded = Document::load(doc.save());
+    ASSERT_TRUE(loaded.has_value());
+    EXPECT_EQ(get_int(loaded->get(root, "neg")), -999);
+}
+
+// -- Corrupt data handling ----------------------------------------------------
+
+TEST(Document, load_empty_data_returns_nullopt) {
+    auto empty = std::vector<std::byte>{};
+    EXPECT_FALSE(Document::load(empty).has_value());
+}
+
+TEST(Document, load_bad_magic_returns_nullopt) {
+    auto data = std::vector<std::byte>{
+        std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00},
+        std::byte{0x01}};
+    EXPECT_FALSE(Document::load(data).has_value());
+}
+
+TEST(Document, load_truncated_data_returns_nullopt) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "x", std::int64_t{42});
+    });
+
+    auto bytes = doc.save();
+    // Truncate to half
+    bytes.resize(bytes.size() / 2);
+    EXPECT_FALSE(Document::load(bytes).has_value());
+}
+
+TEST(Document, load_wrong_version_returns_nullopt) {
+    auto doc = make_doc(1);
+    auto bytes = doc.save();
+    // Corrupt the version byte (position 4)
+    bytes[4] = std::byte{0xFF};
+    EXPECT_FALSE(Document::load(bytes).has_value());
+}
+
+TEST(Document, double_save_load_round_trip) {
+    auto doc = make_doc(1);
+    doc.transact([](auto& tx) {
+        tx.put(root, "x", std::int64_t{42});
+        tx.put(root, "s", std::string{"hello"});
+    });
+
+    // Save, load, save again, load again
+    auto loaded1 = Document::load(doc.save());
+    ASSERT_TRUE(loaded1.has_value());
+    auto loaded2 = Document::load(loaded1->save());
+    ASSERT_TRUE(loaded2.has_value());
+
+    EXPECT_EQ(get_int(loaded2->get(root, "x")), 42);
+    EXPECT_EQ(get_str(loaded2->get(root, "s")), "hello");
+}

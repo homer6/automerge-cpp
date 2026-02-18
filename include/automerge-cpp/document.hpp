@@ -9,6 +9,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -59,6 +60,10 @@ public:
     auto get_changes() const -> std::vector<Change>;
     void apply_changes(const std::vector<Change>& changes);
     auto get_heads() const -> std::vector<ChangeHash>;
+
+    // Phase 4: Binary Serialization
+    auto save() const -> std::vector<std::byte>;
+    static auto load(std::span<const std::byte> data) -> std::optional<Document>;
 
 private:
     std::unique_ptr<detail::DocState> state_;
