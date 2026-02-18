@@ -97,15 +97,18 @@ target_link_options(fuzz_load PRIVATE ${FUZZ_FLAGS})
 
 ---
 
-## 9b: ASan/UBSan CI Job
+## 9b: ASan/UBSan CI Jobs (All Platforms)
 
 ### Modified files
 
 | File | Change |
 |------|--------|
-| `.github/workflows/linux.yml` | Add `sanitizers` job: Clang + `-fsanitize=address,undefined` running all 274 tests |
+| `.github/workflows/linux.yml` | Add `sanitizers` job: Clang + ASan + UBSan |
+| `.github/workflows/macos.yml` | Add `sanitizers` job: Apple Clang + ASan + UBSan |
+| `.github/workflows/windows.yml` | Add `sanitizers` job: MSVC + ASan (no UBSan on MSVC) |
+| `.github/workflows/freebsd.yml` | Add sanitizer build: Clang + ASan + UBSan |
 
-### CI job
+### Linux CI job
 
 ```yaml
   sanitizers:
@@ -128,7 +131,81 @@ target_link_options(fuzz_load PRIVATE ${FUZZ_FLAGS})
       run: ctest --test-dir build --output-on-failure
 ```
 
-Key: Debug build (unoptimized) with ASan+UBSan flags passed to both compile and link. Runs the full test suite under sanitizers.
+### macOS CI job
+
+```yaml
+  sanitizers:
+    name: ASan + UBSan
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    - name: Configure
+      run: >
+        cmake -B build -DCMAKE_BUILD_TYPE=Debug
+        -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
+        -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+        -DAUTOMERGE_CPP_BUILD_TESTS=ON
+    - name: Build
+      run: cmake --build build
+    - name: Test
+      run: ctest --test-dir build --output-on-failure
+```
+
+### Windows CI job
+
+```yaml
+  sanitizers:
+    name: ASan
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    - name: Install zlib with vcpkg
+      run: |
+        git clone https://github.com/microsoft/vcpkg.git
+        .\vcpkg\bootstrap-vcpkg.bat
+        .\vcpkg\vcpkg.exe install zlib
+        echo "VCPKG_ROOT=${{github.workspace}}/vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Append
+    - name: Configure
+      run: >
+        cmake -B build -DCMAKE_BUILD_TYPE=Debug
+        -DCMAKE_CXX_FLAGS="/fsanitize=address"
+        -DAUTOMERGE_CPP_BUILD_TESTS=ON
+        -DCMAKE_TOOLCHAIN_FILE=${{github.workspace}}/vcpkg/scripts/buildsystems/vcpkg.cmake
+    - name: Build
+      run: cmake --build build --config Debug
+    - name: Test
+      run: ctest --test-dir build -C Debug --output-on-failure
+```
+
+Note: MSVC only supports ASan (`/fsanitize=address`), not UBSan.
+
+### FreeBSD CI job
+
+```yaml
+  sanitizers:
+    name: ASan + UBSan
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    - name: Build and test with sanitizers on FreeBSD
+      uses: vmactions/freebsd-vm@v1
+      with:
+        usesh: true
+        prepare: |
+          pkg install -y cmake git
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined" -DAUTOMERGE_CPP_BUILD_TESTS=ON
+          cmake --build build
+          ctest --test-dir build --output-on-failure
+```
+
+Key: Debug builds (unoptimized) with ASan+UBSan flags passed to both compile and link. Runs the full test suite under sanitizers on every platform.
 
 ---
 
