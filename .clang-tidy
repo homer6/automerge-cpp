@@ -13,7 +13,6 @@ Checks: >
   modernize-use-override,
   performance-*,
   -performance-avoid-endl,
-  readability-braces-around-statements,
   readability-misleading-indentation,
   readability-redundant-smartptr-get
 WarningsAsErrors: ''
