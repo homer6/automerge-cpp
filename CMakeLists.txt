@@ -16,6 +16,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(AUTOMERGE_CPP_BUILD_TESTS "Build unit tests" OFF)
 option(AUTOMERGE_CPP_BUILD_EXAMPLES "Build example programs" OFF)
 option(AUTOMERGE_CPP_BUILD_BENCHMARKS "Build benchmarks" OFF)
+option(AUTOMERGE_CPP_BUILD_FUZZ "Build fuzz targets (requires Clang)" OFF)
 
 # Dependencies
 find_package(ZLIB REQUIRED)
@@ -51,4 +52,8 @@ endif()
 
 if(AUTOMERGE_CPP_BUILD_BENCHMARKS)
     add_subdirectory(benchmarks)
+endif()
+
+if(AUTOMERGE_CPP_BUILD_FUZZ)
+    add_subdirectory(fuzz)
 endif()
