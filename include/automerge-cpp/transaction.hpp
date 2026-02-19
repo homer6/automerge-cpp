@@ -310,11 +310,10 @@ public:
               && (!std::is_convertible_v<R, std::string_view>)
     auto put(const ObjId& obj, std::string_view key, R&& range) -> ObjId {
         auto list = put_object(obj, key, ObjType::list);
-        std::ranges::for_each(std::views::enumerate(std::forward<R>(range)),
-            [&](auto&& pair) {
-                auto&& [idx, val] = pair;
-                insert(list, static_cast<std::size_t>(idx), ScalarValue{val});
-            });
+        std::size_t idx = 0;
+        for (auto&& val : range) {
+            insert(list, idx++, ScalarValue{val});
+        }
         return list;
     }
 
@@ -338,11 +337,10 @@ public:
               && (!std::is_convertible_v<R, std::string_view>)
     auto insert(const ObjId& obj, std::size_t index, R&& range) -> ObjId {
         auto list = insert_object(obj, index, ObjType::list);
-        std::ranges::for_each(std::views::enumerate(std::forward<R>(range)),
-            [&](auto&& pair) {
-                auto&& [idx, val] = pair;
-                insert(list, static_cast<std::size_t>(idx), ScalarValue{val});
-            });
+        std::size_t idx = 0;
+        for (auto&& val : range) {
+            insert(list, idx++, ScalarValue{val});
+        }
         return list;
     }
 
