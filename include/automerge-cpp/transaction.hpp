@@ -425,6 +425,32 @@ public:
         }
     }
 
+    // --- Read methods (no locking, safe because transact holds exclusive lock) ---
+
+    /// Read a scalar value at a map key within the transaction.
+    auto get(const ObjId& obj, std::string_view key) const -> std::optional<Value>;
+
+    /// Read a scalar value at a list index within the transaction.
+    auto get(const ObjId& obj, std::size_t index) const -> std::optional<Value>;
+
+    /// Get the object type of an ObjId within the transaction.
+    auto object_type(const ObjId& obj) const -> std::optional<ObjType>;
+
+    /// Get the child ObjId for a map key within the transaction.
+    auto get_obj_id(const ObjId& obj, std::string_view key) const -> std::optional<ObjId>;
+
+    /// Get the child ObjId for a list index within the transaction.
+    auto get_obj_id(const ObjId& obj, std::size_t index) const -> std::optional<ObjId>;
+
+    /// Get the length of a list/text object within the transaction.
+    auto length(const ObjId& obj) const -> std::size_t;
+
+    /// Get all keys of a map object within the transaction.
+    auto keys(const ObjId& obj) const -> std::vector<std::string>;
+
+    /// Get text content within the transaction.
+    auto text(const ObjId& obj) const -> std::string;
+
 private:
     void commit();
 

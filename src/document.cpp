@@ -159,6 +159,18 @@ auto Document::object_type(const ObjId& obj) const -> std::optional<ObjType> {
     return state_->object_type(obj);
 }
 
+// -- Child object lookup ------------------------------------------------------
+
+auto Document::get_obj_id(const ObjId& obj, std::string_view key) const -> std::optional<ObjId> {
+    auto guard = read_guard();
+    return state_->get_obj_id_for_key(obj, std::string{key});
+}
+
+auto Document::get_obj_id(const ObjId& obj, std::size_t index) const -> std::optional<ObjId> {
+    auto guard = read_guard();
+    return state_->get_obj_id_for_index(obj, index);
+}
+
 // -- Phase 3: Fork and Merge --------------------------------------------------
 
 auto Document::fork() const -> Document {

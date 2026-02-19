@@ -22,12 +22,14 @@ automerge-cpp/
 │   ├── patch.hpp                           #   Patch, PatchAction types
 │   ├── cursor.hpp                          #   Cursor (stable position)
 │   ├── mark.hpp                            #   Mark (rich text annotation)
+│   ├── json.hpp                            #   nlohmann/json interop: ADL, export/import, pointer, patch, merge patch, flatten
 │   ├── error.hpp                           #   Error, ErrorKind
 │   └── thread_pool.hpp                     #   Barak Shoshany's BS::thread_pool (header-only)
 ├── src/                                    # IMPLEMENTATION
 │   ├── doc_state.hpp                       #   internal: DocState, ObjectState, MapEntry, ListElement, MarkEntry
 │   ├── document.cpp                        #   Document methods (core, save/load, sync, patches, time travel, cursors, marks)
 │   ├── transaction.cpp                     #   Transaction methods
+│   ├── json.cpp                            #   nlohmann/json interop implementation
 │   ├── crypto/                             #   Cryptographic primitives
 │   │   └── sha256.hpp                      #     vendored header-only SHA-256
 │   ├── encoding/                           #   Columnar format codecs
@@ -213,6 +215,7 @@ See [docs/plans/architecture.md](docs/plans/architecture.md) for the full design
 | `Cursor` | Stable position tracking in lists/text |
 | `Mark` | Rich text range annotations (bold, italic, links) |
 | `thread_pool` | BS::thread_pool for internal parallelism (shared across documents) |
+| `json` | nlohmann/json interop: ADL serialization, import/export, JSON Pointer/Patch/Merge Patch, flatten |
 
 ### Key Invariants
 
@@ -225,7 +228,7 @@ See [docs/plans/architecture.md](docs/plans/architecture.md) for the full design
 
 ## Testing
 
-470 tests across 13 test files. Uses Google Test (fetched via CMake FetchContent).
+583 tests across 14 test files. Uses Google Test (fetched via CMake FetchContent).
 
 | Test File | Count | Covers |
 |-----------|-------|--------|
@@ -241,6 +244,7 @@ See [docs/plans/architecture.md](docs/plans/architecture.md) for the full design
 | `sha256_test.cpp` | 7 | SHA-256 NIST test vectors |
 | `column_spec_test.cpp` | 8 | Column spec encoding/decoding |
 | `chunk_test.cpp` | 17 | Chunk envelope, checksum validation |
+| `json_test.cpp` | 98 | ADL serialization, document export/import, JSON Pointer, JSON Patch, JSON Merge Patch, flatten/unflatten, get_obj_id |
 | `change_op_columns_test.cpp` | 25 | Op column encode/decode, all op types including marks |
 
 - **Property tests**: verify CRDT algebraic properties (commutativity, associativity, idempotency)
@@ -270,7 +274,7 @@ Seven example programs in `examples/`:
 | `sync_demo` | Peer-to-peer sync with SyncState |
 | `thread_safe_demo` | Multi-threaded concurrent reads and writes on a single Document |
 | `parallel_perf_demo` | Monoid-powered fork/merge parallelism, parallel save/load/sync |
-| `json_interop_demo` | nlohmann/json import/export, fork/merge round-trip |
+| `json_interop_demo` | JSON import/export, Pointer, Patch, Merge Patch, flatten, ADL serialization |
 
 ## Benchmarks
 

@@ -242,4 +242,40 @@ void Transaction::commit() {
     state_.change_history.push_back(std::move(change));
 }
 
+// =============================================================================
+// Read methods (lock-free, safe within transact's exclusive lock)
+// =============================================================================
+
+auto Transaction::get(const ObjId& obj, std::string_view key) const -> std::optional<Value> {
+    return state_.map_get(obj, std::string{key});
+}
+
+auto Transaction::get(const ObjId& obj, std::size_t index) const -> std::optional<Value> {
+    return state_.list_get(obj, index);
+}
+
+auto Transaction::object_type(const ObjId& obj) const -> std::optional<ObjType> {
+    return state_.object_type(obj);
+}
+
+auto Transaction::get_obj_id(const ObjId& obj, std::string_view key) const -> std::optional<ObjId> {
+    return state_.get_obj_id_for_key(obj, std::string{key});
+}
+
+auto Transaction::get_obj_id(const ObjId& obj, std::size_t index) const -> std::optional<ObjId> {
+    return state_.get_obj_id_for_index(obj, index);
+}
+
+auto Transaction::length(const ObjId& obj) const -> std::size_t {
+    return state_.object_length(obj);
+}
+
+auto Transaction::keys(const ObjId& obj) const -> std::vector<std::string> {
+    return state_.map_keys(obj);
+}
+
+auto Transaction::text(const ObjId& obj) const -> std::string {
+    return state_.text_content(obj);
+}
+
 }  // namespace automerge_cpp

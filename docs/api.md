@@ -1029,3 +1029,121 @@ auto marks = doc.marks(text_id);
 // marks[0]: {start=0, end=5, name="bold", value=true}
 // marks[1]: {start=6, end=11, name="link", value="https://example.com"}
 ```
+
+---
+
+## JSON Interoperability (`json.hpp`)
+
+```cpp
+#include <automerge-cpp/json.hpp>
+```
+
+Requires `nlohmann/json` (linked as a PUBLIC dependency).
+
+### ADL Serialization
+
+All automerge-cpp types provide `to_json`/`from_json` free functions for
+automatic conversion with `nlohmann::json`:
+
+```cpp
+am::ScalarValue sv = am::Counter{42};
+nlohmann::json j = sv;  // {"__type": "counter", "value": 42}
+
+am::ScalarValue sv2;
+am::from_json(j, sv2);  // round-trips through tagged format
+
+nlohmann::json change_j = doc.get_changes().back();  // Change → JSON
+nlohmann::json patch_j = patches;                      // vector<Patch> → JSON
+```
+
+**Tagged types** (round-trip safe):
+- `Counter{N}` → `{"__type": "counter", "value": N}`
+- `Timestamp{N}` → `{"__type": "timestamp", "value": N}`
+- `Bytes{...}` → `{"__type": "bytes", "value": "<base64>"}`
+
+**Identity types** serialize as hex strings:
+- `ActorId` → 32-character hex string
+- `ChangeHash` → 64-character hex string
+
+### Document Export / Import
+
+```cpp
+// Export the full document (or subtree) as JSON
+auto j = am::json::export_json(doc);                        // full document
+auto j = am::json::export_json(doc, config_id);             // subtree
+auto j = am::json::export_json_at(doc, heads);              // historical
+
+// Import JSON into a document
+am::json::import_json(doc, json{{"name", "Alice"}, {"age", 30}});
+
+// Import within an existing transaction
+doc.transact([&](am::Transaction& tx) {
+    am::json::import_json(tx, some_json);
+});
+
+// Round-trip: JSON → Document → JSON
+auto input = json{{"a", 1}, {"b", {{"c", 2}}}};
+auto doc = am::Document{};
+am::json::import_json(doc, input);
+assert(am::json::export_json(doc) == input);
+```
+
+### Child Object Lookup
+
+```cpp
+auto child = doc.get_obj_id(am::root, "config");       // map key
+auto elem  = doc.get_obj_id(list_id, std::size_t{0});  // list index
+// Returns nullopt if key/index doesn't exist or value isn't an object
+```
+
+### JSON Pointer (RFC 6901)
+
+```cpp
+auto val = am::json::get_pointer(doc, "/config/port");     // get nested value
+am::json::put_pointer(doc, "/config/timeout", am::ScalarValue{std::int64_t{30}});
+am::json::delete_pointer(doc, "/config/debug");
+
+// Escaped characters: ~0 = ~, ~1 = /
+auto val = am::json::get_pointer(doc, "/a~1b");            // key "a/b"
+auto val = am::json::get_pointer(doc, "/c~0d");            // key "c~d"
+
+// List append with "-"
+am::json::put_pointer(doc, "/items/-", am::ScalarValue{std::string{"new"}});
+```
+
+### JSON Patch (RFC 6902)
+
+```cpp
+am::json::apply_json_patch(doc, json::parse(R"([
+    {"op": "add", "path": "/name", "value": "Alice"},
+    {"op": "remove", "path": "/deprecated"},
+    {"op": "replace", "path": "/version", "value": "2.0"},
+    {"op": "move", "from": "/old", "path": "/new"},
+    {"op": "copy", "from": "/src", "path": "/dst"},
+    {"op": "test", "path": "/name", "value": "Alice"}
+])"));
+
+// Generate a diff between two documents
+auto patch = am::json::diff_json_patch(doc_before, doc_after);
+```
+
+### JSON Merge Patch (RFC 7386)
+
+```cpp
+am::json::apply_merge_patch(doc, json{
+    {"name", "Bob"},        // set/replace
+    {"deprecated", nullptr}, // delete (null = remove)
+    {"config", {{"port", 9090}}},  // recursive merge
+});
+
+auto patch = am::json::generate_merge_patch(doc_before, doc_after);
+```
+
+### Flatten / Unflatten
+
+```cpp
+auto flat = am::json::flatten(doc);
+// {"/name": "Alice", "/config/port": 8080, "/items/0": "Milk", ...}
+
+am::json::unflatten(doc, flat);  // recreate nested structure from flat map
+```

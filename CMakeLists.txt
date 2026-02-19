@@ -42,10 +42,11 @@ target_compile_features(automerge-cpp PUBLIC cxx_std_23)
 target_sources(automerge-cpp PRIVATE
     src/document.cpp
     src/transaction.cpp
+    src/json.cpp
 )
 
 target_link_libraries(automerge-cpp
-    PUBLIC Threads::Threads
+    PUBLIC Threads::Threads nlohmann_json::nlohmann_json
     PRIVATE ZLIB::ZLIB
 )
 

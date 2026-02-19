@@ -12,7 +12,7 @@ This is a **from-scratch** reimplementation, not a wrapper. It mirrors the upstr
 Automerge semantics while embracing idiomatic C++23: algebraic types, ranges pipelines,
 strong types, and an API inspired by [nlohmann/json](https://github.com/nlohmann/json).
 
-**470 tests passing** across 13 test files. [nlohmann/json](https://github.com/nlohmann/json) interoperability included.
+**583 tests passing** across 14 test files. Deep [nlohmann/json](https://github.com/nlohmann/json) interoperability included.
 
 ## Quick Example
 
@@ -150,27 +150,57 @@ std::visit(overload{
 
 ## nlohmann/json Interoperability
 
-automerge-cpp includes [nlohmann/json](https://github.com/nlohmann/json) as a dependency
-and provides example patterns for importing/exporting JSON data:
+automerge-cpp includes [nlohmann/json](https://github.com/nlohmann/json) as a public dependency
+and provides deep integration through `<automerge-cpp/json.hpp>`:
 
 ```cpp
 #include <automerge-cpp/automerge.hpp>
+#include <automerge-cpp/json.hpp>
 #include <nlohmann/json.hpp>
 
-// Import a JSON object into an Automerge document
+namespace am = automerge_cpp;
+using json = nlohmann::json;
+
+// Import JSON into an Automerge document (recursive, handles nested objects)
 auto input = json::parse(R"({"name": "Alice", "scores": [10, 20, 30]})");
-import_json(doc, input);
+auto doc = am::Document{};
+am::json::import_json(doc, input);
 
-// Access imported data with typed get<T>() and get_path()
-auto name = doc.get<std::string>(root, "name");        // "Alice"
-auto score = doc.get_path("scores", std::size_t{0});   // 10
+// Export back to JSON — lossless round-trip
+auto output = am::json::export_json(doc);
+assert(input == output);
 
-// Export Automerge state back to JSON
-auto output = export_json(doc);
+// JSON Pointer (RFC 6901) — path-based access
+auto score = am::json::get_pointer(doc, "/scores/0");          // 10
+am::json::put_pointer(doc, "/config/port", am::ScalarValue{std::int64_t{8080}});
+am::json::delete_pointer(doc, "/scores/2");
+
+// JSON Patch (RFC 6902) — atomic batch operations
+am::json::apply_json_patch(doc, json::parse(R"([
+    {"op": "add",     "path": "/scores/-", "value": 99},
+    {"op": "replace", "path": "/name",     "value": "Bob"},
+    {"op": "test",    "path": "/name",     "value": "Bob"}
+])"));
+
+// JSON Merge Patch (RFC 7386) — partial updates
+am::json::apply_merge_patch(doc, json{{"name", "Charlie"}, {"scores", nullptr}});
+
+// Flatten to JSON Pointer paths
+auto flat = am::json::flatten(doc);  // {"/config/port": 8080, "/name": "Charlie"}
+
+// ADL serialization — automerge types ↔ nlohmann::json (in am:: namespace)
+json j = am::ScalarValue{am::Counter{42}};  // {"__type": "counter", "value": 42}
+
+// Fork, diff as RFC 6902, then merge
+auto bob = doc.fork();
+bob.transact([](am::Transaction& tx) { tx.put(am::root, "name", "Dave"); });
+auto diff = am::json::diff_json_patch(doc, bob);
+doc.merge(bob);
 ```
 
-See [`examples/json_interop_demo.cpp`](examples/json_interop_demo.cpp) for a full working example
-with nested objects, fork/merge round-trips, and save/load verification.
+See the **[JSON Integration Guide](docs/json-integration.md)** for complete documentation
+of all features, and [`examples/json_interop_demo.cpp`](examples/json_interop_demo.cpp) for
+a full working example.
 
 ## Features
 
@@ -182,7 +212,7 @@ with nested objects, fork/merge round-trips, and save/load verification.
 - **Strong types**: `ActorId`, `ObjId`, `ChangeHash`, `OpId` never implicitly convert
 - **Type-safe values**: `std::variant`-based `ScalarValue` and `Value` types
 
-### Modern C++ API (Phase 12A)
+### Modern C++ API
 
 - **Typed `get<T>()`**: returns `optional<T>` directly, no variant unwrapping
 - **Scalar overloads**: `put`, `insert`, `set` accept native C++ types
@@ -191,7 +221,15 @@ with nested objects, fork/merge round-trips, and save/load verification.
 - **`operator[]`**: root map access
 - **`get_path()`**: variadic nested access
 - **`overload{}` helper**: ad-hoc variant visitors
-- **nlohmann/json interop**: import/export patterns
+
+### nlohmann/json Integration
+
+- **Import/export**: recursive `import_json` / `export_json` with nested objects, lists, text
+- **JSON Pointer (RFC 6901)**: `get_pointer`, `put_pointer`, `delete_pointer`
+- **JSON Patch (RFC 6902)**: `apply_json_patch` (add, remove, replace, move, copy, test), `diff_json_patch`
+- **JSON Merge Patch (RFC 7386)**: `apply_merge_patch`, `generate_merge_patch`
+- **Flatten/unflatten**: pointer-path maps for document inspection and reconstruction
+- **ADL serialization**: `to_json`/`from_json` for all automerge types with tagged round-trip fidelity
 
 ### Serialization and Sync
 
@@ -211,7 +249,7 @@ with nested objects, fork/merge round-trips, and save/load verification.
 
 ### Quality and Performance
 
-- **470 tests** across 13 test files
+- **583 tests** across 14 test files
 - **Fuzz testing**: libFuzzer targets for `Document::load()`, LEB128, and change chunk parsing
 - **Static analysis**: clang-tidy CI with `bugprone-*`, `performance-*`, `clang-analyzer-*`
 - **Sanitizer CI**: Address Sanitizer + Undefined Behavior Sanitizer
@@ -296,17 +334,19 @@ automerge-cpp/
     patch.hpp                 #   Patch, PatchAction types
     cursor.hpp                #   Cursor (stable position)
     mark.hpp                  #   Mark (rich text annotation)
+    json.hpp                  #   nlohmann/json interop (RFC 6901/6902/7386)
     error.hpp                 #   Error, ErrorKind
     thread_pool.hpp           #   BS::thread_pool (header-only)
   src/                        # implementation
     document.cpp              #   Document methods
     transaction.cpp           #   Transaction methods
+    json.cpp                  #   JSON interop implementation
     doc_state.hpp             #   internal: DocState, ObjectState
     crypto/                   #   SHA-256 (vendored)
     encoding/                 #   LEB128, RLE, delta, boolean codecs
     storage/                  #   columnar binary format
     sync/                     #   bloom filter for sync protocol
-  tests/                      # 470 tests (Google Test)
+  tests/                      # 583 tests (Google Test)
   examples/                   # 7 example programs
   benchmarks/                 # performance benchmarks (Google Benchmark)
   docs/                       # documentation
@@ -330,7 +370,7 @@ Seven example programs in `examples/`:
 | `sync_demo` | Peer-to-peer sync with SyncState |
 | `thread_safe_demo` | Multi-threaded concurrent reads and writes |
 | `parallel_perf_demo` | Monoid-powered fork/merge parallelism |
-| `json_interop_demo` | nlohmann/json import/export, fork/merge round-trip |
+| `json_interop_demo` | JSON import/export, Pointer, Patch, Merge Patch, flatten, ADL serialization |
 
 ```bash
 ./build/examples/basic_usage
@@ -344,12 +384,12 @@ Seven example programs in `examples/`:
 
 ## Documentation
 
+- [JSON Integration Guide](docs/json-integration.md) — import/export, Pointer, Patch, Merge Patch, flatten, ADL serialization
 - [API Reference](docs/api.md) — every public type, method, and usage examples
 - [Benchmark Results](docs/benchmark-results.md) — performance measurements
 - [Style Guide](docs/style.md) — coding style (Ben Deane's modern C++ principles)
 - [Architecture](docs/plans/architecture.md) — design, types, modules
 - [Roadmap](docs/plans/roadmap.md) — phased development plan with status
-- [nlohmann/json Interop Plan](docs/plans/nlohmann-json-interop.md) — JSON integration design
 
 ## Design Philosophy
 
