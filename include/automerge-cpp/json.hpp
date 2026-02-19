@@ -1,9 +1,12 @@
 /// @file json.hpp
 /// @brief nlohmann/json interoperability for automerge-cpp.
 ///
-/// Provides ADL serialization (to_json/from_json), document export/import,
-/// JSON Pointer (RFC 6901), JSON Patch (RFC 6902), JSON Merge Patch (RFC 7386),
-/// and flatten/unflatten utilities.
+/// ADL serialization (to_json/from_json) lives in namespace automerge_cpp
+/// so that ADL finds them alongside the automerge types.
+///
+/// All other JSON interop — import/export, JSON Pointer (RFC 6901),
+/// JSON Patch (RFC 6902), JSON Merge Patch (RFC 7386), flatten/unflatten —
+/// lives in namespace automerge_cpp::json to avoid polluting the main namespace.
 
 #pragma once
 
@@ -27,6 +30,9 @@ namespace automerge_cpp {
 
 // =============================================================================
 // ADL serialization: to_json / from_json  (Phase 12B)
+//
+// These MUST be in namespace automerge_cpp so that ADL finds them when
+// you write:  nlohmann::json j = some_automerge_value;
 // =============================================================================
 
 // -- Scalar tag types ---------------------------------------------------------
@@ -57,6 +63,12 @@ void to_json(nlohmann::json& j, const Change& c);
 void to_json(nlohmann::json& j, const Patch& p);
 void to_json(nlohmann::json& j, const Mark& m);
 void to_json(nlohmann::json& j, const Cursor& c);
+
+// =============================================================================
+// JSON interop namespace — all non-ADL functionality
+// =============================================================================
+
+namespace json {
 
 // =============================================================================
 // Document export / import  (Phase 12C)
@@ -159,5 +171,7 @@ auto flatten(const Document& doc, const ObjId& obj = root)
 void unflatten(Document& doc,
                const std::map<std::string, nlohmann::json>& flat,
                const ObjId& target = root);
+
+}  // namespace json
 
 }  // namespace automerge_cpp

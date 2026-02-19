@@ -164,37 +164,37 @@ using json = nlohmann::json;
 // Import JSON into an Automerge document (recursive, handles nested objects)
 auto input = json::parse(R"({"name": "Alice", "scores": [10, 20, 30]})");
 auto doc = am::Document{};
-am::import_json(doc, input);
+am::json::import_json(doc, input);
 
 // Export back to JSON — lossless round-trip
-auto output = am::export_json(doc);
+auto output = am::json::export_json(doc);
 assert(input == output);
 
 // JSON Pointer (RFC 6901) — path-based access
-auto score = am::get_pointer(doc, "/scores/0");          // 10
-am::put_pointer(doc, "/config/port", am::ScalarValue{std::int64_t{8080}});
-am::delete_pointer(doc, "/scores/2");
+auto score = am::json::get_pointer(doc, "/scores/0");          // 10
+am::json::put_pointer(doc, "/config/port", am::ScalarValue{std::int64_t{8080}});
+am::json::delete_pointer(doc, "/scores/2");
 
 // JSON Patch (RFC 6902) — atomic batch operations
-am::apply_json_patch(doc, json::parse(R"([
+am::json::apply_json_patch(doc, json::parse(R"([
     {"op": "add",     "path": "/scores/-", "value": 99},
     {"op": "replace", "path": "/name",     "value": "Bob"},
     {"op": "test",    "path": "/name",     "value": "Bob"}
 ])"));
 
 // JSON Merge Patch (RFC 7386) — partial updates
-am::apply_merge_patch(doc, json{{"name", "Charlie"}, {"scores", nullptr}});
+am::json::apply_merge_patch(doc, json{{"name", "Charlie"}, {"scores", nullptr}});
 
 // Flatten to JSON Pointer paths
-auto flat = am::flatten(doc);  // {"/config/port": 8080, "/name": "Charlie"}
+auto flat = am::json::flatten(doc);  // {"/config/port": 8080, "/name": "Charlie"}
 
-// ADL serialization — automerge types ↔ nlohmann::json
+// ADL serialization — automerge types ↔ nlohmann::json (in am:: namespace)
 json j = am::ScalarValue{am::Counter{42}};  // {"__type": "counter", "value": 42}
 
 // Fork, diff as RFC 6902, then merge
 auto bob = doc.fork();
 bob.transact([](am::Transaction& tx) { tx.put(am::root, "name", "Dave"); });
-auto diff = am::diff_json_patch(doc, bob);
+auto diff = am::json::diff_json_patch(doc, bob);
 doc.merge(bob);
 ```
 

@@ -1069,23 +1069,23 @@ nlohmann::json patch_j = patches;                      // vector<Patch> → JSON
 
 ```cpp
 // Export the full document (or subtree) as JSON
-auto j = am::export_json(doc);                        // full document
-auto j = am::export_json(doc, config_id);             // subtree
-auto j = am::export_json_at(doc, heads);              // historical
+auto j = am::json::export_json(doc);                        // full document
+auto j = am::json::export_json(doc, config_id);             // subtree
+auto j = am::json::export_json_at(doc, heads);              // historical
 
 // Import JSON into a document
-am::import_json(doc, json{{"name", "Alice"}, {"age", 30}});
+am::json::import_json(doc, json{{"name", "Alice"}, {"age", 30}});
 
 // Import within an existing transaction
 doc.transact([&](am::Transaction& tx) {
-    am::import_json(tx, some_json);
+    am::json::import_json(tx, some_json);
 });
 
 // Round-trip: JSON → Document → JSON
 auto input = json{{"a", 1}, {"b", {{"c", 2}}}};
 auto doc = am::Document{};
-am::import_json(doc, input);
-assert(am::export_json(doc) == input);
+am::json::import_json(doc, input);
+assert(am::json::export_json(doc) == input);
 ```
 
 ### Child Object Lookup
@@ -1099,22 +1099,22 @@ auto elem  = doc.get_obj_id(list_id, std::size_t{0});  // list index
 ### JSON Pointer (RFC 6901)
 
 ```cpp
-auto val = am::get_pointer(doc, "/config/port");     // get nested value
-am::put_pointer(doc, "/config/timeout", am::ScalarValue{std::int64_t{30}});
-am::delete_pointer(doc, "/config/debug");
+auto val = am::json::get_pointer(doc, "/config/port");     // get nested value
+am::json::put_pointer(doc, "/config/timeout", am::ScalarValue{std::int64_t{30}});
+am::json::delete_pointer(doc, "/config/debug");
 
 // Escaped characters: ~0 = ~, ~1 = /
-auto val = am::get_pointer(doc, "/a~1b");            // key "a/b"
-auto val = am::get_pointer(doc, "/c~0d");            // key "c~d"
+auto val = am::json::get_pointer(doc, "/a~1b");            // key "a/b"
+auto val = am::json::get_pointer(doc, "/c~0d");            // key "c~d"
 
 // List append with "-"
-am::put_pointer(doc, "/items/-", am::ScalarValue{std::string{"new"}});
+am::json::put_pointer(doc, "/items/-", am::ScalarValue{std::string{"new"}});
 ```
 
 ### JSON Patch (RFC 6902)
 
 ```cpp
-am::apply_json_patch(doc, json::parse(R"([
+am::json::apply_json_patch(doc, json::parse(R"([
     {"op": "add", "path": "/name", "value": "Alice"},
     {"op": "remove", "path": "/deprecated"},
     {"op": "replace", "path": "/version", "value": "2.0"},
@@ -1124,26 +1124,26 @@ am::apply_json_patch(doc, json::parse(R"([
 ])"));
 
 // Generate a diff between two documents
-auto patch = am::diff_json_patch(doc_before, doc_after);
+auto patch = am::json::diff_json_patch(doc_before, doc_after);
 ```
 
 ### JSON Merge Patch (RFC 7386)
 
 ```cpp
-am::apply_merge_patch(doc, json{
+am::json::apply_merge_patch(doc, json{
     {"name", "Bob"},        // set/replace
     {"deprecated", nullptr}, // delete (null = remove)
     {"config", {{"port", 9090}}},  // recursive merge
 });
 
-auto patch = am::generate_merge_patch(doc_before, doc_after);
+auto patch = am::json::generate_merge_patch(doc_before, doc_after);
 ```
 
 ### Flatten / Unflatten
 
 ```cpp
-auto flat = am::flatten(doc);
+auto flat = am::json::flatten(doc);
 // {"/name": "Alice", "/config/port": 8080, "/items/0": "Milk", ...}
 
-am::unflatten(doc, flat);  // recreate nested structure from flat map
+am::json::unflatten(doc, flat);  // recreate nested structure from flat map
 ```

@@ -15,7 +15,8 @@
 namespace automerge_cpp {
 
 // =============================================================================
-// Hex helpers (internal)
+// Shared helpers (anonymous namespace, visible to both automerge_cpp and
+// automerge_cpp::json through normal name lookup)
 // =============================================================================
 
 namespace {
@@ -97,7 +98,7 @@ auto base64_decode(std::string_view encoded) -> std::vector<std::byte> {
 }  // anonymous namespace
 
 // =============================================================================
-// ADL serialization: to_json / from_json
+// ADL serialization: to_json / from_json  (in namespace automerge_cpp)
 // =============================================================================
 
 void to_json(nlohmann::json& j, Null) {
@@ -214,12 +215,13 @@ void to_json(nlohmann::json& j, const Change& c) {
     }
 }
 
-static void patch_action_to_json(nlohmann::json& j, const PatchAction& action) {
+namespace {
+
+void patch_action_to_json(nlohmann::json& j, const PatchAction& action) {
     std::visit(overload{
         [&](const PatchPut& p) {
             j["type"] = "put";
             j["conflict"] = p.conflict;
-            // Export the value: if it's a ScalarValue, use ADL; if ObjType, store type string
             std::visit(overload{
                 [&](const ScalarValue& sv) {
                     auto sv_json = nlohmann::json{};
@@ -263,11 +265,12 @@ static void patch_action_to_json(nlohmann::json& j, const PatchAction& action) {
     }, action);
 }
 
+}  // anonymous namespace
+
 void to_json(nlohmann::json& j, const Patch& p) {
     j = nlohmann::json{
         {"obj", p.obj},
     };
-    // Key: string or size_t
     std::visit(overload{
         [&](const std::string& k) { j["key"] = k; },
         [&](std::size_t i) { j["key"] = i; },
@@ -291,6 +294,12 @@ void to_json(nlohmann::json& j, const Mark& m) {
 void to_json(nlohmann::json& j, const Cursor& c) {
     to_json(j, c.position);
 }
+
+// =============================================================================
+// namespace automerge_cpp::json — all non-ADL interop functionality
+// =============================================================================
+
+namespace json {
 
 // =============================================================================
 // Document export (Phase 12C)
@@ -713,7 +722,6 @@ void delete_pointer(Document& doc, std::string_view pointer) {
 namespace {
 
 // Internal helpers for JSON Patch that operate within a transaction.
-// These mirror get_pointer/put_pointer/delete_pointer but use the tx.
 
 auto get_value_at_pointer(const Transaction& tx, const std::vector<std::string>& segments)
     -> std::optional<Value> {
@@ -786,7 +794,7 @@ void add_value_at_pointer(Transaction& tx,
             }
         } else {
             auto sv = ScalarValue{};
-            from_json(value, sv);
+            automerge_cpp::from_json(value, sv);
             tx.insert(current, idx, sv);
         }
     } else {
@@ -970,8 +978,6 @@ auto generate_merge_patch(const Document& before, const Document& after) -> nloh
     auto j1 = export_json(before);
     auto j2 = export_json(after);
     // Build a merge patch by comparing the two JSON trees.
-    // For objects: changed/added keys get their new value, removed keys get null.
-    // For non-objects: the entire new value replaces.
     auto build_patch = [](const nlohmann::json& source, const nlohmann::json& target,
                           auto&& self) -> nlohmann::json {
         if (target.is_object()) {
@@ -1129,5 +1135,7 @@ void unflatten(Document& doc,
         }
     });
 }
+
+}  // namespace json
 
 }  // namespace automerge_cpp
