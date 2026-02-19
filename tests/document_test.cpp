@@ -7,8 +7,11 @@
 
 #include <algorithm>
 #include <atomic>
+#include <map>
+#include <set>
 #include <string>
 #include <thread>
+#include <vector>
 
 using namespace automerge_cpp;
 
@@ -5208,6 +5211,76 @@ TEST(Document, insert_bare_initializer_map_into_list) {
     auto outer = doc.transact([](auto& tx) {
         auto outer = tx.put(root, "records", ObjType::list);
         tx.insert(outer, 0, {{"name", "Alice"}, {"age", std::int64_t{30}}});
+        return outer;
+    });
+    if (auto name = doc.get_path("records", std::size_t{0}, "name")) {
+        EXPECT_EQ(get_scalar<std::string>(*name), "Alice");
+    }
+}
+
+// -- STL container overloads --------------------------------------------------
+
+TEST(Document, put_vector_creates_list) {
+    auto doc = Document{};
+    auto tags = std::vector<std::string>{"crdt", "cpp", "collaborative"};
+    auto list = doc.transact([&](auto& tx) {
+        return tx.put(root, "tags", tags);
+    });
+    EXPECT_EQ(doc.length(list), 3u);
+    EXPECT_EQ(doc.get<std::string>(list, std::size_t{0}), "crdt");
+    EXPECT_EQ(doc.get<std::string>(list, std::size_t{2}), "collaborative");
+}
+
+TEST(Document, put_std_map_creates_map) {
+    auto doc = Document{};
+    auto dims = std::map<std::string, ScalarValue>{
+        {"w", ScalarValue{std::int64_t{800}}},
+        {"h", ScalarValue{std::int64_t{600}}},
+    };
+    auto obj = doc.transact([&](auto& tx) {
+        return tx.put(root, "dims", dims);
+    });
+    EXPECT_EQ(doc.get<std::int64_t>(obj, "w"), 800);
+    EXPECT_EQ(doc.get<std::int64_t>(obj, "h"), 600);
+}
+
+TEST(Document, put_set_creates_list) {
+    auto doc = Document{};
+    auto unique = std::set<std::string>{"alpha", "beta", "gamma"};
+    auto list = doc.transact([&](auto& tx) {
+        return tx.put(root, "sorted", unique);
+    });
+    EXPECT_EQ(doc.length(list), 3u);
+    // std::set is sorted, so alpha < beta < gamma
+    EXPECT_EQ(doc.get<std::string>(list, std::size_t{0}), "alpha");
+}
+
+TEST(Document, insert_vector_into_list) {
+    auto doc = Document{};
+    auto nums = std::vector<ScalarValue>{
+        ScalarValue{std::int64_t{10}},
+        ScalarValue{std::int64_t{20}},
+    };
+    auto outer = doc.transact([&](auto& tx) {
+        auto outer = tx.put(root, "outer", ObjType::list);
+        tx.insert(outer, 0, nums);
+        return outer;
+    });
+    // outer[0] is a nested list
+    auto nested = doc.get(outer, std::size_t{0});
+    ASSERT_TRUE(nested.has_value());
+    EXPECT_TRUE(is_object(*nested));
+}
+
+TEST(Document, insert_std_map_into_list) {
+    auto doc = Document{};
+    auto record = std::map<std::string, ScalarValue>{
+        {"name", ScalarValue{std::string{"Alice"}}},
+        {"score", ScalarValue{std::int64_t{100}}},
+    };
+    auto outer = doc.transact([&](auto& tx) {
+        auto outer = tx.put(root, "records", ObjType::list);
+        tx.insert(outer, 0, record);
         return outer;
     });
     if (auto name = doc.get_path("records", std::size_t{0}, "name")) {

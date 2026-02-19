@@ -7,10 +7,13 @@
 #include <automerge-cpp/types.hpp>
 #include <automerge-cpp/value.hpp>
 
+#include <algorithm>
+#include <concepts>
 #include <cstddef>
 #include <initializer_list>
 #include <ranges>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -275,6 +278,72 @@ public:
         auto map = insert_object(obj, index, ObjType::map);
         for (const auto& [k, v] : entries) put(map, std::string_view{k}, v);
         return map;
+    }
+
+    // -- STL container overloads (create objects from containers) --------------
+
+    /// Create a map at a map key from any associative container (std::map, std::unordered_map, etc.).
+    /// @code
+    /// auto dims = std::map<std::string, int>{{"w", 800}, {"h", 600}};
+    /// auto obj = tx.put(root, "dims", dims);
+    /// @endcode
+    template <typename AssocContainer>
+        requires requires { typename AssocContainer::mapped_type; }
+              && std::convertible_to<typename AssocContainer::key_type, std::string_view>
+              && std::convertible_to<typename AssocContainer::mapped_type, ScalarValue>
+    auto put(const ObjId& obj, std::string_view key, const AssocContainer& container) -> ObjId {
+        auto map = put_object(obj, key, ObjType::map);
+        std::ranges::for_each(container, [&](const auto& entry) {
+            put(map, std::string_view{entry.first}, ScalarValue{entry.second});
+        });
+        return map;
+    }
+
+    /// Create a list at a map key from any range (std::vector, std::set, std::deque, etc.).
+    /// @code
+    /// auto tags = std::vector<std::string>{"crdt", "cpp"};
+    /// auto list = tx.put(root, "tags", tags);
+    /// @endcode
+    template <std::ranges::input_range R>
+        requires std::convertible_to<std::ranges::range_value_t<R>, ScalarValue>
+              && (!requires { typename std::remove_cvref_t<R>::mapped_type; })
+              && (!std::is_convertible_v<R, std::string_view>)
+    auto put(const ObjId& obj, std::string_view key, R&& range) -> ObjId {
+        auto list = put_object(obj, key, ObjType::list);
+        std::ranges::for_each(std::views::enumerate(std::forward<R>(range)),
+            [&](auto&& pair) {
+                auto&& [idx, val] = pair;
+                insert(list, static_cast<std::size_t>(idx), ScalarValue{val});
+            });
+        return list;
+    }
+
+    /// Insert a map into a list from any associative container.
+    template <typename AssocContainer>
+        requires requires { typename AssocContainer::mapped_type; }
+              && std::convertible_to<typename AssocContainer::key_type, std::string_view>
+              && std::convertible_to<typename AssocContainer::mapped_type, ScalarValue>
+    auto insert(const ObjId& obj, std::size_t index, const AssocContainer& container) -> ObjId {
+        auto map = insert_object(obj, index, ObjType::map);
+        std::ranges::for_each(container, [&](const auto& entry) {
+            put(map, std::string_view{entry.first}, ScalarValue{entry.second});
+        });
+        return map;
+    }
+
+    /// Insert a list into a list from any range.
+    template <std::ranges::input_range R>
+        requires std::convertible_to<std::ranges::range_value_t<R>, ScalarValue>
+              && (!requires { typename std::remove_cvref_t<R>::mapped_type; })
+              && (!std::is_convertible_v<R, std::string_view>)
+    auto insert(const ObjId& obj, std::size_t index, R&& range) -> ObjId {
+        auto list = insert_object(obj, index, ObjType::list);
+        std::ranges::for_each(std::views::enumerate(std::forward<R>(range)),
+            [&](auto&& pair) {
+                auto&& [idx, val] = pair;
+                insert(list, static_cast<std::size_t>(idx), ScalarValue{val});
+            });
+        return list;
     }
 
     // -- Scalar convenience overloads (list set) ------------------------------

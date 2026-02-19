@@ -303,60 +303,104 @@ tx.insert(list, 0, true);                   // bool
 tx.set(list, 0, "updated");                 // same overloads for set()
 ```
 
-### Initializer Lists (`List{}`, `Map{}`)
+### Initializer Lists
 
-Create and populate nested objects in a single call — like nlohmann/json's
-`json::array()` and `json::object()`:
-
-```cpp
-#include <automerge-cpp/value.hpp>  // List, Map
-```
+Create and populate nested objects in a single call — like nlohmann/json.
+Bare initializer lists auto-detect: flat values `{a, b, c}` create a list,
+key-value pairs `{{"k", v}, ...}` create a map.
 
 #### Signatures
 
 ```cpp
-// Create a populated list at a map key
-tx.put(ObjId, std::string_view key, List{values...}) -> ObjId
+// Bare initializer lists (auto-detect list vs map)
+tx.put(ObjId, key, {values...})            -> ObjId   // creates list
+tx.put(ObjId, key, {{"k1",v1}, {"k2",v2}}) -> ObjId   // creates map
+tx.insert(ObjId, idx, {values...})          -> ObjId   // creates list in list
+tx.insert(ObjId, idx, {{"k1",v1}, ...})     -> ObjId   // creates map in list
 
-// Create a populated map at a map key
-tx.put(ObjId, std::string_view key, Map{{"k1", v1}, {"k2", v2}}) -> ObjId
-
-// Insert a populated list into a list
-tx.insert(ObjId, std::size_t index, List{values...}) -> ObjId
-
-// Insert a populated map into a list
-tx.insert(ObjId, std::size_t index, Map{{"k1", v1}, {"k2", v2}}) -> ObjId
+// Explicit wrappers (List{}, Map{})
+tx.put(ObjId, key, List{values...})         -> ObjId
+tx.put(ObjId, key, Map{{"k1",v1}, ...})     -> ObjId
+tx.insert(ObjId, idx, List{values...})      -> ObjId
+tx.insert(ObjId, idx, Map{{"k1",v1}, ...})  -> ObjId
 ```
 
 #### Examples
 
 ```cpp
 doc.transact([](auto& tx) {
-    // Create a list with initial values
-    auto items = tx.put(root, "items", List{"Milk", "Eggs", "Bread"});
+    // Bare initializer lists — auto-detects list vs map
+    auto items = tx.put(root, "items", {"Milk", "Eggs", "Bread"});
+    auto config = tx.put(root, "config", {{"port", 8080}, {"host", "localhost"}});
 
-    // Create a map with initial entries
-    auto config = tx.put(root, "config", Map{
-        {"port", 8080},
-        {"host", "localhost"},
-        {"debug", false},
-    });
+    // Explicit wrappers work too
+    auto tags = tx.put(root, "tags", List{"crdt", "cpp"});
+    auto meta = tx.put(root, "meta", Map{{"version", "1.0"}});
 
-    // Mixed types work — int, string, double, bool
+    // Mixed types — int, string, double, bool
     auto mixed = tx.put(root, "data", List{1, "hello", 3.14, true});
 
     // Empty containers
     auto empty_list = tx.put(root, "log", List{});
     auto empty_map = tx.put(root, "meta", Map{});
 
-    // Insert into lists
+    // Insert populated objects into lists
     auto records = tx.put(root, "users", ObjType::list);
-    tx.insert(records, 0, Map{{"name", "Alice"}, {"role", "admin"}});
-    tx.insert(records, 1, Map{{"name", "Bob"}, {"role", "editor"}});
+    tx.insert(records, 0, {{"name", "Alice"}, {"role", "admin"}});
+    tx.insert(records, 1, {{"name", "Bob"}, {"role", "editor"}});
 });
 ```
 
-### Batch Operations
+### STL Containers
+
+`put` and `insert` accept any STL container directly — ranges create lists,
+associative containers create maps. Uses `std::ranges::for_each` and
+`std::views::enumerate` internally.
+
+#### Signatures
+
+```cpp
+// Any range (vector, set, deque, etc.) → creates list
+template <std::ranges::input_range R>
+tx.put(ObjId, key, R&& range)              -> ObjId
+tx.insert(ObjId, idx, R&& range)           -> ObjId
+
+// Any associative container (map, unordered_map) → creates map
+template <typename AssocContainer>  // requires mapped_type
+tx.put(ObjId, key, const AssocContainer&)   -> ObjId
+tx.insert(ObjId, idx, const AssocContainer&) -> ObjId
+```
+
+#### Examples
+
+```cpp
+// std::vector → creates a list
+auto tags = std::vector<std::string>{"crdt", "cpp", "collaborative"};
+auto list = tx.put(root, "tags", tags);
+
+// std::set → creates a list (sorted order preserved)
+auto unique = std::set<std::string>{"alpha", "beta", "gamma"};
+tx.put(root, "sorted", unique);
+
+// std::map → creates a map
+auto dims = std::map<std::string, ScalarValue>{
+    {"w", ScalarValue{std::int64_t{800}}},
+    {"h", ScalarValue{std::int64_t{600}}},
+};
+tx.put(root, "dims", dims);
+
+// Insert containers into lists
+auto records = tx.put(root, "records", ObjType::list);
+auto row = std::map<std::string, ScalarValue>{
+    {"name", ScalarValue{std::string{"Alice"}}},
+    {"score", ScalarValue{std::int64_t{100}}},
+};
+tx.insert(records, 0, row);
+```
+
+### Batch Operations (existing objects)
+
+These operate on already-created objects (when you already have an ObjId):
 
 ```cpp
 // Batch insert from initializer list
@@ -365,11 +409,11 @@ tx.insert_all(ObjId, std::size_t start, std::initializer_list<ScalarValue> value
 // Batch put key-value pairs from initializer list
 tx.put_all(ObjId, std::initializer_list<std::pair<std::string_view, ScalarValue>> entries);
 
-// Populate from any associative container (std::map, std::unordered_map, etc.)
+// Populate existing map from any associative container
 template <typename Map>
 tx.put_map(ObjId, const Map& map);
 
-// Insert from any range of ScalarValue-convertible values
+// Insert into existing list from any range
 template <std::ranges::input_range R>
 tx.insert_range(ObjId, std::size_t start, R&& range);
 ```
@@ -377,28 +421,27 @@ tx.insert_range(ObjId, std::size_t start, R&& range);
 #### Batch Examples
 
 ```cpp
-// Initializer list — batch put
+// Batch put into an existing map
 tx.put_all(root, {
     {"name", ScalarValue{std::string{"Alice"}}},
     {"age",  ScalarValue{std::int64_t{30}}},
-    {"active", ScalarValue{true}},
 });
 
-// Initializer list — batch insert
+// Batch insert into an existing list
 tx.insert_all(list, 0, {
     ScalarValue{std::int64_t{1}},
     ScalarValue{std::int64_t{2}},
     ScalarValue{std::int64_t{3}},
 });
 
-// From std::map
+// From std::map into an existing map
 auto data = std::map<std::string, ScalarValue>{
     {"x", ScalarValue{std::int64_t{10}}},
     {"y", ScalarValue{std::int64_t{20}}},
 };
 tx.put_map(root, data);
 
-// From std::vector (or any range)
+// From std::vector into an existing list
 auto vals = std::vector<ScalarValue>{
     ScalarValue{std::int64_t{100}},
     ScalarValue{std::int64_t{200}},

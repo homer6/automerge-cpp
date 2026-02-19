@@ -33,12 +33,12 @@ static void import_json_value(am::Transaction& tx, const am::ObjId& obj,
 static void import_json_value(am::Transaction& tx, const am::ObjId& obj,
                               std::string_view key, const json& val) {
     if (val.is_object()) {
-        auto child = tx.put_object(obj, key, am::ObjType::map);
+        auto child = tx.put(obj, key, am::ObjType::map);
         for (auto& [k, v] : val.items()) {
             import_json_value(tx, child, std::string_view{k}, v);
         }
     } else if (val.is_array()) {
-        auto child = tx.put_object(obj, key, am::ObjType::list);
+        auto child = tx.put(obj, key, am::ObjType::list);
         for (std::size_t i = 0; i < val.size(); ++i) {
             import_json_value(tx, child, i, val[i]);
         }
@@ -60,12 +60,12 @@ static void import_json_value(am::Transaction& tx, const am::ObjId& obj,
 static void import_json_value(am::Transaction& tx, const am::ObjId& obj,
                               std::size_t index, const json& val) {
     if (val.is_object()) {
-        auto child = tx.insert_object(obj, index, am::ObjType::map);
+        auto child = tx.insert(obj, index, am::ObjType::map);
         for (auto& [k, v] : val.items()) {
             import_json_value(tx, child, std::string_view{k}, v);
         }
     } else if (val.is_array()) {
-        auto child = tx.insert_object(obj, index, am::ObjType::list);
+        auto child = tx.insert(obj, index, am::ObjType::list);
         for (std::size_t i = 0; i < val.size(); ++i) {
             import_json_value(tx, child, i, val[i]);
         }

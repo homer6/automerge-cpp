@@ -1,13 +1,15 @@
 // collaborative_todo — two actors concurrently edit a shared todo list
 //
-// Demonstrates: fork, merge, conflict resolution, list operations,
-//               transact with return values, typed get<T>()
+// Demonstrates: bare initializer lists, Map{} wrapper, std::vector,
+//               fork, merge, conflict resolution, transact with return values,
+//               get_path()
 
 #include <automerge-cpp/automerge.hpp>
 
 #include <cstdint>
 #include <cstdio>
 #include <string>
+#include <vector>
 
 namespace am = automerge_cpp;
 
@@ -28,13 +30,15 @@ int main() {
     auto alice_doc = am::Document{};
     alice_doc.set_actor_id(am::ActorId{alice_id});
 
-    // transact returns the list ObjId directly — no external variable needed
+    // Bare initializer list — creates the todos list in one call
     auto todo_list = alice_doc.transact([](am::Transaction& tx) {
         tx.put(am::root, "title", "Team Tasks");
-        auto list = tx.put_object(am::root, "todos", am::ObjType::list);
-        tx.insert(list, 0, "Set up CI pipeline");
-        tx.insert(list, 1, "Write unit tests");
-        return list;
+        return tx.put(am::root, "todos", {"Set up CI pipeline", "Write unit tests"});
+    });
+
+    // Map{} wrapper — create a metadata map with explicit wrapper
+    alice_doc.transact([](am::Transaction& tx) {
+        tx.put(am::root, "meta", am::Map{{"owner", "Alice"}, {"priority", "high"}});
     });
 
     print_todos(alice_doc, todo_list, "Alice (initial)");
@@ -53,11 +57,29 @@ int main() {
     print_todos(alice_doc, todo_list, "Alice (after her edit)");
     print_todos(bob_doc, todo_list, "Bob (after his edit)");
 
-    // Merge — both items are preserved, no data loss
+    // Merge — both items preserved, no data loss
     alice_doc.merge(bob_doc);
     print_todos(alice_doc, todo_list, "Alice (after merge)");
 
-    std::printf("\nAll %zu todos preserved after merge.\n",
+    // std::vector — add labels from a container
+    alice_doc.transact([](am::Transaction& tx) {
+        auto labels = std::vector<std::string>{"urgent", "sprint-3"};
+        tx.put(am::root, "labels", labels);
+    });
+
+    // get_path() into nested map
+    if (auto owner = alice_doc.get_path("meta", "owner")) {
+        if (auto s = am::get_scalar<std::string>(*owner)) {
+            std::printf("\nMeta owner: %s\n", s->c_str());
+        }
+    }
+    if (auto label = alice_doc.get_path("labels", std::size_t{0})) {
+        if (auto s = am::get_scalar<std::string>(*label)) {
+            std::printf("First label: %s\n", s->c_str());
+        }
+    }
+
+    std::printf("All %zu todos preserved after merge.\n",
                 alice_doc.length(todo_list));
     return 0;
 }

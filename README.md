@@ -12,7 +12,7 @@ This is a **from-scratch** reimplementation, not a wrapper. It mirrors the upstr
 Automerge semantics while embracing idiomatic C++23: algebraic types, ranges pipelines,
 strong types, and an API inspired by [nlohmann/json](https://github.com/nlohmann/json).
 
-**461 tests passing** across 13 test files. [nlohmann/json](https://github.com/nlohmann/json) interoperability included.
+**470 tests passing** across 13 test files. [nlohmann/json](https://github.com/nlohmann/json) interoperability included.
 
 ## Quick Example
 
@@ -84,12 +84,12 @@ doc.transact([](auto& tx) {
 ```cpp
 // Lambda return type is deduced — no external variable needed
 auto list_id = doc.transact([](Transaction& tx) {
-    return tx.put(root, "items", ObjType::list);
+    return tx.put(root, "items", {"Milk", "Eggs", "Bread"});
 });
 
 // transact_with_patches returns {result, patches}
 auto [obj_id, patches] = doc.transact_with_patches([](Transaction& tx) {
-    return tx.put(root, "data", ObjType::map);
+    return tx.put(root, "data", Map{});
 });
 ```
 
@@ -97,24 +97,41 @@ auto [obj_id, patches] = doc.transact_with_patches([](Transaction& tx) {
 
 ```cpp
 doc.transact([](auto& tx) {
-    // Create a populated list in one call
-    auto items = tx.put(root, "items", List{"Milk", "Eggs", "Bread"});
+    // Bare initializer lists — auto-detects list vs map
+    auto items = tx.put(root, "items", {"Milk", "Eggs", "Bread"});
+    auto config = tx.put(root, "config", {{"port", 8080}, {"host", "localhost"}});
 
-    // Create a populated map in one call
-    auto config = tx.put(root, "config", Map{
-        {"port", 8080},
-        {"host", "localhost"},
-        {"debug", false},
-    });
+    // Explicit wrappers also work
+    auto tags = tx.put(root, "tags", List{"crdt", "cpp", "collaborative"});
+    auto meta = tx.put(root, "meta", Map{{"version", "1.0"}, {"stable", true}});
 
     // Mixed types work naturally
     auto mixed = tx.put(root, "data", List{1, "hello", 3.14, true});
 
     // Insert populated objects into lists
     auto records = tx.put(root, "records", ObjType::list);
-    tx.insert(records, 0, Map{{"name", "Alice"}, {"role", "admin"}});
-    tx.insert(records, 1, Map{{"name", "Bob"}, {"role", "editor"}});
+    tx.insert(records, 0, {{"name", "Alice"}, {"role", "admin"}});
+    tx.insert(records, 1, {{"name", "Bob"}, {"role", "editor"}});
 });
+```
+
+### STL containers — vector, set, map
+
+```cpp
+// std::vector → creates a list
+auto tags = std::vector<std::string>{"crdt", "cpp", "collaborative"};
+doc.transact([&](auto& tx) { tx.put(root, "tags", tags); });
+
+// std::set → creates a list (sorted)
+auto unique = std::set<std::string>{"alpha", "beta", "gamma"};
+doc.transact([&](auto& tx) { tx.put(root, "sorted", unique); });
+
+// std::map → creates a map
+auto dims = std::map<std::string, ScalarValue>{
+    {"w", ScalarValue{std::int64_t{800}}},
+    {"h", ScalarValue{std::int64_t{600}}},
+};
+doc.transact([&](auto& tx) { tx.put(root, "dims", dims); });
 ```
 
 ### Path-based nested access
@@ -197,7 +214,7 @@ with nested objects, fork/merge round-trips, and save/load verification.
 
 ### Quality and Performance
 
-- **453 tests** across 13 test files
+- **470 tests** across 13 test files
 - **Fuzz testing**: libFuzzer targets for `Document::load()`, LEB128, and change chunk parsing
 - **Static analysis**: clang-tidy CI with `bugprone-*`, `performance-*`, `clang-analyzer-*`
 - **Sanitizer CI**: Address Sanitizer + Undefined Behavior Sanitizer
@@ -292,7 +309,7 @@ automerge-cpp/
     encoding/                 #   LEB128, RLE, delta, boolean codecs
     storage/                  #   columnar binary format
     sync/                     #   bloom filter for sync protocol
-  tests/                      # 453 tests (Google Test)
+  tests/                      # 470 tests (Google Test)
   examples/                   # 7 example programs
   benchmarks/                 # performance benchmarks (Google Benchmark)
   docs/                       # documentation
