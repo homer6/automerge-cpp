@@ -206,7 +206,7 @@ public:
     /// @code
     /// auto items = tx.put(root, "items", List{"Milk", "Eggs", "Bread"});
     /// @endcode
-    auto put(const ObjId& obj, std::string_view key, List init) -> ObjId {
+    auto put(const ObjId& obj, std::string_view key, const List& init) -> ObjId {
         auto list = put_object(obj, key, ObjType::list);
         std::size_t idx = 0;
         for (const auto& val : init.values) insert(list, idx++, val);
@@ -217,14 +217,14 @@ public:
     /// @code
     /// auto config = tx.put(root, "config", Map{{"port", 8080}, {"host", "localhost"}});
     /// @endcode
-    auto put(const ObjId& obj, std::string_view key, Map init) -> ObjId {
+    auto put(const ObjId& obj, std::string_view key, const Map& init) -> ObjId {
         auto map = put_object(obj, key, ObjType::map);
         for (const auto& [k, v] : init.entries) put(map, std::string_view{k}, v);
         return map;
     }
 
     /// Insert a list at a list index and populate it with initial values.
-    auto insert(const ObjId& obj, std::size_t index, List init) -> ObjId {
+    auto insert(const ObjId& obj, std::size_t index, const List& init) -> ObjId {
         auto list = insert_object(obj, index, ObjType::list);
         std::size_t idx = 0;
         for (const auto& val : init.values) insert(list, idx++, val);
@@ -232,7 +232,7 @@ public:
     }
 
     /// Insert a map at a list index and populate it with initial entries.
-    auto insert(const ObjId& obj, std::size_t index, Map init) -> ObjId {
+    auto insert(const ObjId& obj, std::size_t index, const Map& init) -> ObjId {
         auto map = insert_object(obj, index, ObjType::map);
         for (const auto& [k, v] : init.entries) put(map, std::string_view{k}, v);
         return map;
