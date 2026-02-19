@@ -203,6 +203,20 @@ public:
     /// @return The object type, or nullopt if the object doesn't exist.
     auto object_type(const ObjId& obj) const -> std::optional<ObjType>;
 
+    // -- Child object lookup --------------------------------------------------
+
+    /// Get the ObjId of a nested object at a map key.
+    /// @param obj The parent map object.
+    /// @param key The key to look up.
+    /// @return The child ObjId, or nullopt if the key doesn't exist or isn't an object.
+    auto get_obj_id(const ObjId& obj, std::string_view key) const -> std::optional<ObjId>;
+
+    /// Get the ObjId of a nested object at a list index.
+    /// @param obj The parent list object.
+    /// @param index The index to look up.
+    /// @return The child ObjId, or nullopt if the index is out of bounds or isn't an object.
+    auto get_obj_id(const ObjId& obj, std::size_t index) const -> std::optional<ObjId>;
+
     // -- Fork and Merge -------------------------------------------------------
 
     /// Create an independent copy with a new actor ID.

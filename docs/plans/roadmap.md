@@ -417,7 +417,7 @@ See [v0.4.0-performance.md](v0.4.0-performance.md) for the full plan.
 ---
 
 ## Phase 12: Modern C++ API and nlohmann/json Interoperability
-**Status**: Phase 12A complete — 453 tests passing (412 Phase 1-11 + 41 Phase 12A)
+**Status**: Complete — ~570 tests passing (412 Phase 1-11 + 41 Phase 12A + ~98 Phase 12B-12G + 19 extra)
 
 See [nlohmann-json-interop.md](nlohmann-json-interop.md) for the full interop plan.
 
@@ -468,11 +468,33 @@ All 7 examples rewritten to use modern API:
 | `parallel_perf_demo` | Monoid-powered fork/merge parallelism |
 | `json_interop_demo` | nlohmann/json import/export, fork/merge round-trip |
 
-### Phase 12B: Deep nlohmann/json Integration (Planned)
+### Phases 12B–12G: Deep nlohmann/json Integration (Complete)
 
-- [ ] `to_json()` / `from_json()` ADL customization points for `Document`
-- [ ] `nlohmann::json` constructor from `Document` (implicit conversion)
-- [ ] `Document` construction from `nlohmann::json`
-- [ ] JSON Patch (RFC 6902) support via `nlohmann::json::diff()` + automerge patches
-- [ ] JSON Pointer (RFC 6901) path navigation mapped to `get_path()`
-- [ ] Full recursive `export_json()` with nested object resolution
+See [phase12b-12g-json-interop.md](phase12b-12g-json-interop.md) for the full plan.
+
+#### Deliverables
+- [x] 12B — ADL serialization (`to_json`/`from_json`) for all automerge types (ScalarValue, Counter, Timestamp, ActorId, ChangeHash, OpId, ObjId, Change, Patch, Mark, Cursor)
+- [x] 12C — Document import/export (`export_json`, `import_json`, `export_json_at`) with recursive nested object resolution
+- [x] 12C — `Document::get_obj_id()` public method (2 overloads: key and index)
+- [x] 12D — JSON Pointer (RFC 6901): `get_pointer`, `put_pointer`, `delete_pointer` with `~0`/`~1` escaping
+- [x] 12E — JSON Patch (RFC 6902): `apply_json_patch` (add/remove/replace/move/copy/test), `diff_json_patch`
+- [x] 12F — JSON Merge Patch (RFC 7386): `apply_merge_patch`, `generate_merge_patch`
+- [x] 12F — `flatten`/`unflatten` (JSON Pointer paths → leaf values)
+- [x] 12G — Documentation updates (api.md, CLAUDE.md)
+
+#### New Files
+- `include/automerge-cpp/json.hpp` — public header with all interop declarations
+- `src/json.cpp` — implementations (~650 lines)
+- `tests/json_test.cpp` — 98 tests
+- `docs/plans/phase12b-12g-json-interop.md` — implementation plan
+
+#### Tests (98 new)
+- [x] `get_obj_id`: map child, list child, nonexistent, scalar, out-of-bounds (5 tests)
+- [x] ADL serialization: all scalar types, tagged Counter/Timestamp/Bytes, identity types, compound types (22 tests)
+- [x] Document export: empty, flat, nested, list, mixed, text, deep, subtree, after merge, historical (12 tests)
+- [x] Document import: flat, nested, arrays, round-trips, transaction overload (10 tests)
+- [x] JSON Pointer: get, put, delete, escaping, nested intermediates, list append (12 tests)
+- [x] JSON Patch: all 6 ops, test assertion, diff generation, round-trip (14 tests)
+- [x] JSON Merge Patch: set, add, delete, recursive, idempotent, generate (8 tests)
+- [x] Flatten/unflatten: nested, list indices, escaping, round-trip, text (9 tests)
+- [x] Integration: merge commutativity, save/load, combined operations (6 tests)

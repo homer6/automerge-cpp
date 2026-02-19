@@ -14,6 +14,7 @@ add_executable(automerge_cpp_tests
     op_test.cpp
     change_test.cpp
     document_test.cpp
+    json_test.cpp
     leb128_test.cpp
     rle_test.cpp
     delta_encoder_test.cpp
