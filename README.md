@@ -24,14 +24,18 @@ int main() {
     auto doc = am::Document{};
 
     // Initializer lists — just like nlohmann/json
-    auto items = doc.transact([](am::Transaction& tx) {
+    const auto items = doc.transact([](am::Transaction& tx) {
         tx.put(am::root, "title", "Shopping List");
         tx.put(am::root, "config", {{"theme", "dark"}, {"lang", "en"}});
         return tx.put(am::root, "items", {"Milk", "Eggs", "Bread"});
     });
 
     // Typed get<T>() — no variant unwrapping
-    auto title = doc.get<std::string>(am::root, "title");  // "Shopping List"
+    const auto title = doc.get<std::string>(am::root, "title");  // "Shopping List"
+
+    // operator[] and get_path() — nested access
+    const auto value = doc["title"];                    // root map access
+    const auto theme = doc.get_path("config", "theme"); // nested path access
 
     // Fork, edit concurrently, merge — conflict-free
     auto doc2 = doc.fork();
@@ -40,7 +44,7 @@ int main() {
     doc.merge(doc2);  // both items preserved, no data loss
 
     // Save to binary and reload
-    auto bytes = doc.save();
+    const auto bytes = doc.save();
     auto loaded = am::Document::load(bytes);
 }
 ```

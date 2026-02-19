@@ -181,7 +181,7 @@ public:
     /// @code
     /// auto name = doc["name"];
     /// @endcode
-    auto operator[](std::string_view key) const -> std::optional<Value> {
+    [[nodiscard]] auto operator[](std::string_view key) const -> std::optional<Value> {
         return get(root, key);
     }
 
