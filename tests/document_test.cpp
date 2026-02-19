@@ -5287,3 +5287,180 @@ TEST(Document, insert_std_map_into_list) {
         EXPECT_EQ(get_scalar<std::string>(*name), "Alice");
     }
 }
+
+// -- Edge case tests for accessors --------------------------------------------
+
+TEST(Document, operator_bracket_returns_various_types) {
+    auto doc = Document{};
+    doc.transact([](auto& tx) {
+        tx.put(root, "name", "Alice");
+        tx.put(root, "age", std::int64_t{30});
+        tx.put(root, "score", 99.5);
+        tx.put(root, "active", true);
+    });
+    EXPECT_EQ(get_scalar<std::string>(doc["name"]), "Alice");
+    EXPECT_EQ(get_scalar<std::int64_t>(doc["age"]), 30);
+    EXPECT_EQ(get_scalar<double>(doc["score"]), 99.5);
+    EXPECT_EQ(get_scalar<bool>(doc["active"]), true);
+}
+
+TEST(Document, operator_bracket_reflects_mutation) {
+    auto doc = Document{};
+    doc.transact([](auto& tx) { tx.put(root, "x", 1); });
+    EXPECT_EQ(get_scalar<std::int64_t>(doc["x"]), 1);
+    doc.transact([](auto& tx) { tx.put(root, "x", 2); });
+    EXPECT_EQ(get_scalar<std::int64_t>(doc["x"]), 2);
+}
+
+TEST(Document, operator_bracket_after_merge) {
+    auto doc = Document{};
+    doc.transact([](auto& tx) { tx.put(root, "x", 1); });
+    auto doc2 = doc.fork();
+    doc2.transact([](auto& tx) { tx.put(root, "y", 2); });
+    doc.merge(doc2);
+    EXPECT_EQ(get_scalar<std::int64_t>(doc["x"]), 1);
+    EXPECT_EQ(get_scalar<std::int64_t>(doc["y"]), 2);
+}
+
+TEST(Document, get_path_list_index_out_of_bounds) {
+    auto doc = Document{};
+    doc.transact([](auto& tx) {
+        tx.put(root, "items", {"a", "b"});
+    });
+    EXPECT_FALSE(doc.get_path("items", std::size_t{99}).has_value());
+}
+
+TEST(Document, get_path_on_empty_doc) {
+    auto doc = Document{};
+    EXPECT_FALSE(doc.get_path("anything").has_value());
+    EXPECT_FALSE(doc.get_path("a", "b", "c").has_value());
+}
+
+TEST(Document, get_path_after_merge) {
+    auto doc = Document{};
+    doc.transact([](auto& tx) {
+        tx.put(root, "config", {{"port", 8080}});
+    });
+    auto doc2 = doc.fork();
+    doc2.transact([](auto& tx) {
+        tx.put(root, "meta", {{"owner", "Bob"}});
+    });
+    doc.merge(doc2);
+    EXPECT_EQ(get_scalar<std::int64_t>(doc.get_path("config", "port")), 8080);
+    EXPECT_EQ(get_scalar<std::string>(doc.get_path("meta", "owner")), "Bob");
+}
+
+TEST(Document, get_path_deep_nesting) {
+    auto doc = Document{};
+    doc.transact([](auto& tx) {
+        auto a = tx.put(root, "a", ObjType::map);
+        auto b = tx.put(a, "b", ObjType::map);
+        auto c = tx.put(b, "c", ObjType::map);
+        tx.put(c, "val", 42);
+    });
+    EXPECT_EQ(get_scalar<std::int64_t>(doc.get_path("a", "b", "c", "val")), 42);
+}
+
+TEST(Document, map_initializer_survives_save_load) {
+    auto doc = Document{};
+    doc.transact([](auto& tx) {
+        tx.put(root, "config", Map{{"host", "localhost"}, {"port", 8080}});
+    });
+    auto bytes = doc.save();
+    auto loaded = Document::load(bytes);
+    ASSERT_TRUE(loaded.has_value());
+    EXPECT_EQ(get_scalar<std::string>(loaded->get_path("config", "host")), "localhost");
+    EXPECT_EQ(get_scalar<std::int64_t>(loaded->get_path("config", "port")), 8080);
+}
+
+TEST(Document, bare_initializer_list_mixed_types) {
+    auto doc = Document{};
+    auto list_id = doc.transact([](auto& tx) {
+        return tx.put(root, "mixed", {1, "two", 3.0, true});
+    });
+    EXPECT_EQ(doc.length(list_id), 4);
+    EXPECT_EQ(get_scalar<std::int64_t>(doc.get(list_id, std::size_t{0})), 1);
+    EXPECT_EQ(get_scalar<std::string>(doc.get(list_id, std::size_t{1})), "two");
+    EXPECT_EQ(get_scalar<double>(doc.get(list_id, std::size_t{2})), 3.0);
+    EXPECT_EQ(get_scalar<bool>(doc.get(list_id, std::size_t{3})), true);
+}
+
+TEST(Document, bare_initializer_survives_save_load) {
+    auto doc = Document{};
+    doc.transact([](auto& tx) {
+        tx.put(root, "tags", {"alpha", "beta", "gamma"});
+        tx.put(root, "dims", {{"w", 800}, {"h", 600}});
+    });
+    auto bytes = doc.save();
+    auto loaded = Document::load(bytes);
+    ASSERT_TRUE(loaded.has_value());
+    EXPECT_EQ(get_scalar<std::string>(loaded->get_path("tags", std::size_t{0})), "alpha");
+    EXPECT_EQ(get_scalar<std::int64_t>(loaded->get_path("dims", "w")), 800);
+}
+
+TEST(Document, put_set_creates_sorted_list) {
+    auto doc = Document{};
+    auto list_id = doc.transact([](auto& tx) {
+        auto vals = std::set<std::string>{"cherry", "apple", "banana"};
+        return tx.put(root, "sorted", vals);
+    });
+    EXPECT_EQ(doc.length(list_id), 3);
+    // std::set is sorted, so order is apple, banana, cherry
+    EXPECT_EQ(get_scalar<std::string>(doc.get(list_id, std::size_t{0})), "apple");
+    EXPECT_EQ(get_scalar<std::string>(doc.get(list_id, std::size_t{1})), "banana");
+    EXPECT_EQ(get_scalar<std::string>(doc.get(list_id, std::size_t{2})), "cherry");
+}
+
+TEST(Document, put_empty_vector_creates_empty_list) {
+    auto doc = Document{};
+    auto list_id = doc.transact([](auto& tx) {
+        auto empty = std::vector<std::string>{};
+        return tx.put(root, "empty", empty);
+    });
+    EXPECT_EQ(doc.length(list_id), 0);
+}
+
+TEST(Document, put_empty_std_map_creates_empty_map) {
+    auto doc = Document{};
+    auto map_id = doc.transact([](auto& tx) {
+        auto empty = std::map<std::string, ScalarValue>{};
+        return tx.put(root, "empty", empty);
+    });
+    EXPECT_EQ(doc.length(map_id), 0);
+    EXPECT_EQ(doc.keys(map_id).size(), 0);
+}
+
+TEST(Document, stl_container_survives_save_load) {
+    auto doc = Document{};
+    doc.transact([](auto& tx) {
+        auto tags = std::vector<std::string>{"x", "y", "z"};
+        tx.put(root, "tags", tags);
+        auto dims = std::map<std::string, ScalarValue>{
+            {"w", ScalarValue{std::int64_t{1920}}},
+            {"h", ScalarValue{std::int64_t{1080}}},
+        };
+        tx.put(root, "dims", dims);
+    });
+    auto bytes = doc.save();
+    auto loaded = Document::load(bytes);
+    ASSERT_TRUE(loaded.has_value());
+    EXPECT_EQ(get_scalar<std::string>(loaded->get_path("tags", std::size_t{0})), "x");
+    EXPECT_EQ(get_scalar<std::int64_t>(loaded->get_path("dims", "w")), 1920);
+}
+
+TEST(Document, initializer_list_after_fork_merge) {
+    auto doc = Document{};
+    doc.transact([](auto& tx) {
+        tx.put(root, "items", {"a", "b"});
+    });
+    auto doc2 = doc.fork();
+    doc.transact([](auto& tx) {
+        tx.put(root, "x", List{"from_doc1"});
+    });
+    doc2.transact([](auto& tx) {
+        tx.put(root, "y", Map{{"from", "doc2"}});
+    });
+    doc.merge(doc2);
+    EXPECT_EQ(get_scalar<std::string>(doc.get_path("x", std::size_t{0})), "from_doc1");
+    EXPECT_EQ(get_scalar<std::string>(doc.get_path("y", "from")), "doc2");
+}
