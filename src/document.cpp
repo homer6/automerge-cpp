@@ -1150,4 +1150,43 @@ auto Document::marks_at(const ObjId& obj,
     return collect_marks(snapshot, obj);
 }
 
+// -- Phase 12A: Modern API helpers --------------------------------------------
+
+auto Document::ops_to_patches_internal(const std::vector<Op>& ops) -> std::vector<Patch> {
+    return ops_to_patches(ops);
+}
+
+auto Document::get_path_impl(std::span<const Prop> path) const -> std::optional<Value> {
+    auto guard = read_guard();
+    if (path.empty()) return std::nullopt;
+
+    auto current_obj = root;
+
+    // Walk all but the last path element to resolve intermediate ObjIds.
+    for (std::size_t i = 0; i + 1 < path.size(); ++i) {
+        auto val = std::visit(overload{
+            [&](const std::string& key) { return state_->map_get(current_obj, key); },
+            [&](std::size_t index) { return state_->list_get(current_obj, index); },
+        }, path[i]);
+
+        if (!val) return std::nullopt;
+
+        // The value must be an ObjType to continue navigating.
+        if (!is_object(*val)) return std::nullopt;
+
+        // We need the ObjId, not the ObjType. For intermediate objects,
+        // the ObjId is the OpId that created them. We look it up via
+        // the internal state's object-at-key resolution.
+        auto obj_id = state_->get_obj_id_at(current_obj, path[i]);
+        if (!obj_id) return std::nullopt;
+        current_obj = *obj_id;
+    }
+
+    // Final element: return the value.
+    return std::visit(overload{
+        [&](const std::string& key) { return state_->map_get(current_obj, key); },
+        [&](std::size_t index) { return state_->list_get(current_obj, index); },
+    }, path.back());
+}
+
 }  // namespace automerge_cpp

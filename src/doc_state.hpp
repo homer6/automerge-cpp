@@ -273,6 +273,50 @@ struct DocState {
         return result;
     }
 
+    // -- Nested object ID resolution ------------------------------------------
+
+    /// Resolve the ObjId of a nested object at a map key.
+    /// Returns nullopt if the key doesn't exist or holds a scalar.
+    auto get_obj_id_for_key(const ObjId& obj, const std::string& key) const -> std::optional<ObjId> {
+        const auto* state = get_object(obj);
+        if (!state) return std::nullopt;
+
+        auto it = state->map_entries.find(key);
+        if (it == state->map_entries.end() || it->second.empty()) return std::nullopt;
+
+        // Find the winning entry (highest OpId)
+        const auto& entries = it->second;
+        auto winner = std::ranges::max_element(entries,
+            [](const MapEntry& a, const MapEntry& b) { return a.op_id < b.op_id; });
+
+        // Must be an object type, not a scalar
+        if (!std::holds_alternative<ObjType>(winner->value)) return std::nullopt;
+        return ObjId{winner->op_id};
+    }
+
+    /// Resolve the ObjId of a nested object at a list index.
+    /// Returns nullopt if the index is out of bounds or holds a scalar.
+    auto get_obj_id_for_index(const ObjId& obj, std::size_t index) const -> std::optional<ObjId> {
+        const auto* state = get_object(obj);
+        if (!state) return std::nullopt;
+
+        auto real_idx = visible_index_to_real(*state, index);
+        if (real_idx >= state->list_elements.size()) return std::nullopt;
+        if (!state->list_elements[real_idx].visible) return std::nullopt;
+
+        const auto& elem = state->list_elements[real_idx];
+        if (!std::holds_alternative<ObjType>(elem.value)) return std::nullopt;
+        return ObjId{elem.insert_id};
+    }
+
+    /// Resolve the ObjId of a nested object at a Prop (key or index).
+    auto get_obj_id_at(const ObjId& obj, const Prop& prop) const -> std::optional<ObjId> {
+        return std::visit(overload{
+            [&](const std::string& key) { return get_obj_id_for_key(obj, key); },
+            [&](std::size_t index) { return get_obj_id_for_index(obj, index); },
+        }, prop);
+    }
+
     // -- Text operations ------------------------------------------------------
 
     auto text_content(const ObjId& obj) const -> std::string {

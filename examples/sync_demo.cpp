@@ -1,6 +1,7 @@
 // sync_demo — two documents syncing over a simulated network
 //
-// Demonstrates: SyncState, generate_sync_message, receive_sync_message
+// Demonstrates: SyncState, generate_sync_message, receive_sync_message,
+//               typed get<T>()
 
 #include <automerge-cpp/automerge.hpp>
 
@@ -46,7 +47,7 @@ int main() {
     auto peer_a = am::Document{};
     peer_a.set_actor_id(am::ActorId{id_a});
     peer_a.transact([](auto& tx) {
-        tx.put(am::root, "name", std::string{"Alice"});
+        tx.put(am::root, "name", "Alice");
         tx.put(am::root, "score", std::int64_t{100});
     });
 
@@ -64,10 +65,10 @@ int main() {
     std::printf("\n=== Scenario 2: Bidirectional sync ===\n");
 
     peer_a.transact([](auto& tx) {
-        tx.put(am::root, "from_a", std::string{"hello from A"});
+        tx.put(am::root, "from_a", "hello from A");
     });
     peer_b.transact([](auto& tx) {
-        tx.put(am::root, "from_b", std::string{"hello from B"});
+        tx.put(am::root, "from_b", "hello from B");
     });
 
     std::printf("Peer A keys: %zu, Peer B keys: %zu\n",
@@ -87,17 +88,15 @@ int main() {
 
     // A makes a change, syncs to B, B syncs to C
     peer_a.transact([](auto& tx) {
-        tx.put(am::root, "relay_test", std::string{"from A via B"});
+        tx.put(am::root, "relay_test", "from A via B");
     });
 
     sync_peers(peer_a, peer_b);
     msgs = sync_peers(peer_b, peer_c);
     std::printf("B->C synced in %d messages\n", msgs);
 
-    auto val = peer_c.get(am::root, "relay_test");
-    if (val) {
-        auto& sv = std::get<am::ScalarValue>(*val);
-        std::printf("Peer C received: \"%s\"\n", std::get<std::string>(sv).c_str());
+    if (auto val = peer_c.get<std::string>(am::root, "relay_test")) {
+        std::printf("Peer C received: \"%s\"\n", val->c_str());
     }
 
     // --- SyncState persistence ---

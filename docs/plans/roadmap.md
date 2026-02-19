@@ -381,7 +381,7 @@ See [docs/benchmark-results.md](../benchmark-results.md) for full results.
 ---
 
 ## Phase 11: Performance and Parallelism (v0.4.0)
-**Status**: In progress — 281 tests passing, 32 benchmarks
+**Status**: In progress — 412 tests passing, 32 benchmarks
 
 See [v0.4.0-performance.md](v0.4.0-performance.md) for the full plan.
 
@@ -413,3 +413,66 @@ See [v0.4.0-performance.md](v0.4.0-performance.md) for the full plan.
 - [ ] 11C.7 — Fork/merge parallelism for batch mutations
 - [ ] 11D.1 — Hardware SHA-256 (ARM Crypto Extensions + x86 SHA-NI)
 - [ ] 11D.2 — Cache-line alignment for ObjectState
+
+---
+
+## Phase 12: Modern C++ API and nlohmann/json Interoperability
+**Status**: Phase 12A complete — 453 tests passing (412 Phase 1-11 + 41 Phase 12A)
+
+See [nlohmann-json-interop.md](nlohmann-json-interop.md) for the full interop plan.
+
+### Phase 12A: Modern C++ API (Complete)
+
+Redesigned the public API to feel like modern C++ — inspired by nlohmann/json's ergonomics.
+
+#### Deliverables
+- [x] Template `get<T>()` on `Document` — returns `std::optional<T>` directly, no variant unwrapping
+- [x] `get_scalar<T>()` free function — low-level extraction from `Value` and `optional<Value>`
+- [x] Scalar convenience overloads on `Transaction` — `put`, `insert`, `set` accept native C++ types (`std::string`, `const char*`, `std::string_view`, `std::int64_t`, `std::uint64_t`, `double`, `bool`, `Counter`, `Null`)
+- [x] Templated `transact()` — lambda return type deduced, returns value directly
+- [x] `transact_with_patches()` — returns `{result, patches}` structured binding
+- [x] Batch operations: `put_all`, `insert_all` with `std::initializer_list`
+- [x] Container operations: `put_map` (any associative container), `insert_range` (any `std::ranges::input_range`)
+- [x] `operator[]` on `Document` — root map access returning `optional<Value>`
+- [x] Variadic `get_path()` — nested access with arbitrary key/index path
+- [x] `overload{}` helper struct — ad-hoc variant visitors
+- [x] `is_object()` free function — test if a `Value` holds `ObjType`
+- [x] nlohmann/json added as build dependency (upstream submodule at `upstream/json/`)
+- [x] `json_interop_demo` example — import/export, fork/merge round-trip, structured batch import
+
+#### Design Decisions
+- `get<T>()` template coexists with non-template `get()` — C++ prefers non-templates when no explicit template argument is provided
+- Explicit `std::string` overloads placed before `std::string_view` overloads to resolve ambiguity (string literals and `std::string` are equally convertible to `ScalarValue` and `string_view`)
+- `get_path_impl` resolves nested objects by looking up `ObjId{OpId}` from winning `MapEntry` or `ListElement` entries in `DocState`
+- Batch operations use `std::initializer_list` for ergonomic inline use and templates for STL container compatibility
+
+#### Tests (41 new)
+- [x] Typed `get<T>()`: string, int64, uint64, double, bool, counter, null, missing key, wrong type, nested path (10 tests)
+- [x] Scalar convenience overloads: string literal, std::string, int, double, bool, counter, null, string_view (8 tests)
+- [x] Templated transact: return ObjId, return int, void lambda, return with patches (5 tests)
+- [x] Batch operations: put_all, insert_all, put_map, insert_range (4 tests)
+- [x] `operator[]` and `get_path`: root access, missing key, nested map, nested list, deeply nested, missing intermediate (6 tests)
+- [x] `get_scalar<T>()`: from Value, from optional, wrong type, nullopt, is_object (5 tests)
+- [x] `overload` helper: two-type visitor, multi-type visitor, default handler (3 tests)
+
+#### Example Programs Updated
+All 7 examples rewritten to use modern API:
+
+| Example | Description |
+|---------|-------------|
+| `basic_usage` | Typed `get<T>()`, `operator[]`, `get_path()`, counters, save/load |
+| `collaborative_todo` | Scalar overloads, transact with return values, fork/merge |
+| `text_editor` | Text editing with patches, cursors, time travel |
+| `sync_demo` | Peer-to-peer sync with SyncState |
+| `thread_safe_demo` | Multi-threaded concurrent reads and writes |
+| `parallel_perf_demo` | Monoid-powered fork/merge parallelism |
+| `json_interop_demo` | nlohmann/json import/export, fork/merge round-trip |
+
+### Phase 12B: Deep nlohmann/json Integration (Planned)
+
+- [ ] `to_json()` / `from_json()` ADL customization points for `Document`
+- [ ] `nlohmann::json` constructor from `Document` (implicit conversion)
+- [ ] `Document` construction from `nlohmann::json`
+- [ ] JSON Patch (RFC 6902) support via `nlohmann::json::diff()` + automerge patches
+- [ ] JSON Pointer (RFC 6901) path navigation mapped to `get_path()`
+- [ ] Full recursive `export_json()` with nested object resolution

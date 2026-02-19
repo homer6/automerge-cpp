@@ -33,7 +33,6 @@ int main() {
     });
 
     // -- Concurrent reads -----------------------------------------------------
-    // get() acquires a shared lock — all 8 threads read simultaneously.
     std::printf("=== Concurrent reads ===\n");
     {
         auto found = std::atomic<int>{0};
@@ -41,7 +40,8 @@ int main() {
         for (int t = 0; t < 8; ++t) {
             threads.emplace_back([&doc, &found, t]() {
                 for (int i = t * 125; i < (t + 1) * 125; ++i) {
-                    if (doc.get(am::root, "key_" + std::to_string(i)))
+                    // Typed get<T>() — returns optional directly
+                    if (doc.get<std::int64_t>(am::root, "key_" + std::to_string(i)))
                         found.fetch_add(1, std::memory_order_relaxed);
                 }
             });
@@ -51,7 +51,6 @@ int main() {
     }
 
     // -- Concurrent writers ---------------------------------------------------
-    // transact() acquires an exclusive lock — writers are serialized.
     std::printf("=== Concurrent writers ===\n");
     {
         auto threads = std::vector<std::thread>{};
@@ -70,13 +69,12 @@ int main() {
     }
 
     // -- Readers + writer simultaneously --------------------------------------
-    // One writer appends text while 4 readers read concurrently.
     std::printf("=== Readers + writer ===\n");
     {
-        am::ObjId text_id;
-        doc.transact([&](auto& tx) {
-            text_id = tx.put_object(am::root, "content", am::ObjType::text);
-            tx.splice_text(text_id, 0, 0, "Hello");
+        auto text_id = doc.transact([](am::Transaction& tx) {
+            auto id = tx.put(am::root, "content", am::ObjType::text);
+            tx.splice_text(id, 0, 0, "Hello");
+            return id;
         });
 
         auto stop = std::atomic<bool>{false};
@@ -111,8 +109,6 @@ int main() {
     }
 
     // -- Lock-free reads ------------------------------------------------------
-    // When no writers are active, disable read locking for maximum throughput.
-    // This eliminates shared_mutex cache-line contention across cores.
     std::printf("=== Lock-free reads ===\n");
     {
         doc.set_read_locking(false);  // caller guarantees no concurrent writers
@@ -122,7 +118,7 @@ int main() {
         for (int t = 0; t < 8; ++t) {
             threads.emplace_back([&doc, &found, t]() {
                 for (int i = t * 125; i < (t + 1) * 125; ++i) {
-                    if (doc.get(am::root, "key_" + std::to_string(i)))
+                    if (doc.get<std::int64_t>(am::root, "key_" + std::to_string(i)))
                         found.fetch_add(1, std::memory_order_relaxed);
                 }
             });
@@ -134,15 +130,14 @@ int main() {
     }
 
     // -- Shared thread pool ---------------------------------------------------
-    // Documents can share a thread pool via the constructor.
     std::printf("=== Shared thread pool ===\n");
     {
         auto pool = doc.get_thread_pool();
         auto doc2 = am::Document{pool};
         auto doc3 = am::Document{pool};
 
-        doc2.transact([](auto& tx) { tx.put(am::root, "src", std::string{"doc2"}); });
-        doc3.transact([](auto& tx) { tx.put(am::root, "src", std::string{"doc3"}); });
+        doc2.transact([](auto& tx) { tx.put(am::root, "src", "doc2"); });
+        doc3.transact([](auto& tx) { tx.put(am::root, "src", "doc3"); });
 
         std::printf("  doc2 and doc3 share pool: %s\n",
                     (doc2.get_thread_pool() == doc3.get_thread_pool()) ? "yes" : "no");

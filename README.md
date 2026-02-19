@@ -10,9 +10,9 @@ replicated data type (CRDT) library for building collaborative applications.
 
 This is a **from-scratch** reimplementation, not a wrapper. It mirrors the upstream
 Automerge semantics while embracing idiomatic C++23: algebraic types, ranges pipelines,
-strong types, and APIs that make illegal states unrepresentable.
+strong types, and an API inspired by [nlohmann/json](https://github.com/nlohmann/json).
 
-**281 tests passing** across 8 implementation phases.
+**470 tests passing** across 13 test files. [nlohmann/json](https://github.com/nlohmann/json) interoperability included.
 
 ## Quick Example
 
@@ -21,72 +21,203 @@ strong types, and APIs that make illegal states unrepresentable.
 namespace am = automerge_cpp;
 
 int main() {
-    auto doc1 = am::Document{};
-    am::ObjId list_id;
+    auto doc = am::Document{};
 
-    doc1.transact([&](auto& tx) {
-        tx.put(am::root, "title", std::string{"Shopping List"});
-        list_id = tx.put_object(am::root, "items", am::ObjType::list);
-        tx.insert(list_id, 0, std::string{"Milk"});
-        tx.insert(list_id, 1, std::string{"Eggs"});
+    // Initializer lists — just like nlohmann/json
+    const auto items = doc.transact([](am::Transaction& tx) {
+        tx.put(am::root, "title", "Shopping List");
+        tx.put(am::root, "config", {{"theme", "dark"}, {"lang", "en"}});
+        return tx.put(am::root, "items", {"Milk", "Eggs", "Bread"});
     });
 
-    // Fork and make concurrent edits
-    auto doc2 = doc1.fork();
+    // Typed get<T>() — no variant unwrapping
+    const auto title = doc.get<std::string>(am::root, "title");  // "Shopping List"
 
-    doc1.transact([&](auto& tx) {
-        tx.insert(list_id, 2, std::string{"Bread"});
-    });
+    // operator[] and get_path() — nested access
+    const auto value = doc["title"];                    // root map access
+    const auto theme = doc.get_path("config", "theme"); // nested path access
 
-    doc2.transact([&](auto& tx) {
-        tx.insert(list_id, 2, std::string{"Butter"});
-    });
-
-    // Merge — both edits preserved, no data loss
-    doc1.merge(doc2);
-    // list now contains: Milk, Eggs, Bread, Butter (deterministic order)
+    // Fork, edit concurrently, merge — conflict-free
+    auto doc2 = doc.fork();
+    doc.transact([&](auto& tx)  { tx.insert(items, 3, "Butter"); });
+    doc2.transact([&](auto& tx) { tx.insert(items, 3, "Cheese"); });
+    doc.merge(doc2);  // both items preserved, no data loss
 
     // Save to binary and reload
-    auto bytes = doc1.save();
+    const auto bytes = doc.save();
     auto loaded = am::Document::load(bytes);
-
-    // Time travel — read past state
-    auto heads_v1 = doc1.get_heads();
-    auto past = doc1.get_at(am::root, "title", heads_v1);
 }
 ```
 
+## Modern C++ API
+
+The API is designed to feel like modern C++ — inspired by nlohmann/json's ergonomics:
+
+### Typed `get<T>()` — no variant unwrapping
+
+```cpp
+auto name = doc.get<std::string>(root, "name");       // optional<string>
+auto age  = doc.get<std::int64_t>(root, "age");        // optional<int64_t>
+auto pi   = doc.get<double>(root, "pi");               // optional<double>
+auto ok   = doc.get<bool>(root, "active");             // optional<bool>
+auto hits = doc.get<Counter>(root, "hits");            // optional<Counter>
+```
+
+### Scalar overloads — no wrapping in `ScalarValue{}`
+
+```cpp
+doc.transact([](auto& tx) {
+    tx.put(root, "name", "Alice");                     // const char*
+    tx.put(root, "age", 30);                           // int → int64_t
+    tx.put(root, "score", 99.5);                       // double
+    tx.put(root, "active", true);                      // bool
+    tx.put(root, "views", Counter{0});                 // Counter
+    tx.put(root, "empty", Null{});                     // null
+});
+```
+
+### Transact with return values
+
+```cpp
+// Lambda return type is deduced — no external variable needed
+auto list_id = doc.transact([](Transaction& tx) {
+    return tx.put(root, "items", {"Milk", "Eggs", "Bread"});
+});
+
+// transact_with_patches returns {result, patches}
+auto [obj_id, patches] = doc.transact_with_patches([](Transaction& tx) {
+    return tx.put(root, "data", Map{});
+});
+```
+
+### Initializer lists — like nlohmann/json
+
+```cpp
+doc.transact([](auto& tx) {
+    // Bare initializer lists — auto-detects list vs map
+    auto items = tx.put(root, "items", {"Milk", "Eggs", "Bread"});
+    auto config = tx.put(root, "config", {{"port", 8080}, {"host", "localhost"}});
+
+    // Explicit wrappers also work
+    auto tags = tx.put(root, "tags", List{"crdt", "cpp", "collaborative"});
+    auto meta = tx.put(root, "meta", Map{{"version", "1.0"}, {"stable", true}});
+
+    // Mixed types work naturally
+    auto mixed = tx.put(root, "data", List{1, "hello", 3.14, true});
+
+    // Insert populated objects into lists
+    auto records = tx.put(root, "records", ObjType::list);
+    tx.insert(records, 0, {{"name", "Alice"}, {"role", "admin"}});
+    tx.insert(records, 1, {{"name", "Bob"}, {"role", "editor"}});
+});
+```
+
+### STL containers — vector, set, map
+
+```cpp
+// std::vector → creates a list
+auto tags = std::vector<std::string>{"crdt", "cpp", "collaborative"};
+doc.transact([&](auto& tx) { tx.put(root, "tags", tags); });
+
+// std::set → creates a list (sorted)
+auto unique = std::set<std::string>{"alpha", "beta", "gamma"};
+doc.transact([&](auto& tx) { tx.put(root, "sorted", unique); });
+
+// std::map → creates a map
+auto dims = std::map<std::string, ScalarValue>{
+    {"w", ScalarValue{std::int64_t{800}}},
+    {"h", ScalarValue{std::int64_t{600}}},
+};
+doc.transact([&](auto& tx) { tx.put(root, "dims", dims); });
+```
+
+### Path-based nested access
+
+```cpp
+auto port = doc.get_path("config", "database", "port");
+auto item = doc.get_path("todos", std::size_t{0}, "title");
+```
+
+### Variant visitor helper
+
+```cpp
+std::visit(overload{
+    [](std::string s)  { printf("%s\n", s.c_str()); },
+    [](std::int64_t i) { printf("%ld\n", i); },
+    [](auto&&)         { printf("other\n"); },
+}, some_scalar_value);
+```
+
+## nlohmann/json Interoperability
+
+automerge-cpp includes [nlohmann/json](https://github.com/nlohmann/json) as a dependency
+and provides example patterns for importing/exporting JSON data:
+
+```cpp
+#include <automerge-cpp/automerge.hpp>
+#include <nlohmann/json.hpp>
+
+// Import a JSON object into an Automerge document
+auto input = json::parse(R"({"name": "Alice", "scores": [10, 20, 30]})");
+import_json(doc, input);
+
+// Access imported data with typed get<T>() and get_path()
+auto name = doc.get<std::string>(root, "name");        // "Alice"
+auto score = doc.get_path("scores", std::size_t{0});   // 10
+
+// Export Automerge state back to JSON
+auto output = export_json(doc);
+```
+
+See [`examples/json_interop_demo.cpp`](examples/json_interop_demo.cpp) for a full working example
+with nested objects, fork/merge round-trips, and save/load verification.
+
 ## Features
 
-### Implemented
+### Core CRDT
 
-- **CRDT data types**: Map, List, Text, Counter
+- **Data types**: Map, List, Text, Counter, Table
 - **Conflict-free merging**: concurrent edits merge deterministically (RGA for lists/text)
 - **Fork and merge**: create independent document copies, merge them back
-- **Binary serialization**: `save()` / `load()` with upstream-compatible columnar encoding
-- **Sync protocol**: bloom filter-based peer-to-peer synchronization
-- **Patches**: incremental change notifications via `transact_with_patches()`
-- **Time travel**: read document state at any historical point (`get_at()`, `text_at()`, etc.)
-- **Cursors**: stable positions in lists/text that survive edits and merges
-- **Rich text marks**: range annotations (bold, italic, links) anchored by identity, not index
 - **Strong types**: `ActorId`, `ObjId`, `ChangeHash`, `OpId` never implicitly convert
 - **Type-safe values**: `std::variant`-based `ScalarValue` and `Value` types
 
-- **Columnar encoding**: upstream-compatible columnar op encoding with RLE, delta, and boolean encoders
-- **DEFLATE compression**: raw DEFLATE (no zlib/gzip header) for columns exceeding 256 bytes, matching upstream Rust format
-- **SHA-256 checksums**: chunk envelope with SHA-256 integrity validation
-- **Backward compatibility**: v1 format loading with automatic format detection
+### Modern C++ API (Phase 12A)
 
-- **Fuzz testing**: libFuzzer targets for `Document::load()`, LEB128 decode, and change chunk parsing
-- **Static analysis**: clang-tidy CI with `bugprone-*`, `performance-*`, and `clang-analyzer-*` checks
-- **Sanitizer CI**: Address Sanitizer + Undefined Behavior Sanitizer on all tests
+- **Typed `get<T>()`**: returns `optional<T>` directly, no variant unwrapping
+- **Scalar overloads**: `put`, `insert`, `set` accept native C++ types
+- **Transact with return values**: lambda return type is deduced
+- **Batch operations**: `put_all`, `insert_all`, `put_map`, `insert_range`
+- **`operator[]`**: root map access
+- **`get_path()`**: variadic nested access
+- **`overload{}` helper**: ad-hoc variant visitors
+- **nlohmann/json interop**: import/export patterns
 
-- **Thread safety**: `Document` is thread-safe via `std::shared_mutex` — N concurrent readers, exclusive writers
-- **Thread pool**: built-in work-stealing thread pool (Barak Shoshany's BS::thread_pool), shared across documents
-- **Lock-free reads**: `set_read_locking(false)` eliminates shared_mutex contention for read-heavy workloads (13.5x parallel scaling on 30 cores)
-- **Performance caching**: change hash cache (22x faster time travel), actor table cache (1.2x faster save)
+### Serialization and Sync
 
-- **Doxygen documentation**: auto-generated API docs with GitHub Pages deployment
+- **Binary serialization**: `save()` / `load()` with upstream-compatible columnar encoding
+- **Columnar encoding**: RLE, delta, and boolean encoders matching upstream Rust format
+- **DEFLATE compression**: raw DEFLATE for columns exceeding 256 bytes
+- **SHA-256 checksums**: chunk envelope with integrity validation
+- **Backward compatibility**: v1 format loading with automatic detection
+- **Sync protocol**: bloom filter-based peer-to-peer synchronization
+
+### Advanced Features
+
+- **Patches**: incremental change notifications via `transact_with_patches()`
+- **Time travel**: read document state at any historical point (`get_at()`, `text_at()`, etc.)
+- **Cursors**: stable positions in lists/text that survive edits and merges
+- **Rich text marks**: range annotations (bold, italic, links) anchored by identity
+
+### Quality and Performance
+
+- **470 tests** across 13 test files
+- **Fuzz testing**: libFuzzer targets for `Document::load()`, LEB128, and change chunk parsing
+- **Static analysis**: clang-tidy CI with `bugprone-*`, `performance-*`, `clang-analyzer-*`
+- **Sanitizer CI**: Address Sanitizer + Undefined Behavior Sanitizer
+- **Thread safety**: `std::shared_mutex` — N concurrent readers, exclusive writers
+- **Thread pool**: built-in BS::thread_pool, shared across documents
+- **Lock-free reads**: 13.5x parallel scaling on 30 cores
 
 ## Performance
 
@@ -111,25 +242,9 @@ Release-build highlights (Intel Xeon Platinum 8358, 30 cores, Linux, GCC 13.3, `
 | Get (100K keys, lock-free) | 7.1 M ops/s | **95.0 M ops/s** | **13.5x** |
 | Get (1M keys, lock-free) | 5.7 M ops/s | **55.0 M ops/s** | **9.6x** |
 | Put (100K keys, sharded) | 2.0 M ops/s | **13.5 M ops/s** | **6.9x** |
-| Put (1M keys, sharded) | 1.7 M ops/s | **8.4 M ops/s** | **4.8x** |
 | Save 500 docs | 95 K docs/s | **806 K docs/s** | **8.4x** |
-| Load 500 docs | 48 K docs/s | **190 K docs/s** | **3.9x** |
 
-v0.4.0 optimizations: **22x** faster time travel, **5.6x** faster sync (hash/actor table caching),
-**13.5x** parallel read scaling (lock-free reads eliminate shared_mutex contention).
-
-See [docs/benchmark-results.md](docs/benchmark-results.md) for full results, platform comparison,
-and perf analysis.
-
-## Design Philosophy
-
-Inspired by Ben Deane's approach to modern C++:
-
-- **Make illegal states unrepresentable** — algebraic types model the domain precisely
-- **Algorithms over raw loops** — `std::ranges` pipelines, folds, transforms
-- **CRDTs are monoids** — merge is associative, commutative, and idempotent
-- **Strong types prevent mixups** — `ActorId`, `ObjId`, `ChangeHash` never interconvert
-- **Value semantics** — immutable outside transactions, explicit mutation boundaries
+See [docs/benchmark-results.md](docs/benchmark-results.md) for full results.
 
 ## Building
 
@@ -174,7 +289,7 @@ automerge-cpp/
     document.hpp              #   Document class
     transaction.hpp           #   Transaction class
     types.hpp                 #   ActorId, ObjId, OpId, ChangeHash, Prop
-    value.hpp                 #   ScalarValue, Value, ObjType
+    value.hpp                 #   ScalarValue, Value, ObjType, overload, get_scalar
     change.hpp                #   Change struct
     op.hpp                    #   Op, OpType
     sync_state.hpp            #   SyncState, SyncMessage
@@ -190,30 +305,32 @@ automerge-cpp/
     crypto/                   #   SHA-256 (vendored)
     encoding/                 #   LEB128, RLE, delta, boolean codecs
     storage/                  #   columnar binary format
-      columns/                #   column spec, op encoding, value encoding, compression
     sync/                     #   bloom filter for sync protocol
-  tests/                      # unit and integration tests
-  examples/                   # example programs
-  benchmarks/                 # performance benchmarks
+  tests/                      # 470 tests (Google Test)
+  examples/                   # 7 example programs
+  benchmarks/                 # performance benchmarks (Google Benchmark)
   docs/                       # documentation
     api.md                    #   API reference
     style.md                  #   coding style guide
     plans/                    #   architecture and roadmap
-  upstream/automerge/         # upstream Rust reference (git submodule)
+  upstream/
+    automerge/                # upstream Rust reference (git submodule)
+    json/                     # nlohmann/json (git submodule)
 ```
 
 ## Examples
 
-Six example programs in `examples/`:
+Seven example programs in `examples/`:
 
 | Example | Description |
 |---------|-------------|
-| `basic_usage` | Create doc, put/get values, counters, save/load |
+| `basic_usage` | Create doc, typed get, operator[], get_path, counters, save/load |
 | `collaborative_todo` | Two actors concurrently editing a shared todo list |
 | `text_editor` | Text editing with patches, cursors, and time travel |
 | `sync_demo` | Peer-to-peer sync with SyncState |
-| `thread_safe_demo` | Multi-threaded concurrent reads and writes on a single Document |
-| `parallel_perf_demo` | Monoid-powered fork/merge parallelism, parallel save/load/sync |
+| `thread_safe_demo` | Multi-threaded concurrent reads and writes |
+| `parallel_perf_demo` | Monoid-powered fork/merge parallelism |
+| `json_interop_demo` | nlohmann/json import/export, fork/merge round-trip |
 
 ```bash
 ./build/examples/basic_usage
@@ -222,15 +339,28 @@ Six example programs in `examples/`:
 ./build/examples/sync_demo
 ./build/examples/thread_safe_demo
 ./build/examples/parallel_perf_demo
+./build/examples/json_interop_demo
 ```
 
 ## Documentation
 
 - [API Reference](docs/api.md) — every public type, method, and usage examples
 - [Benchmark Results](docs/benchmark-results.md) — performance measurements
-- [Style Guide](docs/style.md) — coding style and conventions (Ben Deane's modern C++ principles)
-- [Architecture Plan](docs/plans/architecture.md) — design principles, core types, module layout
-- [Implementation Roadmap](docs/plans/roadmap.md) — phased development plan with status
+- [Style Guide](docs/style.md) — coding style (Ben Deane's modern C++ principles)
+- [Architecture](docs/plans/architecture.md) — design, types, modules
+- [Roadmap](docs/plans/roadmap.md) — phased development plan with status
+- [nlohmann/json Interop Plan](docs/plans/nlohmann-json-interop.md) — JSON integration design
+
+## Design Philosophy
+
+Inspired by Ben Deane's approach to modern C++ and nlohmann/json's API design:
+
+- **Make illegal states unrepresentable** — algebraic types model the domain precisely
+- **Algorithms over raw loops** — `std::ranges` pipelines, folds, transforms
+- **CRDTs are monoids** — merge is associative, commutative, and idempotent
+- **Strong types prevent mixups** — `ActorId`, `ObjId`, `ChangeHash` never interconvert
+- **Value semantics** — immutable outside transactions, explicit mutation boundaries
+- **Easy to use, hard to misuse** — typed accessors, scalar overloads, deduced return types
 
 ## License
 
@@ -240,3 +370,4 @@ MIT License. See [LICENSE](LICENSE).
 
 - [Automerge](https://automerge.org/) — the original CRDT library by Martin Kleppmann et al.
 - [automerge-rs](https://github.com/automerge/automerge) — the upstream Rust implementation
+- [nlohmann/json](https://github.com/nlohmann/json) — JSON for Modern C++ by Niels Lohmann
