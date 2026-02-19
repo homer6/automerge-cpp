@@ -23,28 +23,21 @@ namespace am = automerge_cpp;
 int main() {
     auto doc = am::Document{};
 
-    // Initializer lists — like nlohmann/json
-    auto list_id = doc.transact([](am::Transaction& tx) {
+    // Initializer lists — just like nlohmann/json
+    auto items = doc.transact([](am::Transaction& tx) {
         tx.put(am::root, "title", "Shopping List");
-        tx.put(am::root, "count", 0);
-        return tx.put(am::root, "items", am::List{"Milk", "Eggs", "Bread"});
+        tx.put(am::root, "config", {{"theme", "dark"}, {"lang", "en"}});
+        return tx.put(am::root, "items", {"Milk", "Eggs", "Bread"});
     });
 
-    // Typed get<T>() — returns std::optional<T>
-    auto title = doc.get<std::string>(am::root, "title");   // optional<string>
-    auto count = doc.get<std::int64_t>(am::root, "count");  // optional<int64_t>
+    // Typed get<T>() — no variant unwrapping
+    auto title = doc.get<std::string>(am::root, "title");  // "Shopping List"
 
-    // get_path() for nested access
-    auto first = doc.get_path("items", std::size_t{0});     // optional<Value>
-
-    // Fork and make concurrent edits
+    // Fork, edit concurrently, merge — conflict-free
     auto doc2 = doc.fork();
-
-    doc.transact([&](auto& tx) { tx.insert(list_id, 3, "Butter"); });
-    doc2.transact([&](auto& tx) { tx.insert(list_id, 3, "Cheese"); });
-
-    // Merge — both edits preserved, no data loss
-    doc.merge(doc2);
+    doc.transact([&](auto& tx)  { tx.insert(items, 3, "Butter"); });
+    doc2.transact([&](auto& tx) { tx.insert(items, 3, "Cheese"); });
+    doc.merge(doc2);  // both items preserved, no data loss
 
     // Save to binary and reload
     auto bytes = doc.save();
