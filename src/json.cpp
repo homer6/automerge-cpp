@@ -74,7 +74,7 @@ auto base64_decode(std::string_view encoded) -> std::vector<std::byte> {
         t.fill(0);
         constexpr std::string_view chars =
             "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-        for (unsigned char i = 0; i < chars.size(); ++i) {
+        for (std::size_t i = 0; i < chars.size(); ++i) {
             t[static_cast<unsigned char>(chars[i])] = i;
         }
         return t;
@@ -773,7 +773,7 @@ void add_value_at_pointer(Transaction& tx,
     auto& last = segments.back();
     auto type = tx.object_type(current);
     if (type && (*type == ObjType::list || *type == ObjType::text)) {
-        std::size_t idx;
+        std::size_t idx = 0;
         if (last == "-") {
             idx = tx.length(current);
         } else {
