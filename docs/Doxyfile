@@ -2,7 +2,7 @@
 # Generate with: doxygen docs/Doxyfile
 
 PROJECT_NAME           = "automerge-cpp"
-PROJECT_NUMBER         = 0.5.0
+PROJECT_NUMBER         = 0.6.0
 PROJECT_BRIEF          = "A modern C++23 implementation of the Automerge CRDT library"
 
 OUTPUT_DIRECTORY       = docs
