@@ -11,6 +11,12 @@ compact document chunk for a nonempty history. An empty document is serialized a
 canonical empty compact document chunk. Calling `save()` advances the incremental cursor to the
 current heads.
 
+`save_compact()` writes one upstream-compatible compact document chunk. Unlike `save()`, it uses
+the upstream columnar document representation. A document opened with `load_shallow()` retains only
+post-checkpoint changes in memory, so its ordinary `save()` output contains only those changes;
+`save_compact()` combines them with the opaque checkpoint chunk into a new compact document. Like a
+full save, it advances the incremental cursor to the current heads.
+
 `save_incremental()` serializes every change that is not a transitive dependency of the saved
 heads. Its result is a concatenated stream of upstream change chunks and is empty when there are no
 new changes. A nonempty result advances the cursor to the current heads. Before the first full or
@@ -25,6 +31,11 @@ cursor, matching automerge-rs `AutoCommit` behavior.
 chunk. Compact document loading supports independently DEFLATE-compressed change and operation
 columns. The decoder reconstructs predecessor operations and change hashes, and verifies that the
 reconstructed heads match the document chunk.
+
+`load_shallow(bytes)` accepts exactly one compact document chunk. It materializes visible state,
+heads, actor clocks, and operation counters without retaining the pre-checkpoint operation graph.
+See [History compaction and shallow documents](history-compaction.md) for the resulting history,
+merge, and sync boundary.
 
 The complete input is parsed before mutation. Reconstructed changes then pass through the same
 validation, deduplication, dependency queue, and apply path as `apply_changes()`. The return type is

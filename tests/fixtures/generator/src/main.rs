@@ -425,36 +425,48 @@ fn load_document(path: &Path) -> AutoCommit {
 
 fn verify_cpp(output_directory: &Path) {
     for name in CPP_CASES {
-        let actual_path = output_directory.join(format!("{name}.automerge"));
-        let expected_path = if *name == "empty_document" {
+        let expected_change_path = if *name == "empty_document" {
             fixture_directory().join("empty_document.document.automerge")
         } else {
             fixture_directory().join(format!("{name}.automerge"))
         };
-        let actual = load_document(&actual_path);
-        let expected = load_document(&expected_path);
-
-        assert_eq!(
-            actual.stats().num_changes,
-            expected.stats().num_changes,
-            "{name}: changes"
+        verify_cpp_fixture(
+            name,
+            &output_directory.join(format!("{name}.automerge")),
+            &expected_change_path,
         );
-        assert_eq!(
-            actual.stats().num_ops,
-            expected.stats().num_ops,
-            "{name}: operations"
-        );
-        assert_eq!(
-            actual.stats().num_actors,
-            expected.stats().num_actors,
-            "{name}: actors"
-        );
-        assert_eq!(
-            actual.hydrate(ROOT, None).unwrap(),
-            expected.hydrate(ROOT, None).unwrap(),
-            "{name}: visible state"
+        verify_cpp_fixture(
+            name,
+            &output_directory.join(format!("{name}.document.automerge")),
+            &fixture_directory().join(format!("{name}.document.automerge")),
         );
     }
+}
+
+fn verify_cpp_fixture(name: &str, actual_path: &Path, expected_path: &Path) {
+    let actual = load_document(actual_path);
+    let expected = load_document(expected_path);
+
+    assert_eq!(
+        actual.stats().num_changes,
+        expected.stats().num_changes,
+        "{name}: changes"
+    );
+    assert_eq!(
+        actual.stats().num_ops,
+        expected.stats().num_ops,
+        "{name}: operations"
+    );
+    assert_eq!(
+        actual.stats().num_actors,
+        expected.stats().num_actors,
+        "{name}: actors"
+    );
+    assert_eq!(
+        actual.hydrate(ROOT, None).unwrap(),
+        expected.hydrate(ROOT, None).unwrap(),
+        "{name}: visible state"
+    );
 }
 
 fn main() {

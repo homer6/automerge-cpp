@@ -212,16 +212,20 @@ struct Fixture {
     am::Document (*make_document)();
 };
 
-void write_fixture(const std::filesystem::path& output_directory, const Fixture& fixture) {
-    auto document = fixture.make_document();
-    const auto bytes = document.save();
-    auto output = std::ofstream{output_directory / (std::string{fixture.name} + ".automerge"),
-                                std::ios::binary};
+void write_bytes(const std::filesystem::path& path, const std::vector<std::byte>& bytes) {
+    auto output = std::ofstream{path, std::ios::binary};
     output.write(reinterpret_cast<const char*>(bytes.data()),
                  static_cast<std::streamsize>(bytes.size()));
     if (!output) {
         throw std::runtime_error{"failed to write reverse fixture"};
     }
+}
+
+void write_fixture(const std::filesystem::path& output_directory, const Fixture& fixture) {
+    auto document = fixture.make_document();
+    write_bytes(output_directory / (std::string{fixture.name} + ".automerge"), document.save());
+    write_bytes(output_directory / (std::string{fixture.name} + ".document.automerge"),
+                document.save_compact());
 }
 
 } // namespace

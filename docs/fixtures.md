@@ -37,11 +37,11 @@ The always-enabled C++ fixture tests load every committed Rust change stream and
 For change streams they decode each change, verify its hash, re-encode the chunk byte-identically,
 and require `Document::save()` to reproduce the full stream.
 
-When Cargo is available, CTest also runs the reverse direction. A C++ fixture writer creates each
-supported case under the build directory. The Rust generator loads those files and compares their
-change count, operation count, actor count, and hydrated state with the committed Rust case. The
-reverse test has the CTest labels `compatibility` and `cargo`; it is not registered when Cargo is
-unavailable.
+When Cargo is available, CTest also runs the reverse direction. A C++ fixture writer creates both
+the change stream and `save_compact()` document chunk for each supported case under the build
+directory. The Rust generator loads each file and compares its change count, operation count, actor
+count, and hydrated state with the committed Rust case. The reverse test has the CTest labels
+`compatibility` and `cargo`; it is not registered when Cargo is unavailable.
 
 ## Regeneration
 

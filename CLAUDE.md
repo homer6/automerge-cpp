@@ -44,6 +44,7 @@ automerge-cpp/
 │   │   ├── chunk.hpp                       #     chunk envelope and upstream change hash
 │   │   ├── change_chunk.hpp                #     complete change chunk serialization/deserialization
 │   │   ├── document_chunk.hpp              #     compact document chunk deserialization
+│   │   ├── document_chunk_writer.hpp       #     compact document chunk serialization
 │   │   └── columns/                        #     columnar encoding
 │   │       ├── column_spec.hpp             #       column type enum and spec bitfield
 │   │       ├── raw_column.hpp              #       raw column parse/write
@@ -52,7 +53,7 @@ automerge-cpp/
 │   │       └── change_op_columns.hpp       #       op column encoding/decoding (14 parallel columns)
 │   └── sync/                               #   Sync protocol internals
 │       └── bloom_filter.hpp                #     bloom filter (10 bits/entry, 7 probes)
-├── tests/                                  # TESTS (Google Test) — 646 tests
+├── tests/                                  # TESTS (Google Test) — 653 tests
 │   ├── CMakeLists.txt
 │   ├── error_test.cpp
 │   ├── types_test.cpp
@@ -80,6 +81,7 @@ automerge-cpp/
 │   └── json_interop_demo.cpp
 ├── benchmarks/                             # BENCHMARKS (Google Benchmark)
 │   ├── CMakeLists.txt
+│   ├── history_compaction_measure.cpp      #   shallow/full load and historical-read measurements
 │   └── placeholder_benchmark.cpp
 ├── fuzz/                                   # FUZZ TESTING (libFuzzer)
 │   ├── CMakeLists.txt                      #   libFuzzer build config
@@ -232,7 +234,7 @@ See [docs/plans/architecture.md](docs/plans/architecture.md) for the full design
 
 ## Testing
 
-646 tests across 16 test files. Uses Google Test (fetched via CMake FetchContent), plus two
+653 tests across 16 test files. Uses Google Test (fetched via CMake FetchContent), plus two
 compatibility CTest steps when Cargo is available.
 
 | Test File | Count | Covers |
@@ -243,7 +245,7 @@ compatibility CTest steps when Cargo is available.
 | `op_test.cpp` | 4 | Op, OpType |
 | `change_test.cpp` | 4 | Change |
 | `change_hash_fixture_test.cpp` | 16 | automerge-rs change hashes, document chunks, incremental saves, and the compatibility fixture sweep |
-| `document_test.cpp` | 321 | Document core, merge, serialization, incremental save/load, change queries, sync, patches, time travel, cursors, marks, thread safety, conflict resolution, list concurrency, counters, save/load edge cases, large data stress, text/marks, sync protocol, typed get<T>(), scalar overloads, batch ops, operator[], get_path, get_scalar, overload helper, List/Map initializers, bare initializer lists, STL containers, external change application, transaction rollback, commit metadata |
+| `document_test.cpp` | 329 | Document core, merge, serialization, incremental save/load, change queries, sync, patches, time travel, cursors, marks, thread safety, conflict resolution, list concurrency, counters, save/load edge cases, large data stress, text/marks, sync protocol, typed get<T>(), scalar overloads, batch ops, operator[], get_path, get_scalar, overload helper, List/Map initializers, bare initializer lists, STL containers, external change application, transaction rollback, commit metadata, shallow history checkpoints |
 | `sync_wire_format_test.cpp` | 6 | automerge-rs sync bytes, change delivery, peer replacement, state resume |
 | `leb128_test.cpp` | 22 | LEB128 encode/decode |
 | `rle_test.cpp` | 69 | RLE encoder/decoder round-trips |

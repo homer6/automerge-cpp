@@ -283,6 +283,9 @@ public:
     ///   vector when there are no new changes.
     auto save_incremental() const -> std::vector<std::byte>;
 
+    /// Serialize the current document as one upstream compact document chunk.
+    auto save_compact() const -> std::vector<std::byte>;
+
     /// Apply change chunks or an upstream document chunk to this document.
     /// @return The number of changes applied immediately. Changes waiting for
     ///   unavailable dependencies are retained by the checked apply path.
@@ -295,6 +298,12 @@ public:
     /// @param data The binary data to load from.
     /// @return The loaded document, or nullopt if the data is invalid.
     static auto load(std::span<const std::byte> data) -> std::optional<Document>;
+
+    /// Load one upstream compact document chunk as a shallow checkpoint.
+    ///
+    /// The visible state and checkpoint heads are retained. Changes and operations before the
+    /// checkpoint are not kept in the resident history.
+    static auto load_shallow(std::span<const std::byte> data) -> std::optional<Document>;
 
     /// Load a document and return patches that materialize its visible state.
     ///

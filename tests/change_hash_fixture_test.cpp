@@ -209,6 +209,10 @@ TEST(ChangeHashFixture, matches_automerge_rs_change_chunks) {
         EXPECT_EQ(document->get_changes().size(), expected_hashes.size()) << fixture_name;
         EXPECT_EQ(document->get_heads(), expected_heads) << fixture_name;
         EXPECT_EQ(document->save(), bytes) << fixture_name;
+        const auto encoded_document = document->save_compact();
+        const auto expected_document =
+            read_bytes(fixture_path(std::string{fixture_name} + ".document.am"));
+        EXPECT_EQ(encoded_document, expected_document) << fixture_name;
 
         auto compact_document = Document{};
         const auto compact_result = compact_document.load_incremental(

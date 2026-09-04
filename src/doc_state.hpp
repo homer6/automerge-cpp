@@ -57,9 +57,14 @@ struct PendingMark {
 // The state of a single CRDT object in the document tree.
 struct ObjectState {
     ObjType type;
-    std::map<std::string, std::vector<MapEntry>> map_entries;  // map/table
-    std::vector<ListElement> list_elements;                     // list/text
-    std::vector<MarkEntry> marks;                               // rich-text marks
+    std::map<std::string, std::vector<MapEntry>> map_entries; // map/table
+    std::vector<ListElement> list_elements;                   // list/text
+    std::vector<MarkEntry> marks;                             // rich-text marks
+};
+
+struct StateCheckpoint {
+    std::vector<ChangeHash> heads;
+    std::unordered_map<ObjId, ObjectState> objects;
 };
 
 // The complete internal state of a Document.
@@ -75,7 +80,7 @@ struct DocState {
     std::unordered_map<ChangeHash, std::unordered_set<ChangeHash>> pending_dependents;
     std::unordered_map<ActorId, std::unordered_map<std::uint64_t, ChangeHash>> pending_sequences;
     std::vector<ChangeHash> heads;
-    std::map<ActorId, std::uint64_t> clock;  // actor -> max seq seen
+    std::map<ActorId, std::uint64_t> clock; // actor -> max seq seen
     std::uint64_t local_seq = 0;
     std::unordered_map<ActorId, PendingMark> pending_marks;
 
@@ -86,11 +91,21 @@ struct DocState {
     std::optional<std::size_t> deferred_head_index_;
     std::unordered_map<ChangeHash, std::size_t> cached_hash_index_; // hash → index
 
+    // A shallow document retains the materialized checkpoint and its heads, but not the
+    // changes that precede it. The original compact bytes allow save_compact() to rebuild a
+    // complete upstream document on demand without keeping that history resident.
+    std::optional<StateCheckpoint> compaction_checkpoint;
+    std::vector<std::byte> compaction_bytes;
+
+    // Historical reads reuse the last materialized state when the next requested heads descend
+    // from it. Access is serialized by Document's mutex.
+    mutable std::optional<StateCheckpoint> historical_checkpoint;
+
     // Cached actor table (11A.3b) — incrementally maintained.
     // Invalidated by tracking how many changes have been scanned.
     mutable std::vector<ActorId> cached_actor_table_;
     mutable std::unordered_set<ActorId> cached_actor_set_;
-    mutable std::size_t cached_actor_table_size_ = 0;  // changes scanned so far
+    mutable std::size_t cached_actor_table_size_ = 0; // changes scanned so far
     mutable bool cached_actor_table_has_local_ = false;
 
     DocState() {
@@ -770,7 +785,10 @@ struct DocState {
     // Check if we have a change with the given hash. O(1) via cached index.
     auto has_change_hash(const ChangeHash& hash) const -> bool {
         ensure_hash_index();
-        return cached_hash_index_.contains(hash);
+        const auto is_compaction_head =
+            compaction_checkpoint && std::ranges::find(compaction_checkpoint->heads, hash) !=
+                                         compaction_checkpoint->heads.end();
+        return cached_hash_index_.contains(hash) || is_compaction_head;
     }
 
     // Get all change hashes in change_history order (cached, no recomputation).
@@ -832,7 +850,7 @@ struct DocState {
         ensure_hash_index();
         auto result = std::vector<ChangeHash>{};
         auto add_if_missing = [&](const ChangeHash& hash) {
-            if (!cached_hash_index_.contains(hash) && !pending_changes.contains(hash) &&
+            if (!has_change_hash(hash) && !pending_changes.contains(hash) &&
                 std::ranges::find(result, hash) == result.end()) {
                 result.push_back(hash);
             }
@@ -898,17 +916,96 @@ struct DocState {
         return indices;
     }
 
+    auto changes_after_checkpoint(const std::vector<ChangeHash>& target_heads,
+                                  const std::vector<ChangeHash>& checkpoint_heads) const
+        -> std::optional<std::vector<std::size_t>> {
+        ensure_hash_index();
+        auto remaining_checkpoint_heads =
+            std::set<ChangeHash>{checkpoint_heads.begin(), checkpoint_heads.end()};
+        auto visited = std::set<ChangeHash>{};
+        auto queue = target_heads;
+        auto queued = std::set<ChangeHash>{target_heads.begin(), target_heads.end()};
+        auto indices = std::vector<std::size_t>{};
+        auto has_unknown_ancestor = false;
+
+        const auto traversal = std::views::iota(std::size_t{0},
+                                                change_history.size() + target_heads.size() +
+                                                    checkpoint_heads.size()) |
+                               std::views::take_while([&](const auto) { return !queue.empty(); });
+        std::ranges::for_each(traversal, [&](const auto) {
+            const auto hash = queue.back();
+            queue.pop_back();
+            if (!visited.insert(hash).second) {
+                return;
+            }
+            if (remaining_checkpoint_heads.erase(hash) != 0) {
+                return;
+            }
+            const auto change = cached_hash_index_.find(hash);
+            if (change == cached_hash_index_.end()) {
+                has_unknown_ancestor = true;
+                return;
+            }
+            indices.push_back(change->second);
+            std::ranges::copy_if(
+                change_history[change->second].deps,
+                std::back_inserter(queue),
+                [&](const ChangeHash& dependency) { return queued.insert(dependency).second; });
+        });
+
+        if (has_unknown_ancestor || !remaining_checkpoint_heads.empty()) {
+            return std::nullopt;
+        }
+        std::ranges::sort(indices);
+        return indices;
+    }
+
+    auto checkpoint_snapshot(const StateCheckpoint& checkpoint,
+                             const std::vector<ChangeHash>& target_heads,
+                             const std::vector<std::size_t>& changes) const -> DocState {
+        auto snapshot = DocState{};
+        snapshot.actor = actor;
+        snapshot.objects = checkpoint.objects;
+        std::ranges::for_each(changes, [&](const std::size_t index) {
+            std::ranges::for_each(change_history[index].operations,
+                                  [&](const Op& operation) { snapshot.apply_op(operation); });
+        });
+        historical_checkpoint = StateCheckpoint{
+            .heads = target_heads,
+            .objects = snapshot.objects,
+        };
+        return snapshot;
+    }
+
     // Rebuild a fresh DocState by replaying only the changes visible at given heads.
     auto rebuild_state_at(const std::vector<ChangeHash>& target_heads) const -> DocState {
-        auto indices = changes_visible_at(target_heads);
+        if (historical_checkpoint) {
+            const auto changes =
+                changes_after_checkpoint(target_heads, historical_checkpoint->heads);
+            if (changes) {
+                return checkpoint_snapshot(*historical_checkpoint, target_heads, *changes);
+            }
+        }
+        if (compaction_checkpoint) {
+            const auto changes =
+                changes_after_checkpoint(target_heads, compaction_checkpoint->heads);
+            if (changes) {
+                return checkpoint_snapshot(*compaction_checkpoint, target_heads, *changes);
+            }
+        }
+
+        const auto indices = changes_visible_at(target_heads);
         auto snapshot = DocState{};
         snapshot.actor = actor;
 
-        for (auto idx : indices) {
-            for (const auto& op : change_history[idx].operations) {
-                snapshot.apply_op(op);
-            }
-        }
+        std::ranges::for_each(indices, [&](const std::size_t index) {
+            std::ranges::for_each(change_history[index].operations,
+                                  [&](const Op& operation) { snapshot.apply_op(operation); });
+        });
+        historical_checkpoint = StateCheckpoint{
+            .heads = target_heads,
+            .objects = snapshot.objects,
+        };
         return snapshot;
     }
 

@@ -12,7 +12,7 @@ This is a **from-scratch** reimplementation, not a wrapper. It mirrors the upstr
 Automerge semantics while embracing idiomatic C++23: algebraic types, ranges pipelines,
 strong types, and an API inspired by [nlohmann/json](https://github.com/nlohmann/json).
 
-**646 GoogleTest cases passing** across 16 test files, plus two compatibility CTest steps when
+**653 GoogleTest cases passing** across 16 test files, plus two compatibility CTest steps when
 Cargo is available. Deep [nlohmann/json](https://github.com/nlohmann/json) interoperability
 included.
 
@@ -236,6 +236,7 @@ a full working example.
 ### Serialization and Sync
 
 - **Binary serialization**: full and incremental save/load with upstream-compatible chunks
+- **History checkpoints**: upstream compact saves and shallow loads that retain visible state at its heads
 - **Change queries**: changes since heads, changes added by another document, latest local change
 - **Columnar encoding**: RLE, delta, and boolean encoders matching upstream Rust format
 - **DEFLATE compression**: raw DEFLATE for columns exceeding 256 bytes
@@ -248,12 +249,13 @@ a full working example.
 
 - **Patches**: incremental notifications for local transactions, remote changes, merge, sync, and load
 - **Time travel**: read document state at any historical point (`get_at()`, `text_at()`, etc.)
+- **Bounded historical reads**: cache the latest reconstructed state for nearby `get_at()` requests
 - **Cursors**: stable positions in lists/text that survive edits and merges
 - **Rich text marks**: range annotations (bold, italic, links) anchored by identity
 
 ### Quality and Performance
 
-- **646 GoogleTest cases** across 16 test files, plus two compatibility CTest steps with Cargo
+- **653 GoogleTest cases** across 16 test files, plus two compatibility CTest steps with Cargo
 - **Fuzz testing**: libFuzzer targets for `Document::load()`, LEB128, and change chunk parsing
 - **Static analysis**: clang-tidy CI with `bugprone-*`, `performance-*`, `clang-analyzer-*`
 - **Sanitizer CI**: Address Sanitizer + Undefined Behavior Sanitizer
@@ -351,7 +353,7 @@ automerge-cpp/
     encoding/                 #   LEB128, RLE, delta, boolean codecs
     storage/                  #   columnar binary format
     sync/                     #   bloom filter for sync protocol
-  tests/                      # 646 tests (Google Test)
+  tests/                      # 653 tests (Google Test)
   examples/                   # 7 example programs
   benchmarks/                 # performance benchmarks (Google Benchmark)
   docs/                       # documentation

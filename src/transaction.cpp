@@ -279,13 +279,22 @@ void Transaction::commit(CommitOptions options) {
 
     rollback_state_->begin_commit(state_);
 
+    auto dependencies = rollback_state_->heads_before();
+    if (state_.compaction_checkpoint) {
+        std::ranges::copy_if(state_.compaction_checkpoint->heads,
+                             std::back_inserter(dependencies),
+                             [&](const ChangeHash& head) {
+                                 return std::ranges::find(dependencies, head) == dependencies.end();
+                             });
+    }
+
     auto change = Change{
         .actor = state_.actor,
         .seq = ++state_.local_seq,
         .start_op = rollback_state_->start_op(),
         .timestamp = options.time.value_or(0),
         .message = std::move(options.message),
-        .deps = rollback_state_->heads_before(),
+        .deps = std::move(dependencies),
         .operations = std::move(pending_ops_),
     };
 

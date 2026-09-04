@@ -223,9 +223,11 @@ doc.get_missing_deps(std::vector<ChangeHash>) -> std::vector<ChangeHash>
 
 ```cpp
 doc.save()                                  -> std::vector<std::byte>
+doc.save_compact()                          -> std::vector<std::byte>
 doc.save_incremental()                      -> std::vector<std::byte>
 doc.load_incremental(std::span<const std::byte>) -> std::expected<std::size_t, Error>
 Document::load(std::span<const std::byte>)  -> std::optional<Document>
+Document::load_shallow(std::span<const std::byte>) -> std::optional<Document>
 Document::load_with_patches(std::span<const std::byte>, Document& output)
                                               -> std::expected<std::vector<Patch>, Error>
 ```
@@ -1055,6 +1057,19 @@ replica.load_incremental(base);
 replica.load_incremental(update);
 ```
 
+Use a compact document checkpoint when the active copy does not need resident history before its
+current heads:
+
+```cpp
+auto checkpoint = doc.save_compact();
+auto active = am::Document::load_shallow(checkpoint);
+active->transact([](auto& tx) { tx.put(am::root, "next", 3); });
+```
+
+`load_shallow()` requires one compact document chunk. The returned document preserves visible state
+and checkpoint heads, accepts post-checkpoint transactions and sync, and queues changes that depend
+only on older discarded history. Its historical reads cannot address a point before the checkpoint.
+
 See [Incremental save, load, and change queries](incremental-save.md) for cursor, error, and format
 details.
 
@@ -1120,6 +1135,10 @@ doc.transact([](auto& tx) { tx.put(am::root, "x", 2); });
 doc.get_at(am::root, "x", v1);     // 1 (past)
 doc.get(am::root, "x");            // 2 (current)
 ```
+
+The latest reconstructed historical state is cached. A subsequent request descended from that
+point replays only intervening changes. A shallow document uses its checkpoint as the earliest
+cache point. See [History compaction and shallow documents](history-compaction.md).
 
 ### Cursors
 

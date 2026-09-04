@@ -10,6 +10,7 @@
 #include "storage/chunk.hpp"
 #include "storage/deserializer.hpp"
 #include "storage/document_chunk.hpp"
+#include "storage/document_chunk_writer.hpp"
 #include "storage/serializer.hpp"
 #include "sync/bloom_filter.hpp"
 #include "sync_message_encoding.hpp"
@@ -820,12 +821,12 @@ static auto visible_state_patches(const ObjectMap& before, const ObjectMap& afte
 }
 
 auto Document::merge(const Document& other) -> std::expected<void, Error> {
-    return apply_changes(other.get_changes());
+    return apply_changes(get_changes_added(other));
 }
 
 auto Document::merge_with_patches(const Document& other)
     -> std::expected<std::vector<Patch>, Error> {
-    return apply_changes_with_patches(other.get_changes());
+    return apply_changes_with_patches(get_changes_added(other));
 }
 
 auto Document::get_changes() const -> std::vector<Change> {
@@ -842,7 +843,14 @@ auto Document::get_changes_since(const std::vector<ChangeHash>& heads) const
 }
 
 auto Document::get_changes_added(const Document& other) const -> std::vector<Change> {
-    const auto other_changes = other.get_changes();
+    const auto checkpoint_heads = [&]() {
+        auto lock = std::unique_lock{mutex_};
+        state_->materialize_changes();
+        return state_->compaction_checkpoint ? state_->compaction_checkpoint->heads
+                                             : std::vector<ChangeHash>{};
+    }();
+    const auto other_changes =
+        checkpoint_heads.empty() ? other.get_changes() : other.get_changes_since(checkpoint_heads);
     auto lock = std::unique_lock{mutex_};
     state_->materialize_changes();
     auto result = std::vector<Change>{};
@@ -935,6 +943,31 @@ auto Document::save_incremental() const -> std::vector<std::byte> {
         save_heads_ = state_->heads;
     }
     return output;
+}
+
+auto Document::save_compact() const -> std::vector<std::byte> {
+    auto lock = std::unique_lock{mutex_};
+    state_->materialize_changes();
+    if (!state_->compaction_checkpoint) {
+        save_heads_ = state_->heads;
+        return storage::serialize_document_chunk(state_->change_history, state_->heads);
+    }
+    if (state_->change_history.empty()) {
+        save_heads_ = state_->heads;
+        return state_->compaction_bytes;
+    }
+
+    auto full_document = load(state_->compaction_bytes);
+    if (!full_document) {
+        return {};
+    }
+    const auto applied = full_document->apply_changes(state_->change_history);
+    if (!applied) {
+        return {};
+    }
+    save_heads_ = state_->heads;
+    return storage::serialize_document_chunk(full_document->state_->change_history,
+                                             full_document->state_->heads);
 }
 
 // Intermediate struct for parsed document data (avoids private access issues).
@@ -1124,6 +1157,93 @@ auto Document::load(std::span<const std::byte> data) -> std::optional<Document> 
     doc.state_->clock = std::move(parsed->clock);
 
     return doc;
+}
+
+static void prune_shallow_objects(detail::DocState& state) {
+    std::ranges::for_each(state.objects, [](auto& object_entry) {
+        auto& object = object_entry.second;
+        std::erase_if(object.list_elements,
+                      [](const detail::ListElement& element) { return !element.visible; });
+        auto visible_ids = std::unordered_set<OpId>{};
+        std::ranges::transform(object.list_elements,
+                               std::inserter(visible_ids, visible_ids.end()),
+                               &detail::ListElement::insert_id);
+        std::erase_if(object.marks, [&](const detail::MarkEntry& mark) {
+            return !visible_ids.contains(mark.start_elem) || !visible_ids.contains(mark.end_elem);
+        });
+    });
+
+    auto reachable = std::unordered_set<ObjId>{root};
+    auto queue = std::vector<ObjId>{root};
+    const auto traversal = std::views::iota(std::size_t{0}, state.objects.size()) |
+                           std::views::take_while([&](const auto) { return !queue.empty(); });
+    std::ranges::for_each(traversal, [&](const auto) {
+        const auto object_id = queue.back();
+        queue.pop_back();
+        const auto object = state.objects.find(object_id);
+        if (object == state.objects.end()) {
+            return;
+        }
+        const auto add_child = [&](const OpId& operation_id, const Value& value) {
+            if (!std::holds_alternative<ObjType>(value)) {
+                return;
+            }
+            const auto child = ObjId{operation_id};
+            if (reachable.insert(child).second) {
+                queue.push_back(child);
+            }
+        };
+        std::ranges::for_each(object->second.map_entries, [&](const auto& map_entry) {
+            std::ranges::for_each(map_entry.second, [&](const detail::MapEntry& value) {
+                add_child(value.op_id, value.value);
+            });
+        });
+        std::ranges::for_each(object->second.list_elements,
+                              [&](const detail::ListElement& element) {
+                                  add_child(element.insert_id, element.value);
+                              });
+    });
+    std::erase_if(state.objects, [&](const auto& object_entry) {
+        return !reachable.contains(object_entry.first);
+    });
+}
+
+auto Document::load_shallow(std::span<const std::byte> data) -> std::optional<Document> {
+    const auto header = storage::parse_chunk_header(data);
+    if (!header || header->type != storage::ChunkType::document ||
+        header->body_offset + header->body_length != data.size()) {
+        return std::nullopt;
+    }
+    auto decoded = storage::parse_shallow_document_chunk(data);
+    if (!decoded) {
+        return std::nullopt;
+    }
+
+    auto document = Document{1u};
+    if (!decoded->metadata.empty()) {
+        document.state_->actor = decoded->metadata.front().actor;
+    }
+    std::ranges::for_each(decoded->metadata, [&](const storage::DocumentChangeMetadata& change) {
+        document.state_->clock[change.actor] =
+            std::max(document.state_->clock[change.actor], change.sequence);
+        if (change.actor == document.state_->actor) {
+            document.state_->local_seq = std::max(document.state_->local_seq, change.sequence);
+            document.state_->next_counter =
+                std::max(document.state_->next_counter, change.max_operation + 1);
+        }
+        std::ranges::for_each(change.operations, [&](const std::optional<Op>& operation) {
+            document.state_->apply_op(*operation);
+        });
+    });
+    document.state_->heads = std::move(decoded->heads);
+    std::ranges::sort(document.state_->heads);
+    prune_shallow_objects(*document.state_);
+    document.state_->compaction_checkpoint = detail::StateCheckpoint{
+        .heads = document.state_->heads,
+        .objects = document.state_->objects,
+    };
+    document.state_->compaction_bytes.assign(data.begin(), data.end());
+    return document;
 }
 
 auto Document::load_with_patches(std::span<const std::byte> data, Document& document)

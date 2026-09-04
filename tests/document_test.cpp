@@ -1531,6 +1531,124 @@ TEST(Document, get_heads_tracks_dag) {
 
 // -- Phase 4: Binary Serialization --------------------------------------------
 
+TEST(Document, compact_save_shallow_load_round_trip_preserves_visible_state_and_heads) {
+    auto document = make_doc(1);
+    auto list = ObjId{};
+    document.transact([&](auto& transaction) {
+        transaction.put(root, "name", "checkpoint");
+        list = transaction.put_object(root, "items", ObjType::list);
+        transaction.insert(list, 0, std::int64_t{1});
+        transaction.insert(list, 1, std::int64_t{2});
+    });
+    document.transact([&](auto& transaction) { transaction.delete_index(list, 0); });
+
+    const auto compact = document.save_compact();
+    auto shallow = Document::load_shallow(compact);
+
+    ASSERT_TRUE(shallow.has_value());
+    EXPECT_EQ(shallow->get_heads(), document.get_heads());
+    EXPECT_EQ(shallow->get_changes().size(), 0u);
+    EXPECT_EQ(shallow->get<std::string>(root, "name"), "checkpoint");
+    EXPECT_EQ(shallow->length(list), 1u);
+    EXPECT_EQ(shallow->get<std::int64_t>(list, std::size_t{0}), 2);
+    EXPECT_EQ(shallow->save_compact(), compact);
+}
+
+TEST(Document, compact_save_full_load_round_trip_preserves_supported_values) {
+    auto document = make_doc(1);
+    auto text = ObjId{};
+    document.transact([&](auto& transaction) {
+        transaction.put(root, "count", Counter{4});
+        text = transaction.put_object(root, "text", ObjType::text);
+        ASSERT_TRUE(transaction.splice_text(text, 0, 0, "abc").has_value());
+    });
+    document.transact([&](auto& transaction) {
+        transaction.increment(root, "count", 3);
+        ASSERT_TRUE(transaction.splice_text(text, 1, 1, "Z").has_value());
+        transaction.mark(text, 0, 2, "bold", true);
+    });
+
+    auto loaded = Document::load(document.save_compact());
+
+    ASSERT_TRUE(loaded.has_value());
+    EXPECT_EQ(loaded->get<Counter>(root, "count"), Counter{7});
+    EXPECT_EQ(loaded->text(text), "aZc");
+    ASSERT_EQ(loaded->marks(text).size(), 1u);
+    EXPECT_EQ(loaded->marks(text).front().name, "bold");
+    EXPECT_EQ(loaded->get_heads(), document.get_heads());
+}
+
+TEST(Document, shallow_document_transaction_depends_on_compaction_heads) {
+    auto full = make_doc(1);
+    full.transact([](auto& transaction) { transaction.put(root, "base", std::int64_t{1}); });
+    const auto compaction_heads = full.get_heads();
+    auto shallow = Document::load_shallow(full.save_compact());
+    ASSERT_TRUE(shallow.has_value());
+    shallow->set_actor_id(make_doc(2).actor_id());
+
+    shallow->transact([](auto& transaction) { transaction.put(root, "after", std::int64_t{2}); });
+
+    const auto changes = shallow->get_changes();
+    ASSERT_EQ(changes.size(), 1u);
+    EXPECT_TRUE(std::ranges::all_of(compaction_heads, [&](const ChangeHash& head) {
+        return std::ranges::find(changes.front().deps, head) != changes.front().deps.end();
+    }));
+    auto reloaded = Document::load(shallow->save_compact());
+    ASSERT_TRUE(reloaded.has_value());
+    EXPECT_EQ(reloaded->get<std::int64_t>(root, "base"), 1);
+    EXPECT_EQ(reloaded->get<std::int64_t>(root, "after"), 2);
+}
+
+TEST(Document, shallow_and_full_peers_merge_post_checkpoint_changes_both_directions) {
+    auto full = make_doc(1);
+    full.transact([](auto& transaction) { transaction.put(root, "base", std::int64_t{0}); });
+    auto shallow = Document::load_shallow(full.save_compact());
+    ASSERT_TRUE(shallow.has_value());
+    shallow->set_actor_id(make_doc(2).actor_id());
+
+    full.transact([](auto& transaction) { transaction.put(root, "full", std::int64_t{1}); });
+    shallow->transact([](auto& transaction) { transaction.put(root, "shallow", std::int64_t{2}); });
+
+    ASSERT_TRUE(full.merge(*shallow).has_value());
+    ASSERT_TRUE(shallow->merge(full).has_value());
+    EXPECT_EQ(full.get_heads(), shallow->get_heads());
+    EXPECT_EQ(full.get<std::int64_t>(root, "full"), 1);
+    EXPECT_EQ(full.get<std::int64_t>(root, "shallow"), 2);
+    EXPECT_EQ(shallow->get<std::int64_t>(root, "full"), 1);
+    EXPECT_EQ(shallow->get<std::int64_t>(root, "shallow"), 2);
+}
+
+TEST(Document, shallow_document_queues_change_that_depends_on_pruned_history) {
+    auto full = make_doc(1);
+    full.transact([](auto& transaction) { transaction.put(root, "first", std::int64_t{1}); });
+    auto old_peer = full.fork();
+    const auto pruned_head = full.get_heads().front();
+    full.transact([](auto& transaction) { transaction.put(root, "checkpoint", std::int64_t{2}); });
+    auto shallow = Document::load_shallow(full.save_compact());
+    ASSERT_TRUE(shallow.has_value());
+
+    old_peer.transact(
+        [](auto& transaction) { transaction.put(root, "old-branch", std::int64_t{3}); });
+    const auto result = shallow->apply_changes(old_peer.get_changes_since({pruned_head}));
+
+    ASSERT_TRUE(result.has_value());
+    EXPECT_FALSE(shallow->get_at(root, "first", {pruned_head}).has_value());
+    EXPECT_FALSE(shallow->get(root, "old-branch").has_value());
+    EXPECT_EQ(shallow->get_missing_deps({}), std::vector<ChangeHash>{pruned_head});
+}
+
+TEST(Document, cached_historical_read_advances_from_nearby_heads) {
+    auto document = make_doc(1);
+    auto heads = std::vector<std::vector<ChangeHash>>{};
+    for (auto index = std::int64_t{0}; index < 100; ++index) {
+        document.transact([&](auto& transaction) { transaction.put(root, "value", index); });
+        heads.push_back(document.get_heads());
+    }
+
+    EXPECT_EQ(document.get_at(root, "value", heads[89]), Value{ScalarValue{std::int64_t{89}}});
+    EXPECT_EQ(document.get_at(root, "value", heads[90]), Value{ScalarValue{std::int64_t{90}}});
+}
+
 TEST(Document, save_and_load_empty_document) {
     auto doc = make_doc(1);
     auto bytes = doc.save();
@@ -2015,6 +2133,23 @@ auto sync_docs(Document& a, Document& b) -> int {
         if (!progress) break;
     }
     return count;
+}
+
+TEST(Document, sync_full_and_shallow_peers_exchanges_post_checkpoint_changes) {
+    auto full = make_doc(1);
+    full.transact([](auto& transaction) { transaction.put(root, "base", std::int64_t{0}); });
+    auto shallow = Document::load_shallow(full.save_compact());
+    ASSERT_TRUE(shallow.has_value());
+    shallow->set_actor_id(make_doc(2).actor_id());
+    full.transact([](auto& transaction) { transaction.put(root, "full", std::int64_t{1}); });
+    shallow->transact([](auto& transaction) { transaction.put(root, "shallow", std::int64_t{2}); });
+
+    const auto messages = sync_docs(full, *shallow);
+
+    EXPECT_GT(messages, 0);
+    EXPECT_EQ(full.get_heads(), shallow->get_heads());
+    EXPECT_EQ(full.get<std::int64_t>(root, "shallow"), 2);
+    EXPECT_EQ(shallow->get<std::int64_t>(root, "full"), 1);
 }
 
 TEST(Document, sync_two_fresh_documents) {

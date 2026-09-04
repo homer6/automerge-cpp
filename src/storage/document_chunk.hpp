@@ -638,25 +638,56 @@ inline auto restore_document_predecessors(std::vector<DocumentOperationRow> rows
     return operations;
 }
 
+inline auto assign_document_operations(std::vector<DocumentChangeMetadata>& metadata,
+                                       std::vector<Op> operations) -> bool {
+    struct OperationLocation {
+        std::size_t change;
+        std::size_t offset;
+    };
+    auto locations = std::unordered_map<OpId, OperationLocation>{};
+    locations.reserve(operations.size());
+    std::ranges::for_each(
+        std::views::iota(std::size_t{0}, metadata.size()), [&](const std::size_t change_index) {
+            const auto& change = metadata[change_index];
+            std::ranges::for_each(
+                std::views::iota(change.start_operation, change.max_operation + 1),
+                [&](const std::uint64_t counter) {
+                    locations.emplace(
+                        OpId{counter, change.actor},
+                        OperationLocation{
+                            .change = change_index,
+                            .offset = static_cast<std::size_t>(counter - change.start_operation),
+                        });
+                });
+        });
+    const auto assigned = std::ranges::all_of(operations, [&](auto& operation) {
+        const auto location = locations.find(operation.id);
+        if (location == locations.end()) {
+            return false;
+        }
+        auto& destination = metadata[location->second.change].operations[location->second.offset];
+        if (destination) {
+            return false;
+        }
+        destination = std::move(operation);
+        return true;
+    });
+    if (!assigned) {
+        return false;
+    }
+
+    return std::ranges::none_of(metadata, [](const DocumentChangeMetadata& change) {
+        return std::ranges::any_of(change.operations,
+                                   [](const auto& operation) { return !operation.has_value(); });
+    });
+}
+
 inline auto assemble_document_changes(std::vector<DocumentChangeMetadata> metadata,
                                       std::vector<Op> operations,
                                       const std::vector<ChangeHash>& expected_heads)
     -> std::optional<std::vector<Change>> {
-    for (auto& operation : operations) {
-        const auto change = std::ranges::find_if(metadata, [&](const auto& candidate) {
-            return candidate.actor == operation.id.actor &&
-                   operation.id.counter >= candidate.start_operation &&
-                   operation.id.counter <= candidate.max_operation;
-        });
-        if (change == metadata.end()) {
-            return std::nullopt;
-        }
-        const auto offset =
-            static_cast<std::size_t>(operation.id.counter - change->start_operation);
-        if (change->operations[offset]) {
-            return std::nullopt;
-        }
-        change->operations[offset] = std::move(operation);
+    if (!assign_document_operations(metadata, std::move(operations))) {
+        return std::nullopt;
     }
 
     auto changes = std::vector<Change>{};
@@ -664,10 +695,6 @@ inline auto assemble_document_changes(std::vector<DocumentChangeMetadata> metada
     changes.reserve(metadata.size());
     hashes.reserve(metadata.size());
     for (auto& entry : metadata) {
-        if (std::ranges::any_of(entry.operations,
-                                [](const auto& operation) { return !operation.has_value(); })) {
-            return std::nullopt;
-        }
         auto dependencies = std::vector<ChangeHash>{};
         dependencies.reserve(entry.dependencies.size());
         for (const auto dependency : entry.dependencies) {
@@ -713,8 +740,14 @@ inline auto assemble_document_changes(std::vector<DocumentChangeMetadata> metada
     return changes;
 }
 
-inline auto parse_document_chunk(std::span<const std::byte> chunk)
-    -> std::optional<std::vector<Change>> {
+struct DecodedDocumentChunk {
+    std::vector<ChangeHash> heads;
+    std::vector<DocumentChangeMetadata> metadata;
+    std::vector<Op> operations;
+};
+
+inline auto decode_document_chunk(std::span<const std::byte> chunk)
+    -> std::optional<DecodedDocumentChunk> {
     const auto header = parse_chunk_header(chunk);
     if (!header || header->type != ChunkType::document ||
         header->body_offset + header->body_length != chunk.size() ||
@@ -783,7 +816,32 @@ inline auto parse_document_chunk(std::span<const std::byte> chunk)
     if (!metadata || !operations) {
         return std::nullopt;
     }
-    return assemble_document_changes(std::move(*metadata), std::move(*operations), heads);
+    return DecodedDocumentChunk{
+        .heads = std::move(heads),
+        .metadata = std::move(*metadata),
+        .operations = std::move(*operations),
+    };
+}
+
+inline auto parse_document_chunk(std::span<const std::byte> chunk)
+    -> std::optional<std::vector<Change>> {
+    auto decoded = decode_document_chunk(chunk);
+    if (!decoded) {
+        return std::nullopt;
+    }
+    return assemble_document_changes(
+        std::move(decoded->metadata), std::move(decoded->operations), decoded->heads);
+}
+
+inline auto parse_shallow_document_chunk(std::span<const std::byte> chunk)
+    -> std::optional<DecodedDocumentChunk> {
+    auto decoded = decode_document_chunk(chunk);
+    if (!decoded ||
+        !assign_document_operations(decoded->metadata, std::move(decoded->operations))) {
+        return std::nullopt;
+    }
+    decoded->operations.clear();
+    return decoded;
 }
 
 } // namespace automerge_cpp::storage
