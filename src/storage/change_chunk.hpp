@@ -99,11 +99,27 @@ inline auto serialize_change_body(const Change& change) -> std::vector<std::byte
     return body;
 }
 
-inline auto serialize_change_chunk(const Change& change) -> std::vector<std::byte> {
+struct EncodedChange {
+    std::vector<std::byte> bytes;
+    ChangeHash hash;
+};
+
+inline auto encode_change(const Change& change) -> EncodedChange {
     const auto body = serialize_change_body(change);
+    const auto digest = compute_change_hash_from_chunk(ChunkType::change, body);
+    auto hash = ChangeHash{};
+    std::memcpy(hash.bytes.data(), digest.data(), hash.bytes.size());
     auto chunk = std::vector<std::byte>{};
-    write_chunk(ChunkType::change, body, chunk);
-    return chunk;
+    chunk.reserve(chunk_magic.size() + 4 + 1 + 10 + body.size());
+    write_chunk(ChunkType::change, body, digest, chunk);
+    return EncodedChange{
+        .bytes = std::move(chunk),
+        .hash = hash,
+    };
+}
+
+inline auto serialize_change_chunk(const Change& change) -> std::vector<std::byte> {
+    return encode_change(change).bytes;
 }
 
 // Parse a change from an upstream-compatible chunk body.

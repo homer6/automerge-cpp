@@ -10,12 +10,17 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <memory>
 #include <optional>
 #include <set>
 #include <span>
 #include <vector>
 
 namespace automerge_cpp {
+
+namespace detail {
+struct SyncMessageEncoding;
+}
 
 /// A summary of what a peer has: a snapshot point plus a bloom filter
 /// of all changes since that point.
@@ -38,6 +43,8 @@ struct SyncMessage {
     std::vector<Change> changes;      ///< Changes for the recipient to apply.
     /// Optional upstream capability identifiers appended to a v1 message.
     std::optional<std::vector<std::uint8_t>> supported_capabilities;
+    /// Internal cache used to preserve already encoded change chunks.
+    std::shared_ptr<const detail::SyncMessageEncoding> encoding_cache;
 
     /// Encode this message in Automerge's v1 sync wire format.
     auto encode() const -> std::vector<std::byte>;
@@ -45,7 +52,7 @@ struct SyncMessage {
     /// Decode one Automerge v1 sync message.
     static auto decode(std::span<const std::byte> data) -> std::expected<SyncMessage, Error>;
 
-    auto operator==(const SyncMessage&) const -> bool = default;
+    auto operator==(const SyncMessage& other) const -> bool;
 };
 
 /// Per-peer synchronization state machine.

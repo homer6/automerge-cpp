@@ -4,6 +4,7 @@
 #include "storage/deserializer.hpp"
 #include "storage/serializer.hpp"
 #include "sync/bloom_filter.hpp"
+#include "sync_message_encoding.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -96,14 +97,17 @@ auto read_have(storage::Deserializer& decoder) -> std::expected<std::vector<Have
     return have;
 }
 
-auto read_changes(storage::Deserializer& decoder) -> std::expected<std::vector<Change>, Error> {
+auto read_changes(storage::Deserializer& decoder)
+    -> std::expected<detail::SyncMessageEncoding, Error> {
     const auto count = decoder.read_uleb128();
     if (!count || *count > decoder.remaining()) {
         return decode_error("invalid changes count");
     }
 
     auto changes = std::vector<Change>{};
+    auto encoded_changes = std::vector<storage::EncodedChange>{};
     changes.reserve(static_cast<std::size_t>(*count));
+    encoded_changes.reserve(static_cast<std::size_t>(*count));
     for (auto index = std::uint64_t{0}; index < *count; ++index) {
         const auto bytes = read_length_prefixed_bytes(decoder, "change chunk");
         if (!bytes) {
@@ -114,8 +118,15 @@ auto read_changes(storage::Deserializer& decoder) -> std::expected<std::vector<C
             return decode_error("invalid change chunk");
         }
         changes.push_back(std::move(parsed->change));
+        encoded_changes.push_back(storage::EncodedChange{
+            .bytes = {bytes->begin(), bytes->end()},
+            .hash = parsed->hash,
+        });
     }
-    return changes;
+    return detail::SyncMessageEncoding{
+        .changes = std::move(changes),
+        .encoded_changes = std::move(encoded_changes),
+    };
 }
 
 auto read_capabilities(storage::Deserializer& decoder)
@@ -158,9 +169,17 @@ auto SyncMessage::encode() const -> std::vector<std::byte> {
         encoder.write_bytes(summary.bloom_bytes);
     }
 
+    const auto use_cache = encoding_cache && encoding_cache->changes == changes &&
+                           encoding_cache->encoded_changes.size() == changes.size();
     encoder.write_uleb128(changes.size());
-    for (const auto& change : changes) {
-        const auto chunk = storage::serialize_change_chunk(change);
+    for (auto index = std::size_t{0}; index < changes.size(); ++index) {
+        if (use_cache) {
+            const auto& chunk = encoding_cache->encoded_changes[index].bytes;
+            encoder.write_uleb128(chunk.size());
+            encoder.write_bytes(chunk);
+            continue;
+        }
+        const auto chunk = storage::serialize_change_chunk(changes[index]);
         encoder.write_uleb128(chunk.size());
         encoder.write_bytes(chunk);
     }
@@ -172,6 +191,11 @@ auto SyncMessage::encode() const -> std::vector<std::byte> {
         }
     }
     return encoder.take();
+}
+
+auto SyncMessage::operator==(const SyncMessage& other) const -> bool {
+    return heads == other.heads && need == other.need && have == other.have &&
+           changes == other.changes && supported_capabilities == other.supported_capabilities;
 }
 
 auto SyncMessage::decode(std::span<const std::byte> data) -> std::expected<SyncMessage, Error> {
@@ -206,8 +230,9 @@ auto SyncMessage::decode(std::span<const std::byte> data) -> std::expected<SyncM
         .heads = std::move(*heads),
         .need = std::move(*need),
         .have = std::move(*have),
-        .changes = std::move(*changes),
+        .changes = changes->changes,
         .supported_capabilities = std::move(*capabilities),
+        .encoding_cache = std::make_shared<detail::SyncMessageEncoding>(std::move(*changes)),
     };
 }
 

@@ -12,6 +12,7 @@
 #include "storage/document_chunk.hpp"
 #include "storage/serializer.hpp"
 #include "sync/bloom_filter.hpp"
+#include "sync_message_encoding.hpp"
 #include "utf8.hpp"
 
 #include <algorithm>
@@ -323,16 +324,16 @@ static auto queued_sequence_conflicts(const detail::DocState& state,
     return sequence != actor->second.end() && sequence->second != incoming_hash;
 }
 
-static void apply_change(detail::DocState& state, const Change& change) {
+static void
+apply_change(detail::DocState& state, const Change& change, storage::EncodedChange encoded) {
     std::ranges::for_each(change.operations,
                           [&](const Op& operation) { state.apply_op(operation); });
     state.clock[change.actor] = change.seq;
-    const auto hash = detail::DocState::compute_change_hash(change);
     std::ranges::for_each(
         change.deps, [&](const ChangeHash& dependency) { std::erase(state.heads, dependency); });
-    state.heads.push_back(hash);
+    state.heads.push_back(encoded.hash);
     std::ranges::sort(state.heads);
-    state.change_history.push_back(change);
+    state.append_materialized_change(change, std::move(encoded));
 }
 
 static auto dependencies_are_available(const detail::DocState& state, const Change& change)
@@ -366,6 +367,7 @@ static void remove_queued_change(detail::DocState& state, const ChangeHash& hash
         }
     });
     state.pending_changes.erase(queued);
+    state.pending_change_encodings.erase(hash);
 }
 
 static void apply_ready_changes(detail::DocState& state) {
@@ -396,8 +398,11 @@ static void apply_ready_changes(detail::DocState& state) {
             state.pending_dependents.erase(dependents_entry);
         }
         auto change = std::move(ready->second);
+        const auto encoding_entry = state.pending_change_encodings.find(hash);
+        assert(encoding_entry != state.pending_change_encodings.end());
+        auto encoded = std::move(encoding_entry->second);
         remove_queued_change(state, hash);
-        apply_change(state, change);
+        apply_change(state, change, std::move(encoded));
         std::ranges::for_each(dependents, [&](const ChangeHash& dependent) {
             const auto pending = state.pending_changes.find(dependent);
             if (pending != state.pending_changes.end() &&
@@ -411,9 +416,12 @@ static void apply_ready_changes(detail::DocState& state) {
 struct ChangeAdmission {
     ChangeHash hash;
     const Change* change;
+    storage::EncodedChange encoded;
 };
 
-static auto validate_changes(const detail::DocState& state, const std::vector<Change>& changes)
+static auto validate_changes(const detail::DocState& state,
+                             const std::vector<Change>& changes,
+                             std::vector<storage::EncodedChange>* encodings = nullptr)
     -> std::expected<std::vector<ChangeAdmission>, Error> {
     const auto text_validation = validate_text_operations(state, changes);
     if (!text_validation) {
@@ -426,11 +434,17 @@ static auto validate_changes(const detail::DocState& state, const std::vector<Ch
     auto supplied_sequences =
         std::unordered_map<ActorId, std::unordered_map<std::uint64_t, ChangeHash>>{};
     auto error = std::optional<Error>{};
-    std::ranges::for_each(changes, [&](const Change& change) {
+    if (encodings != nullptr) {
+        assert(encodings->size() == changes.size());
+    }
+    std::ranges::for_each(std::views::iota(std::size_t{0}, changes.size()), [&](std::size_t index) {
+        const auto& change = changes[index];
         if (error) {
             return;
         }
-        const auto hash = detail::DocState::compute_change_hash(change);
+        auto encoded =
+            encodings == nullptr ? storage::encode_change(change) : std::move((*encodings)[index]);
+        const auto hash = encoded.hash;
         if (state.has_change_hash(hash) || state.pending_changes.contains(hash)) {
             return;
         }
@@ -460,7 +474,11 @@ static auto validate_changes(const detail::DocState& state, const std::vector<Ch
                           "change actor sequence contradicts another supplied change"};
             return;
         }
-        admissions.push_back(ChangeAdmission{.hash = hash, .change = &change});
+        admissions.push_back(ChangeAdmission{
+            .hash = hash,
+            .change = &change,
+            .encoded = std::move(encoded),
+        });
     });
     if (error) {
         return std::unexpected{std::move(*error)};
@@ -468,12 +486,13 @@ static auto validate_changes(const detail::DocState& state, const std::vector<Ch
     return admissions;
 }
 
-static void queue_change(detail::DocState& state, const ChangeAdmission& admission) {
+static void queue_change(detail::DocState& state, ChangeAdmission& admission) {
     const auto inserted = state.pending_changes.emplace(admission.hash, *admission.change).second;
     if (!inserted) {
         return;
     }
     try {
+        state.pending_change_encodings.emplace(admission.hash, std::move(admission.encoded));
         auto& sequences = state.pending_sequences[admission.change->actor];
         sequences.emplace(admission.change->seq, admission.hash);
         std::ranges::for_each(admission.change->deps, [&](const ChangeHash& dependency) {
@@ -485,11 +504,11 @@ static void queue_change(detail::DocState& state, const ChangeAdmission& admissi
     }
 }
 
-static void admit_changes(detail::DocState& state, const std::vector<ChangeAdmission>& admissions) {
+static void admit_changes(detail::DocState& state, std::vector<ChangeAdmission>& admissions) {
     auto admitted_hashes = std::vector<ChangeHash>{};
     admitted_hashes.reserve(admissions.size());
     try {
-        std::ranges::for_each(admissions, [&](const ChangeAdmission& admission) {
+        std::ranges::for_each(admissions, [&](ChangeAdmission& admission) {
             admitted_hashes.push_back(admission.hash);
             queue_change(state, admission);
         });
@@ -806,19 +825,22 @@ auto Document::merge_with_patches(const Document& other)
 }
 
 auto Document::get_changes() const -> std::vector<Change> {
-    auto guard = read_guard();
+    auto lock = std::unique_lock{mutex_};
+    state_->materialize_changes();
     return state_->change_history;
 }
 
 auto Document::get_changes_since(const std::vector<ChangeHash>& heads) const
     -> std::vector<Change> {
-    auto guard = read_guard();
+    auto lock = std::unique_lock{mutex_};
+    state_->materialize_changes();
     return state_->get_changes_by_hash(state_->get_changes_since(heads));
 }
 
 auto Document::get_changes_added(const Document& other) const -> std::vector<Change> {
     const auto other_changes = other.get_changes();
-    auto guard = read_guard();
+    auto lock = std::unique_lock{mutex_};
+    state_->materialize_changes();
     auto result = std::vector<Change>{};
     result.reserve(other_changes.size());
     std::ranges::copy_if(other_changes, std::back_inserter(result), [&](const Change& change) {
@@ -828,7 +850,8 @@ auto Document::get_changes_added(const Document& other) const -> std::vector<Cha
 }
 
 auto Document::get_last_local_change() const -> std::optional<Change> {
-    auto guard = read_guard();
+    auto lock = std::unique_lock{mutex_};
+    state_->materialize_changes();
     const auto change = std::ranges::find_if(
         state_->change_history.rbegin(),
         state_->change_history.rend(),
@@ -838,7 +861,8 @@ auto Document::get_last_local_change() const -> std::optional<Change> {
 
 auto Document::apply_changes(const std::vector<Change>& changes) -> std::expected<void, Error> {
     auto lock = std::unique_lock{mutex_};
-    const auto admissions = validate_changes(*state_, changes);
+    state_->materialize_changes();
+    auto admissions = validate_changes(*state_, changes);
     if (!admissions) {
         return std::unexpected{admissions.error()};
     }
@@ -849,7 +873,8 @@ auto Document::apply_changes(const std::vector<Change>& changes) -> std::expecte
 auto Document::apply_changes_with_patches(const std::vector<Change>& changes)
     -> std::expected<std::vector<Patch>, Error> {
     auto lock = std::unique_lock{mutex_};
-    const auto admissions = validate_changes(*state_, changes);
+    state_->materialize_changes();
+    auto admissions = validate_changes(*state_, changes);
     if (!admissions) {
         return std::unexpected{admissions.error()};
     }
@@ -859,13 +884,15 @@ auto Document::apply_changes_with_patches(const std::vector<Change>& changes)
 }
 
 auto Document::get_heads() const -> std::vector<ChangeHash> {
-    auto guard = read_guard();
+    auto lock = std::unique_lock{mutex_};
+    state_->materialize_changes();
     return state_->heads;
 }
 
 auto Document::get_missing_deps(const std::vector<ChangeHash>& heads) const
     -> std::vector<ChangeHash> {
-    auto guard = read_guard();
+    auto lock = std::unique_lock{mutex_};
+    state_->materialize_changes();
     return state_->get_missing_deps(heads);
 }
 
@@ -873,10 +900,10 @@ auto Document::get_missing_deps(const std::vector<ChangeHash>& heads) const
 
 auto Document::save() const -> std::vector<std::byte> {
     auto lock = std::unique_lock{mutex_};
+    state_->materialize_changes();
     auto output = std::vector<std::byte>{};
-    for (const auto& change : state_->change_history) {
-        const auto chunk = storage::serialize_change_chunk(change);
-        output.insert(output.end(), chunk.begin(), chunk.end());
+    for (const auto& encoded : state_->encoded_changes_) {
+        output.insert(output.end(), encoded.bytes.begin(), encoded.bytes.end());
     }
 
     if (output.empty()) {
@@ -892,11 +919,13 @@ auto Document::save() const -> std::vector<std::byte> {
 
 auto Document::save_incremental() const -> std::vector<std::byte> {
     auto lock = std::unique_lock{mutex_};
+    state_->materialize_changes();
     const auto hashes = state_->get_changes_since(save_heads_);
-    const auto changes = state_->get_changes_by_hash(hashes);
     auto output = std::vector<std::byte>{};
-    std::ranges::for_each(changes, [&](const Change& change) {
-        const auto chunk = storage::serialize_change_chunk(change);
+    std::ranges::for_each(hashes, [&](const ChangeHash& hash) {
+        const auto change = state_->cached_hash_index_.find(hash);
+        assert(change != state_->cached_hash_index_.end());
+        const auto& chunk = state_->encoded_changes_[change->second].bytes;
         output.insert(output.end(), chunk.begin(), chunk.end());
     });
     if (!output.empty()) {
@@ -911,6 +940,7 @@ struct ParsedDocData {
     std::uint64_t next_counter;
     std::uint64_t local_seq;
     std::vector<Change> changes;
+    std::vector<storage::EncodedChange> encoded_changes;
     std::vector<ChangeHash> heads;
     std::map<ActorId, std::uint64_t> clock;
 };
@@ -936,6 +966,7 @@ static auto parse_empty_document(std::span<const std::byte> data) -> std::option
         .next_counter = 1,
         .local_seq = 0,
         .changes = {},
+        .encoded_changes = {},
         .heads = {},
         .clock = {},
     };
@@ -946,6 +977,7 @@ static auto parse_change_stream(std::span<const std::byte> data) -> std::optiona
         return std::nullopt;
 
     auto changes = std::vector<Change>{};
+    auto encoded_changes = std::vector<storage::EncodedChange>{};
     auto heads = std::vector<ChangeHash>{};
     auto clock = std::map<ActorId, std::uint64_t>{};
     auto position = std::size_t{0};
@@ -962,39 +994,51 @@ static auto parse_change_stream(std::span<const std::byte> data) -> std::optiona
 
         const auto chunk_size = header->body_offset + header->body_length;
         auto chunk_changes = std::vector<Change>{};
+        auto chunk_encodings = std::vector<storage::EncodedChange>{};
         if (header->type == storage::ChunkType::change) {
             const auto parsed_change = storage::parse_change_chunk(remaining.first(chunk_size));
             if (!parsed_change) {
                 return std::nullopt;
             }
             chunk_changes.push_back(parsed_change->change);
+            chunk_encodings.push_back(storage::EncodedChange{
+                .bytes = {remaining.begin(), remaining.begin() + chunk_size},
+                .hash = parsed_change->hash,
+            });
         } else if (header->type == storage::ChunkType::document) {
             const auto parsed_changes = storage::parse_document_chunk(remaining.first(chunk_size));
             if (!parsed_changes) {
                 return std::nullopt;
             }
             chunk_changes = *parsed_changes;
+            chunk_encodings.reserve(chunk_changes.size());
+            std::ranges::transform(
+                chunk_changes, std::back_inserter(chunk_encodings), storage::encode_change);
         } else {
             return std::nullopt;
         }
 
-        std::ranges::for_each(chunk_changes, [&](const Change& change) {
-            const auto hash = detail::DocState::compute_change_hash(change);
-            if (changes.empty()) {
-                local_actor = change.actor;
-            }
-            std::ranges::for_each(
-                change.deps, [&](const ChangeHash& dependency) { std::erase(heads, dependency); });
-            heads.push_back(hash);
-            clock[change.actor] = std::max(clock[change.actor], change.seq);
-            if (change.actor == local_actor) {
-                local_seq = std::max(local_seq, change.seq);
-                std::ranges::for_each(change.operations, [&](const Op& operation) {
-                    next_counter = std::max(next_counter, operation.id.counter + 1);
+        std::ranges::for_each(
+            std::views::iota(std::size_t{0}, chunk_changes.size()), [&](std::size_t index) {
+                const auto& change = chunk_changes[index];
+                const auto hash = chunk_encodings[index].hash;
+                if (changes.empty()) {
+                    local_actor = change.actor;
+                }
+                std::ranges::for_each(change.deps, [&](const ChangeHash& dependency) {
+                    std::erase(heads, dependency);
                 });
-            }
-            changes.push_back(change);
-        });
+                heads.push_back(hash);
+                clock[change.actor] = std::max(clock[change.actor], change.seq);
+                if (change.actor == local_actor) {
+                    local_seq = std::max(local_seq, change.seq);
+                    std::ranges::for_each(change.operations, [&](const Op& operation) {
+                        next_counter = std::max(next_counter, operation.id.counter + 1);
+                    });
+                }
+                changes.push_back(change);
+                encoded_changes.push_back(std::move(chunk_encodings[index]));
+            });
         position += chunk_size;
     }
 
@@ -1003,6 +1047,7 @@ static auto parse_change_stream(std::span<const std::byte> data) -> std::optiona
         .next_counter = next_counter,
         .local_seq = local_seq,
         .changes = std::move(changes),
+        .encoded_changes = std::move(encoded_changes),
         .heads = std::move(heads),
         .clock = std::move(clock),
     };
@@ -1023,7 +1068,8 @@ auto Document::load_incremental(std::span<const std::byte> data)
     }
 
     auto lock = std::unique_lock{mutex_};
-    const auto admissions = validate_changes(*state_, parsed->changes);
+    state_->materialize_changes();
+    auto admissions = validate_changes(*state_, parsed->changes, &parsed->encoded_changes);
     if (!admissions) {
         return std::unexpected{admissions.error()};
     }
@@ -1061,6 +1107,13 @@ auto Document::load(std::span<const std::byte> data) -> std::optional<Document> 
     }
 
     doc.state_->change_history = std::move(parsed->changes);
+    doc.state_->encoded_changes_ = std::move(parsed->encoded_changes);
+    doc.state_->deferred_change_parents_.resize(doc.state_->change_history.size());
+    std::ranges::for_each(std::views::iota(std::size_t{0}, doc.state_->encoded_changes_.size()),
+                          [&](std::size_t index) {
+                              doc.state_->cached_hash_index_.emplace(
+                                  doc.state_->encoded_changes_[index].hash, index);
+                          });
     doc.state_->heads = std::move(parsed->heads);
     std::ranges::sort(doc.state_->heads);
     doc.state_->clock = std::move(parsed->clock);
@@ -1160,7 +1213,8 @@ static auto get_hashes_to_send(const detail::DocState& state,
 }
 
 auto Document::generate_sync_message(SyncState& sync_state) const -> std::optional<SyncMessage> {
-    auto guard = read_guard();
+    auto lock = std::unique_lock{mutex_};
+    state_->materialize_changes();
 
     auto our_heads = state_->heads;
 
@@ -1196,6 +1250,7 @@ auto Document::generate_sync_message(SyncState& sync_state) const -> std::option
 
     // Determine changes to send
     auto changes_to_send = std::vector<Change>{};
+    auto encoded_changes_to_send = std::vector<storage::EncodedChange>{};
     if (sync_state.their_have_ && sync_state.their_need_) {
         auto hashes = get_hashes_to_send(*state_, *sync_state.their_have_, *sync_state.their_need_);
 
@@ -1208,6 +1263,13 @@ auto Document::generate_sync_message(SyncState& sync_state) const -> std::option
         }
 
         changes_to_send = state_->get_changes_by_hash(unsent);
+        encoded_changes_to_send.reserve(unsent.size());
+        std::ranges::transform(
+            unsent, std::back_inserter(encoded_changes_to_send), [&](const ChangeHash& hash) {
+                const auto change = state_->cached_hash_index_.find(hash);
+                assert(change != state_->cached_hash_index_.end());
+                return state_->encoded_changes_[change->second];
+            });
 
         // Track what we're sending
         for (const auto& h : unsent) {
@@ -1233,6 +1295,10 @@ auto Document::generate_sync_message(SyncState& sync_state) const -> std::option
     sync_state.have_responded_ = true;
     sync_state.last_sent_heads_ = our_heads;
     sync_state.in_flight_ = true;
+    auto encoding_cache = std::make_shared<detail::SyncMessageEncoding>(detail::SyncMessageEncoding{
+        .changes = changes_to_send,
+        .encoded_changes = std::move(encoded_changes_to_send),
+    });
 
     return SyncMessage{
         .heads = std::move(our_heads),
@@ -1240,31 +1306,46 @@ auto Document::generate_sync_message(SyncState& sync_state) const -> std::option
         .have = std::move(our_have),
         .changes = std::move(changes_to_send),
         .supported_capabilities = std::vector<std::uint8_t>{0x01},
+        .encoding_cache = std::move(encoding_cache),
     };
+}
+
+static auto validate_sync_message(const detail::DocState& state, const SyncMessage& message)
+    -> std::expected<std::vector<ChangeAdmission>, Error> {
+    if (!message.encoding_cache || message.encoding_cache->changes != message.changes ||
+        message.encoding_cache->encoded_changes.size() != message.changes.size()) {
+        return validate_changes(state, message.changes);
+    }
+    auto encodings = message.encoding_cache->encoded_changes;
+    return validate_changes(state, message.changes, &encodings);
 }
 
 auto Document::receive_sync_message(SyncState& sync_state, const SyncMessage& message)
     -> std::expected<void, Error> {
-    const auto result = apply_changes(message.changes);
-    if (!result) {
-        return std::unexpected{result.error()};
-    }
-
     auto lock = std::unique_lock{mutex_};
+    state_->materialize_changes();
+    auto admissions = validate_sync_message(*state_, message);
+    if (!admissions) {
+        return std::unexpected{admissions.error()};
+    }
+    admit_changes(*state_, *admissions);
     update_sync_state_after_receive(sync_state, message);
     return {};
 }
 
 auto Document::receive_sync_message_with_patches(SyncState& sync_state, const SyncMessage& message)
     -> std::expected<std::vector<Patch>, Error> {
-    auto result = apply_changes_with_patches(message.changes);
-    if (!result) {
-        return std::unexpected{result.error()};
-    }
-
     auto lock = std::unique_lock{mutex_};
+    state_->materialize_changes();
+    auto admissions = validate_sync_message(*state_, message);
+    if (!admissions) {
+        return std::unexpected{admissions.error()};
+    }
+    const auto before = state_->objects;
+    admit_changes(*state_, *admissions);
+    auto patches = visible_state_patches(before, state_->objects);
     update_sync_state_after_receive(sync_state, message);
-    return result;
+    return patches;
 }
 
 void Document::update_sync_state_after_receive(SyncState& sync_state, const SyncMessage& message) {
@@ -1475,7 +1556,8 @@ auto Document::transact_with_patches(const std::function<void(Transaction&)>& fn
 auto Document::get_at(const ObjId& obj,
                       std::string_view key,
                       const std::vector<ChangeHash>& heads) const -> std::optional<Value> {
-    auto guard = read_guard();
+    auto lock = std::unique_lock{mutex_};
+    state_->materialize_changes();
     auto snapshot = state_->rebuild_state_at(heads);
     return snapshot.map_get(obj, std::string{key});
 }
@@ -1483,21 +1565,24 @@ auto Document::get_at(const ObjId& obj,
 auto Document::get_at(const ObjId& obj,
                       std::size_t index,
                       const std::vector<ChangeHash>& heads) const -> std::optional<Value> {
-    auto guard = read_guard();
+    auto lock = std::unique_lock{mutex_};
+    state_->materialize_changes();
     auto snapshot = state_->rebuild_state_at(heads);
     return snapshot.list_get(obj, index);
 }
 
 auto Document::keys_at(const ObjId& obj, const std::vector<ChangeHash>& heads) const
     -> std::vector<std::string> {
-    auto guard = read_guard();
+    auto lock = std::unique_lock{mutex_};
+    state_->materialize_changes();
     auto snapshot = state_->rebuild_state_at(heads);
     return snapshot.map_keys(obj);
 }
 
 auto Document::values_at(const ObjId& obj, const std::vector<ChangeHash>& heads) const
     -> std::vector<Value> {
-    auto guard = read_guard();
+    auto lock = std::unique_lock{mutex_};
+    state_->materialize_changes();
     auto snapshot = state_->rebuild_state_at(heads);
     auto type = snapshot.object_type(obj);
     if (!type)
@@ -1515,14 +1600,16 @@ auto Document::values_at(const ObjId& obj, const std::vector<ChangeHash>& heads)
 
 auto Document::length_at(const ObjId& obj, const std::vector<ChangeHash>& heads) const
     -> std::size_t {
-    auto guard = read_guard();
+    auto lock = std::unique_lock{mutex_};
+    state_->materialize_changes();
     auto snapshot = state_->rebuild_state_at(heads);
     return snapshot.object_length(obj);
 }
 
 auto Document::text_at(const ObjId& obj, const std::vector<ChangeHash>& heads) const
     -> std::string {
-    auto guard = read_guard();
+    auto lock = std::unique_lock{mutex_};
+    state_->materialize_changes();
     auto snapshot = state_->rebuild_state_at(heads);
     return snapshot.text_content(obj);
 }
@@ -1573,7 +1660,8 @@ auto Document::marks(const ObjId& obj) const -> std::vector<Mark> {
 
 auto Document::marks_at(const ObjId& obj, const std::vector<ChangeHash>& heads) const
     -> std::vector<Mark> {
-    auto guard = read_guard();
+    auto lock = std::unique_lock{mutex_};
+    state_->materialize_changes();
     auto snapshot = state_->rebuild_state_at(heads);
     return collect_marks(snapshot, obj);
 }

@@ -125,6 +125,7 @@ struct TransactionRollback {
         commit_before_.emplace(CommitBefore{
             .local_seq = state.local_seq,
             .heads = std::move(state.heads),
+            .deferred_head_index = state.deferred_head_index_,
             .actor_clock = actor_clock,
             .change_history_size = state.change_history.size(),
         });
@@ -151,12 +152,14 @@ struct TransactionRollback {
         if (commit_before_) {
             state.local_seq = commit_before_->local_seq;
             state.heads = std::move(commit_before_->heads);
+            state.deferred_head_index_ = commit_before_->deferred_head_index;
             if (commit_before_->actor_clock) {
                 state.clock[state.actor] = *commit_before_->actor_clock;
             } else {
                 state.clock.erase(state.actor);
             }
             state.change_history.resize(commit_before_->change_history_size);
+            state.deferred_change_parents_.resize(commit_before_->change_history_size);
         }
 
         state.next_counter = start_op_;
@@ -295,6 +298,7 @@ private:
     struct CommitBefore {
         std::uint64_t local_seq;
         std::vector<ChangeHash> heads;
+        std::optional<std::size_t> deferred_head_index;
         std::optional<std::uint64_t> actor_clock;
         std::size_t change_history_size;
     };

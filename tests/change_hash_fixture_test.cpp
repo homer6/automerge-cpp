@@ -105,6 +105,7 @@ TEST(ChangeHashFixture, matches_automerge_rs_change_chunks) {
         ASSERT_TRUE(document.has_value()) << fixture_name;
         EXPECT_EQ(document->get_changes().size(), expected_hashes.size()) << fixture_name;
         EXPECT_EQ(document->get_heads(), expected_heads) << fixture_name;
+        EXPECT_EQ(document->save(), bytes) << fixture_name;
 
         auto compact_document = Document{};
         const auto compact_result = compact_document.load_incremental(
@@ -112,6 +113,7 @@ TEST(ChangeHashFixture, matches_automerge_rs_change_chunks) {
         ASSERT_TRUE(compact_result.has_value()) << fixture_name;
         EXPECT_EQ(*compact_result, expected_hashes.size()) << fixture_name;
         EXPECT_EQ(compact_document.get_heads(), expected_heads) << fixture_name;
+        EXPECT_EQ(compact_document.save(), bytes) << fixture_name;
     }
 
     auto actor_bytes = std::array<std::byte, automerge_cpp::ActorId::size>{};
@@ -130,6 +132,47 @@ TEST(ChangeHashFixture, matches_automerge_rs_change_chunks) {
     ASSERT_EQ(heads.size(), 1u);
     EXPECT_EQ(to_hex(heads.front()), expected_hashes.front());
     EXPECT_EQ(document.save_incremental(), read_bytes(fixture_path("commit_metadata.am")));
+}
+
+TEST(ChangeHashFixture, deferred_local_chain_materializes_stable_dependencies_and_bytes) {
+    auto document = Document{1u};
+    document.transact([](auto& transaction) {
+        const auto value = std::int64_t{1};
+        transaction.put(automerge_cpp::root, "value", value);
+    });
+    document.transact([](auto& transaction) {
+        const auto value = std::int64_t{2};
+        transaction.put(automerge_cpp::root, "value", value);
+    });
+    document.transact([](auto& transaction) {
+        const auto value = std::int64_t{3};
+        transaction.put(automerge_cpp::root, "value", value);
+    });
+
+    const auto first_save = document.save();
+    const auto changes = document.get_changes();
+    ASSERT_EQ(changes.size(), 3u);
+
+    auto hashes = std::vector<ChangeHash>{};
+    auto offset = std::size_t{0};
+    while (offset < first_save.size()) {
+        const auto remaining = std::span<const std::byte>{first_save}.subspan(offset);
+        const auto header = automerge_cpp::storage::parse_chunk_header(remaining);
+        ASSERT_TRUE(header.has_value());
+        const auto chunk_size = header->body_offset + header->body_length;
+        const auto parsed = automerge_cpp::storage::parse_change_chunk(remaining.first(chunk_size));
+        ASSERT_TRUE(parsed.has_value());
+        hashes.push_back(parsed->hash);
+        offset += chunk_size;
+    }
+
+    ASSERT_EQ(hashes.size(), changes.size());
+    EXPECT_TRUE(changes.front().deps.empty());
+    for (auto index = std::size_t{1}; index < changes.size(); ++index) {
+        EXPECT_EQ(changes[index].deps, std::vector<ChangeHash>{hashes[index - 1]});
+    }
+    EXPECT_EQ(document.get_heads(), std::vector<ChangeHash>{hashes.back()});
+    EXPECT_EQ(document.save(), first_save);
 }
 
 TEST(IncrementalSaveFixture, matches_automerge_rs_change_chunks) {

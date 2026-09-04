@@ -132,6 +132,22 @@ TEST(SyncMessageWireFormat, automerge_rs_messages_round_trip_byte_identically) {
     }
 }
 
+TEST(SyncMessageWireFormat, modifying_decoded_changes_invalidates_cached_chunks) {
+    const auto bytes = read_bytes(fixture_path("sync_exchange/02-first-to-second.sync"));
+    auto message = SyncMessage::decode(bytes);
+    ASSERT_TRUE(message.has_value());
+    ASSERT_FALSE(message->changes.empty());
+
+    message->changes.front().message = "modified after decode";
+    const auto modified_bytes = message->encode();
+    EXPECT_NE(modified_bytes, bytes);
+
+    const auto decoded = SyncMessage::decode(modified_bytes);
+    ASSERT_TRUE(decoded.has_value());
+    ASSERT_FALSE(decoded->changes.empty());
+    EXPECT_EQ(decoded->changes.front().message, "modified after decode");
+}
+
 TEST(SyncMessageWireFormat, message_with_changes_applies_after_decode) {
     const auto bytes = read_bytes(fixture_path("sync_exchange/02-first-to-second.sync"));
     const auto message = SyncMessage::decode(bytes);

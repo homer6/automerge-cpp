@@ -119,14 +119,15 @@ inline auto validate_chunk_checksum(const ChunkHeader& header, std::span<const s
 
 // Write a complete chunk to output: magic + checksum + type + LEB128(length) +
 // body.
-inline void
-write_chunk(ChunkType type, std::span<const std::byte> body, std::vector<std::byte>& output) {
+inline void write_chunk(ChunkType type,
+                        std::span<const std::byte> body,
+                        std::span<const std::byte, 32> hash,
+                        std::vector<std::byte>& output) {
     // Magic
     output.insert(output.end(), chunk_magic.begin(), chunk_magic.end());
 
     // Checksum (first four bytes of SHA-256 of type + length + body)
-    auto checksum = compute_chunk_checksum(type, body);
-    output.insert(output.end(), checksum.begin(), checksum.end());
+    output.insert(output.end(), hash.begin(), hash.begin() + 4);
 
     // Chunk type
     output.push_back(static_cast<std::byte>(type));
@@ -136,6 +137,12 @@ write_chunk(ChunkType type, std::span<const std::byte> body, std::vector<std::by
 
     // Body
     output.insert(output.end(), body.begin(), body.end());
+}
+
+inline void
+write_chunk(ChunkType type, std::span<const std::byte> body, std::vector<std::byte>& output) {
+    const auto hash = compute_change_hash_from_chunk(type, body);
+    write_chunk(type, body, hash, output);
 }
 
 } // namespace automerge_cpp::storage

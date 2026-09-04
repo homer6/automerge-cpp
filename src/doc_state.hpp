@@ -11,7 +11,6 @@
 
 #include <algorithm>
 #include <cassert>
-#include <cstring>
 #include <map>
 #include <optional>
 #include <ranges>
@@ -63,16 +62,19 @@ struct DocState {
     // Change tracking (Phase 3)
     std::vector<Change> change_history;
     std::unordered_map<ChangeHash, Change> pending_changes;
+    std::unordered_map<ChangeHash, storage::EncodedChange> pending_change_encodings;
     std::unordered_map<ChangeHash, std::unordered_set<ChangeHash>> pending_dependents;
     std::unordered_map<ActorId, std::unordered_map<std::uint64_t, ChangeHash>> pending_sequences;
     std::vector<ChangeHash> heads;
     std::map<ActorId, std::uint64_t> clock;  // actor -> max seq seen
     std::uint64_t local_seq = 0;
 
-    // Cached change hash index (11A.3) — incrementally maintained.
-    // Only recomputes hashes for newly appended changes (append-only data).
-    mutable std::vector<ChangeHash> cached_hashes_;                        // parallel to change_history
-    mutable std::unordered_map<ChangeHash, std::size_t> cached_hash_index_; // hash → index
+    // Encoded changes form a materialized prefix of change_history. Local commits after that
+    // prefix retain their parent by history index until a hash-bearing API needs the bytes.
+    std::vector<storage::EncodedChange> encoded_changes_;
+    std::vector<std::optional<std::size_t>> deferred_change_parents_;
+    std::optional<std::size_t> deferred_head_index_;
+    std::unordered_map<ChangeHash, std::size_t> cached_hash_index_; // hash → index
 
     // Cached actor table (11A.3b) — incrementally maintained.
     // Invalidated by tracking how many changes have been scanned.
@@ -87,6 +89,51 @@ struct DocState {
 
     auto next_op_id() -> OpId {
         return OpId{next_counter++, actor};
+    }
+
+    void append_local_change(Change change) {
+        const auto index = change_history.size();
+        change_history.push_back(std::move(change));
+        deferred_change_parents_.push_back(deferred_head_index_);
+        heads.clear();
+        deferred_head_index_ = index;
+    }
+
+    void append_materialized_change(Change change, storage::EncodedChange encoded) {
+        assert(encoded_changes_.size() == change_history.size());
+        const auto index = change_history.size();
+        cached_hash_index_.emplace(encoded.hash, index);
+        change_history.push_back(std::move(change));
+        encoded_changes_.push_back(std::move(encoded));
+        deferred_change_parents_.push_back(std::nullopt);
+    }
+
+    void materialize_changes() {
+        if (encoded_changes_.size() == change_history.size()) {
+            return;
+        }
+        encoded_changes_.reserve(change_history.size());
+        deferred_change_parents_.resize(change_history.size());
+        cached_hash_index_.reserve(change_history.size());
+        for (auto index = encoded_changes_.size(); index < change_history.size(); ++index) {
+            auto resolved = change_history[index];
+            const auto parent = deferred_change_parents_[index];
+            if (parent) {
+                assert(*parent < encoded_changes_.size());
+                resolved.deps.push_back(encoded_changes_[*parent].hash);
+            }
+            auto encoded = storage::encode_change(resolved);
+            const auto [entry, inserted] = cached_hash_index_.emplace(encoded.hash, index);
+            assert(inserted);
+            static_cast<void>(entry);
+            change_history[index] = std::move(resolved);
+            deferred_change_parents_[index] = std::nullopt;
+            encoded_changes_.push_back(std::move(encoded));
+        }
+        if (deferred_head_index_) {
+            heads = {encoded_changes_[*deferred_head_index_].hash};
+            deferred_head_index_.reset();
+        }
     }
 
     auto get_object(const ObjId& id) -> ObjectState* {
@@ -647,15 +694,8 @@ struct DocState {
 
     // -- Sync helpers (Phase 5) -------------------------------------------------
 
-    // Ensure the cached hash index is up to date. Only computes hashes for
-    // newly appended changes (changes are append-only).
     void ensure_hash_index() const {
-        if (cached_hashes_.size() == change_history.size()) return;
-        for (auto i = cached_hashes_.size(); i < change_history.size(); ++i) {
-            auto hash = compute_change_hash(change_history[i]);
-            cached_hash_index_[hash] = i;
-            cached_hashes_.push_back(hash);
-        }
+        assert(encoded_changes_.size() == change_history.size());
     }
 
     // Get the cached hash index (read-only reference).
@@ -673,7 +713,12 @@ struct DocState {
     // Get all change hashes in change_history order (cached, no recomputation).
     auto all_change_hashes() const -> std::vector<ChangeHash> {
         ensure_hash_index();
-        return cached_hashes_;
+        auto hashes = std::vector<ChangeHash>{};
+        hashes.reserve(encoded_changes_.size());
+        std::ranges::transform(encoded_changes_,
+                               std::back_inserter(hashes),
+                               [](const storage::EncodedChange& encoded) { return encoded.hash; });
+        return hashes;
     }
 
     // Get change hashes that are NOT ancestors of the given set of hashes.
@@ -709,7 +754,8 @@ struct DocState {
 
         // Return hashes not in ancestors, in change_history order
         auto result = std::vector<ChangeHash>{};
-        for (const auto& hash : cached_hashes_) {
+        for (const auto& encoded : encoded_changes_) {
+            const auto& hash = encoded.hash;
             if (!ancestors.contains(hash)) {
                 result.push_back(hash);
             }
@@ -834,12 +880,7 @@ struct DocState {
     // -- Change hash computation (SHA-256 based) ---------------------------
 
     static auto compute_change_hash(const Change& change) -> ChangeHash {
-        const auto body = storage::serialize_change_body(change);
-        const auto digest =
-            storage::compute_change_hash_from_chunk(storage::ChunkType::change, body);
-        ChangeHash result{};
-        std::memcpy(result.bytes.data(), digest.data(), result.bytes.size());
-        return result;
+        return storage::encode_change(change).hash;
     }
 };
 

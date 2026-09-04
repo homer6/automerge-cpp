@@ -273,23 +273,11 @@ void Transaction::commit(CommitOptions options) {
         .operations = std::move(pending_ops_),
     };
 
-    auto hash = detail::DocState::compute_change_hash(change);
-
-    // Update heads: remove deps, add new hash
-    auto new_heads = std::vector<ChangeHash>{};
-    for (const auto& h : rollback_state_->heads_before()) {
-        if (std::ranges::find(change.deps, h) == change.deps.end()) {
-            new_heads.push_back(h);
-        }
-    }
-    new_heads.push_back(hash);
-    state_.heads = std::move(new_heads);
-
     // Update clock
     state_.clock[state_.actor] = change.seq;
 
     // Store change
-    state_.change_history.push_back(std::move(change));
+    state_.append_local_change(std::move(change));
     rollback_state_->finish_commit();
 }
 
