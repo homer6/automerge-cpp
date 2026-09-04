@@ -30,7 +30,11 @@ auto doc = Document{pool};                                   // shared pool (std
 ```
 
 `Document` is copyable (deep copy — independent state) and movable.
-`fork()` shares the parent's thread pool.
+Each empty-document constructor shown above gives the document a non-zero, 16-byte actor ID from
+the operating system's cryptographically secure random number generator. The implementation uses
+`getentropy` on macOS and Linux and `BCryptGenRandom` on Windows. `fork()` copies the document
+state, shares the parent's thread pool, and obtains another random actor ID independent of the
+parent.
 
 ### Identity
 
@@ -38,6 +42,9 @@ auto doc = Document{pool};                                   // shared pool (std
 doc.actor_id()              -> const ActorId&
 doc.set_actor_id(ActorId)   -> void
 ```
+
+Call `set_actor_id` before the first mutation when an application, test, or fixture requires a
+deterministic actor ID. This explicitly replaces the randomly generated ID.
 
 ### Mutation
 

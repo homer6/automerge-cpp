@@ -8,6 +8,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(googletest)
 
 add_executable(automerge_cpp_tests
+    test_main.cpp
     error_test.cpp
     types_test.cpp
     value_test.cpp
@@ -28,7 +29,7 @@ add_executable(automerge_cpp_tests
 target_link_libraries(automerge_cpp_tests
     PRIVATE
         automerge-cpp::automerge-cpp
-        GTest::gtest_main
+        GTest::gtest
         ZLIB::ZLIB
 )
 

@@ -50,6 +50,10 @@ target_link_libraries(automerge-cpp
     PRIVATE ZLIB::ZLIB
 )
 
+if(WIN32)
+    target_link_libraries(automerge-cpp PRIVATE bcrypt)
+endif()
+
 # Subdirectories
 if(AUTOMERGE_CPP_BUILD_TESTS)
     enable_testing()

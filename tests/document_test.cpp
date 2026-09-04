@@ -6,8 +6,10 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <iostream>
 #include <map>
 #include <set>
@@ -18,11 +20,59 @@
 
 using namespace automerge_cpp;
 
+namespace test_support {
+
+auto actor_id_to_hex(const ActorId& actor) -> std::string;
+auto executable_path() -> const std::string&;
+
+} // namespace test_support
+
+namespace {
+
+auto open_process(const char* command) -> std::FILE* {
+#if defined(_WIN32)
+    return _popen(command, "r");
+#else
+    return popen(command, "r");
+#endif
+}
+
+auto close_process(std::FILE* process) -> int {
+#if defined(_WIN32)
+    return _pclose(process);
+#else
+    return pclose(process);
+#endif
+}
+
+} // namespace
+
 // -- Construction -------------------------------------------------------------
 
-TEST(Document, default_constructed_has_zero_actor_id) {
-    const auto doc = Document{};
-    EXPECT_TRUE(doc.actor_id().is_zero());
+TEST(Document, fresh_documents_have_distinct_nonzero_actor_ids) {
+    auto actor_ids = std::set<ActorId>{};
+    for (auto index = 0; index < 1000; ++index) {
+        const auto doc = Document{};
+        EXPECT_FALSE(doc.actor_id().is_zero());
+        EXPECT_TRUE(actor_ids.insert(doc.actor_id()).second);
+    }
+    EXPECT_EQ(actor_ids.size(), 1000u);
+}
+
+TEST(Document, fresh_documents_in_different_processes_have_different_actor_ids) {
+    const auto parent = Document{};
+    const auto command = '"' + test_support::executable_path() + "\" --print-actor-id";
+    auto* process = open_process(command.c_str());
+    ASSERT_NE(process, nullptr);
+
+    auto output = std::array<char, ActorId::size * 2>{};
+    const auto bytes_read = std::fread(output.data(), sizeof(char), output.size(), process);
+    const auto exit_status = close_process(process);
+    const auto child_actor = std::string{output.data(), bytes_read};
+
+    EXPECT_EQ(exit_status, 0);
+    EXPECT_EQ(bytes_read, output.size());
+    EXPECT_NE(child_actor, test_support::actor_id_to_hex(parent.actor_id()));
 }
 
 TEST(Document, set_and_get_actor_id) {

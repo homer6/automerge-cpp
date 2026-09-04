@@ -12,7 +12,7 @@ This is a **from-scratch** reimplementation, not a wrapper. It mirrors the upstr
 Automerge semantics while embracing idiomatic C++23: algebraic types, ranges pipelines,
 strong types, and an API inspired by [nlohmann/json](https://github.com/nlohmann/json).
 
-**597 tests passing** across 15 test files. Deep [nlohmann/json](https://github.com/nlohmann/json) interoperability included.
+**598 tests passing** across 15 test files. Deep [nlohmann/json](https://github.com/nlohmann/json) interoperability included.
 
 ## Quick Example
 
@@ -250,7 +250,7 @@ a full working example.
 
 ### Quality and Performance
 
-- **597 tests** across 15 test files
+- **598 tests** across 15 test files
 - **Fuzz testing**: libFuzzer targets for `Document::load()`, LEB128, and change chunk parsing
 - **Static analysis**: clang-tidy CI with `bugprone-*`, `performance-*`, `clang-analyzer-*`
 - **Sanitizer CI**: Address Sanitizer + Undefined Behavior Sanitizer
@@ -347,7 +347,7 @@ automerge-cpp/
     encoding/                 #   LEB128, RLE, delta, boolean codecs
     storage/                  #   columnar binary format
     sync/                     #   bloom filter for sync protocol
-  tests/                      # 597 tests (Google Test)
+  tests/                      # 598 tests (Google Test)
   examples/                   # 7 example programs
   benchmarks/                 # performance benchmarks (Google Benchmark)
   docs/                       # documentation

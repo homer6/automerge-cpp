@@ -13,8 +13,7 @@
 #include "sync/bloom_filter.hpp"
 
 #include <algorithm>
-#include <atomic>
-#include <cstring>
+#include <cstdlib>
 #include <expected>
 #include <limits>
 #include <new>
@@ -23,7 +22,42 @@
 #include <shared_mutex>
 #include <unordered_set>
 
+#if defined(_WIN32)
+#include <windows.h>
+
+#include <bcrypt.h>
+#elif defined(__APPLE__) || defined(__linux__)
+#include <sys/random.h>
+#else
+#include <unistd.h>
+#endif
+
 namespace automerge_cpp {
+
+static void fill_random_bytes(std::span<std::byte> bytes) {
+#if defined(_WIN32)
+    const auto status = BCryptGenRandom(nullptr,
+                                        reinterpret_cast<PUCHAR>(bytes.data()),
+                                        static_cast<ULONG>(bytes.size()),
+                                        BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+    if (status < 0) {
+        std::abort();
+    }
+#else
+    if (getentropy(bytes.data(), bytes.size()) != 0) {
+        std::abort();
+    }
+#endif
+}
+
+static auto make_random_actor_id() -> ActorId {
+    auto actor = ActorId{};
+    fill_random_bytes(actor.bytes);
+    if (actor.is_zero()) {
+        return make_random_actor_id();
+    }
+    return actor;
+}
 
 static auto make_default_pool() -> std::shared_ptr<thread_pool> {
     auto n = std::thread::hardware_concurrency();
@@ -38,17 +72,19 @@ static auto make_pool(unsigned int num_threads) -> std::shared_ptr<thread_pool> 
     return std::make_shared<thread_pool>(n);
 }
 
-Document::Document()
-    : state_{std::make_unique<detail::DocState>()},
-      pool_{nullptr} {}
+Document::Document() : state_{std::make_unique<detail::DocState>()}, pool_{nullptr} {
+    state_->actor = make_random_actor_id();
+}
 
 Document::Document(unsigned int num_threads)
-    : state_{std::make_unique<detail::DocState>()},
-      pool_{make_pool(num_threads)} {}
+    : state_{std::make_unique<detail::DocState>()}, pool_{make_pool(num_threads)} {
+    state_->actor = make_random_actor_id();
+}
 
 Document::Document(std::shared_ptr<thread_pool> pool)
-    : state_{std::make_unique<detail::DocState>()},
-      pool_{std::move(pool)} {}
+    : state_{std::make_unique<detail::DocState>()}, pool_{std::move(pool)} {
+    state_->actor = make_random_actor_id();
+}
 
 Document::~Document() = default;
 
@@ -183,14 +219,10 @@ auto Document::get_obj_id(const ObjId& obj, std::size_t index) const -> std::opt
 
 auto Document::fork() const -> Document {
     auto guard = read_guard();
-    static std::atomic<std::uint64_t> fork_counter{1};
     auto forked = Document{pool_};
+    const auto actor = forked.state_->actor;
     *forked.state_ = *state_;
-    // Create a unique actor by stamping a monotonic counter into the last 8 bytes
-    auto new_actor = state_->actor;
-    auto counter = fork_counter.fetch_add(1, std::memory_order_relaxed);
-    std::memcpy(&new_actor.bytes[8], &counter, sizeof(counter));
-    forked.state_->actor = new_actor;
+    forked.state_->actor = actor;
     return forked;
 }
 

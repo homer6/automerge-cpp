@@ -229,7 +229,7 @@ See [docs/plans/architecture.md](docs/plans/architecture.md) for the full design
 
 ## Testing
 
-597 tests across 15 test files. Uses Google Test (fetched via CMake FetchContent).
+598 tests across 15 test files. Uses Google Test (fetched via CMake FetchContent).
 
 | Test File | Count | Covers |
 |-----------|-------|--------|

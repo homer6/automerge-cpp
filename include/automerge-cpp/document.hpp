@@ -60,12 +60,14 @@ public:
     Document();
 
     /// Construct with an explicit thread count.
+    /// The document receives a random actor ID.
     /// @param num_threads Number of threads for internal parallelism.
     ///   0 = hardware_concurrency(), 1 = sequential (no pool).
     explicit Document(unsigned int num_threads);
 
     /// Construct with an externally-owned thread pool.
     /// The pool is shared (via shared_ptr) and can be reused across documents.
+    /// The document receives a random actor ID.
     /// @param pool The thread pool to use. nullptr = sequential (no pool).
     explicit Document(std::shared_ptr<thread_pool> pool);
 
@@ -221,7 +223,7 @@ public:
 
     // -- Fork and Merge -------------------------------------------------------
 
-    /// Create an independent copy with a new actor ID.
+    /// Create an independent copy with a new random actor ID.
     auto fork() const -> Document;
 
     /// Merge another document's unseen changes into this one.
