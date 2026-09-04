@@ -14,6 +14,7 @@ One file per subject. A page says what exists, why, how to verify it, and how to
 | [`transactions/rollback.md`](transactions/rollback.md) | Transaction rollback design and verification |
 | [`incremental-save.md`](incremental-save.md) | Incremental persistence and public change-set queries |
 | [`text/unicode-scalar-values.md`](text/unicode-scalar-values.md) | UTF-8 validation and Unicode scalar-value text indexing |
+| [`remote-patches.md`](remote-patches.md) | Patches from apply, merge, sync receive, and load |
 | [`plans/`](plans/) | Design plans that preceded implementation |
 | `Doxyfile` | Doxygen configuration for the generated reference |
 

@@ -51,7 +51,7 @@ automerge-cpp/
 │   │       └── change_op_columns.hpp       #       op column encoding/decoding (14 parallel columns)
 │   └── sync/                               #   Sync protocol internals
 │       └── bloom_filter.hpp                #     bloom filter (10 bits/entry, 7 probes)
-├── tests/                                  # TESTS (Google Test) — 607 tests
+├── tests/                                  # TESTS (Google Test) — 621 tests
 │   ├── CMakeLists.txt
 │   ├── error_test.cpp
 │   ├── types_test.cpp
@@ -230,25 +230,25 @@ See [docs/plans/architecture.md](docs/plans/architecture.md) for the full design
 
 ## Testing
 
-614 tests across 15 test files. Uses Google Test (fetched via CMake FetchContent).
+621 tests across 15 test files. Uses Google Test (fetched via CMake FetchContent).
 
 | Test File | Count | Covers |
 |-----------|-------|--------|
 | `error_test.cpp` | 4 | Error, ErrorKind |
 | `types_test.cpp` | 22 | ActorId, ChangeHash, OpId, ObjId, Prop |
-| `value_test.cpp` | 14 | ScalarValue, Value, ObjType, Null, Counter, Timestamp |
+| `value_test.cpp` | 19 | ScalarValue, Value, ObjType, Null, Counter, Timestamp |
 | `op_test.cpp` | 4 | Op, OpType |
 | `change_test.cpp` | 4 | Change |
 | `change_hash_fixture_test.cpp` | 3 | automerge-rs change hashes, document chunks, and incremental saves |
-| `document_test.cpp` | 308 | Document core, merge, serialization, incremental save/load, change queries, sync, patches, time travel, cursors, marks, thread safety, conflict resolution, list concurrency, counters, save/load edge cases, large data stress, text/marks, sync protocol, typed get<T>(), scalar overloads, batch ops, operator[], get_path, get_scalar, overload helper, List/Map initializers, bare initializer lists, STL containers, external change application, transaction rollback |
+| `document_test.cpp` | 315 | Document core, merge, serialization, incremental save/load, change queries, sync, patches, time travel, cursors, marks, thread safety, conflict resolution, list concurrency, counters, save/load edge cases, large data stress, text/marks, sync protocol, typed get<T>(), scalar overloads, batch ops, operator[], get_path, get_scalar, overload helper, List/Map initializers, bare initializer lists, STL containers, external change application, transaction rollback |
 | `leb128_test.cpp` | 22 | LEB128 encode/decode |
 | `rle_test.cpp` | 69 | RLE encoder/decoder round-trips |
-| `delta_encoder_test.cpp` | 11 | Delta encoder/decoder round-trips |
+| `delta_encoder_test.cpp` | 12 | Delta encoder/decoder round-trips |
 | `sha256_test.cpp` | 7 | SHA-256 NIST test vectors |
-| `column_spec_test.cpp` | 8 | Column spec encoding/decoding |
-| `chunk_test.cpp` | 17 | Chunk envelope, checksum validation |
+| `column_spec_test.cpp` | 11 | Column spec encoding/decoding |
+| `chunk_test.cpp` | 11 | Chunk envelope, checksum validation |
 | `json_test.cpp` | 98 | ADL serialization, document export/import, JSON Pointer, JSON Patch, JSON Merge Patch, flatten/unflatten, get_obj_id |
-| `change_op_columns_test.cpp` | 25 | Op column encode/decode, all op types including marks |
+| `change_op_columns_test.cpp` | 19 | Op column encode/decode, all op types including marks |
 
 - **Property tests**: verify CRDT algebraic properties (commutativity, associativity, idempotency)
 - **Naming**: `TEST(ModuleName, descriptive_behavior_name)`

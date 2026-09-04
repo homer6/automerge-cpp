@@ -24,6 +24,7 @@
 #include <ranges>
 #include <set>
 #include <shared_mutex>
+#include <unordered_map>
 #include <unordered_set>
 
 #if defined(_WIN32)
@@ -497,8 +498,308 @@ static void admit_changes(detail::DocState& state, const std::vector<ChangeAdmis
     apply_ready_changes(state);
 }
 
+using ObjectMap = std::unordered_map<ObjId, detail::ObjectState>;
+
+static auto winning_entry(const std::vector<detail::MapEntry>& entries) -> const detail::MapEntry* {
+    if (entries.empty()) {
+        return nullptr;
+    }
+    return &*std::ranges::max_element(
+        entries, [](const auto& left, const auto& right) { return left.op_id < right.op_id; });
+}
+
+static auto map_entries_equal(const std::vector<detail::MapEntry>& before,
+                              const std::vector<detail::MapEntry>& after) -> bool {
+    if (before.size() != after.size()) {
+        return false;
+    }
+    return std::ranges::all_of(before, [&](const detail::MapEntry& entry) {
+        return std::ranges::any_of(after, [&](const detail::MapEntry& candidate) {
+            return candidate.op_id == entry.op_id && candidate.value == entry.value;
+        });
+    });
+}
+
+static auto counter_value(const Value& value) -> std::optional<std::int64_t> {
+    const auto* scalar = std::get_if<ScalarValue>(&value);
+    if (scalar == nullptr) {
+        return std::nullopt;
+    }
+    const auto* counter = std::get_if<Counter>(scalar);
+    if (counter == nullptr) {
+        return std::nullopt;
+    }
+    return counter->value;
+}
+
+static auto counter_increment(const std::vector<detail::MapEntry>& before,
+                              const std::vector<detail::MapEntry>& after)
+    -> std::optional<std::int64_t> {
+    if (before.size() != after.size() || before.empty()) {
+        return std::nullopt;
+    }
+    auto delta = std::optional<std::int64_t>{};
+    const auto all_counters_changed_equally =
+        std::ranges::all_of(before, [&](const detail::MapEntry& entry) {
+            const auto candidate = std::ranges::find(after, entry.op_id, &detail::MapEntry::op_id);
+            if (candidate == after.end()) {
+                return false;
+            }
+            const auto before_value = counter_value(entry.value);
+            const auto after_value = counter_value(candidate->value);
+            if (!before_value || !after_value) {
+                return false;
+            }
+            const auto candidate_delta = *after_value - *before_value;
+            if (!delta) {
+                delta = candidate_delta;
+            }
+            return *delta == candidate_delta;
+        });
+    if (!all_counters_changed_equally || !delta || *delta == 0) {
+        return std::nullopt;
+    }
+    return delta;
+}
+
+static auto map_entries(const detail::ObjectState* object, const std::string& key)
+    -> const std::vector<detail::MapEntry>* {
+    if (object == nullptr) {
+        return nullptr;
+    }
+    const auto entry = object->map_entries.find(key);
+    if (entry == object->map_entries.end()) {
+        return nullptr;
+    }
+    return &entry->second;
+}
+
+static void append_map_patches(const ObjId& object_id,
+                               const detail::ObjectState* before,
+                               const detail::ObjectState* after,
+                               std::vector<Patch>& patches) {
+    auto keys = std::set<std::string>{};
+    if (before != nullptr) {
+        std::ranges::transform(before->map_entries,
+                               std::inserter(keys, keys.end()),
+                               [](const auto& entry) { return entry.first; });
+    }
+    if (after != nullptr) {
+        std::ranges::transform(after->map_entries,
+                               std::inserter(keys, keys.end()),
+                               [](const auto& entry) { return entry.first; });
+    }
+    std::ranges::for_each(keys, [&](const std::string& key) {
+        const auto* before_entries = map_entries(before, key);
+        const auto* after_entries = map_entries(after, key);
+        if (before_entries != nullptr && after_entries != nullptr &&
+            map_entries_equal(*before_entries, *after_entries)) {
+            return;
+        }
+        if (after_entries == nullptr) {
+            patches.push_back(Patch{
+                .obj = object_id,
+                .key = key,
+                .action = PatchDelete{.index = 0, .count = 1},
+            });
+            return;
+        }
+        if (before_entries != nullptr) {
+            const auto increment = counter_increment(*before_entries, *after_entries);
+            if (increment) {
+                patches.push_back(Patch{
+                    .obj = object_id,
+                    .key = key,
+                    .action = PatchIncrement{.delta = *increment},
+                });
+                return;
+            }
+        }
+        const auto* winner = winning_entry(*after_entries);
+        if (winner == nullptr) {
+            return;
+        }
+        patches.push_back(Patch{
+            .obj = object_id,
+            .key = key,
+            .action =
+                PatchPut{
+                    .value = winner->value,
+                    .conflict = after_entries->size() > 1,
+                },
+        });
+    });
+}
+
+static auto visible_elements(const detail::ObjectState* object)
+    -> std::vector<detail::ListElement> {
+    if (object == nullptr) {
+        return {};
+    }
+    auto elements = std::vector<detail::ListElement>{};
+    elements.reserve(object->list_elements.size());
+    std::ranges::copy_if(
+        object->list_elements, std::back_inserter(elements), &detail::ListElement::visible);
+    return elements;
+}
+
+static void append_list_patches(const ObjId& object_id,
+                                const detail::ObjectState* before,
+                                const detail::ObjectState* after,
+                                std::vector<Patch>& patches) {
+    auto current = visible_elements(before);
+    const auto target = visible_elements(after);
+    auto index = std::size_t{0};
+    std::ranges::for_each(target, [&](const detail::ListElement& element) {
+        if (index < current.size() && current[index].insert_id == element.insert_id) {
+            if (current[index].value != element.value) {
+                patches.push_back(Patch{
+                    .obj = object_id,
+                    .key = list_index(index),
+                    .action = PatchPut{.value = element.value, .conflict = false},
+                });
+                current[index].value = element.value;
+            }
+            ++index;
+            return;
+        }
+
+        const auto remaining = std::ranges::subrange{
+            current.begin() + static_cast<std::ptrdiff_t>(index),
+            current.end(),
+        };
+        const auto existing =
+            std::ranges::find(remaining, element.insert_id, &detail::ListElement::insert_id);
+        if (existing != current.end()) {
+            const auto count = static_cast<std::size_t>(std::distance(remaining.begin(), existing));
+            patches.push_back(Patch{
+                .obj = object_id,
+                .key = list_index(index),
+                .action = PatchDelete{.index = index, .count = count},
+            });
+            current.erase(remaining.begin(), existing);
+            if (current[index].value != element.value) {
+                patches.push_back(Patch{
+                    .obj = object_id,
+                    .key = list_index(index),
+                    .action = PatchPut{.value = element.value, .conflict = false},
+                });
+                current[index].value = element.value;
+            }
+            ++index;
+            return;
+        }
+
+        patches.push_back(Patch{
+            .obj = object_id,
+            .key = list_index(index),
+            .action = PatchInsert{.index = index, .value = element.value},
+        });
+        current.insert(current.begin() + static_cast<std::ptrdiff_t>(index), element);
+        ++index;
+    });
+    if (index < current.size()) {
+        patches.push_back(Patch{
+            .obj = object_id,
+            .key = list_index(index),
+            .action = PatchDelete{.index = index, .count = current.size() - index},
+        });
+    }
+}
+
+static auto text_content(const detail::ObjectState* object) -> std::string {
+    if (object == nullptr) {
+        return {};
+    }
+    auto text = std::string{};
+    std::ranges::for_each(object->list_elements, [&](const detail::ListElement& element) {
+        if (!element.visible) {
+            return;
+        }
+        const auto* scalar = std::get_if<ScalarValue>(&element.value);
+        if (scalar == nullptr) {
+            return;
+        }
+        const auto* value = std::get_if<std::string>(scalar);
+        if (value != nullptr) {
+            text += *value;
+        }
+    });
+    return text;
+}
+
+static void append_text_patches(const ObjId& object_id,
+                                const detail::ObjectState* before,
+                                const detail::ObjectState* after,
+                                std::vector<Patch>& patches) {
+    const auto before_text = text_content(before);
+    const auto after_text = text_content(after);
+    if (before_text == after_text) {
+        return;
+    }
+    const auto prefix_mismatch = std::ranges::mismatch(before_text, after_text);
+    const auto prefix =
+        static_cast<std::size_t>(std::distance(before_text.begin(), prefix_mismatch.in1));
+    const auto before_tail = std::string_view{before_text}.substr(prefix);
+    const auto after_tail = std::string_view{after_text}.substr(prefix);
+    const auto before_reverse = std::views::reverse(before_tail);
+    const auto after_reverse = std::views::reverse(after_tail);
+    const auto suffix_mismatch = std::ranges::mismatch(before_reverse, after_reverse);
+    const auto suffix =
+        static_cast<std::size_t>(std::distance(before_reverse.begin(), suffix_mismatch.in1));
+    const auto delete_count = before_text.size() - prefix - suffix;
+    const auto inserted = after_text.substr(prefix, after_text.size() - prefix - suffix);
+    patches.push_back(Patch{
+        .obj = object_id,
+        .key = list_index(prefix),
+        .action =
+            PatchSpliceText{
+                .index = prefix,
+                .delete_count = delete_count,
+                .text = inserted,
+            },
+    });
+}
+
+static auto visible_state_patches(const ObjectMap& before, const ObjectMap& after)
+    -> std::vector<Patch> {
+    auto object_ids = std::set<ObjId>{};
+    std::ranges::transform(before,
+                           std::inserter(object_ids, object_ids.end()),
+                           [](const auto& entry) { return entry.first; });
+    std::ranges::transform(after,
+                           std::inserter(object_ids, object_ids.end()),
+                           [](const auto& entry) { return entry.first; });
+    auto patches = std::vector<Patch>{};
+    std::ranges::for_each(object_ids, [&](const ObjId& object_id) {
+        const auto before_entry = before.find(object_id);
+        const auto after_entry = after.find(object_id);
+        const auto* before_object = before_entry == before.end() ? nullptr : &before_entry->second;
+        const auto* after_object = after_entry == after.end() ? nullptr : &after_entry->second;
+        const auto type = after_object != nullptr ? after_object->type : before_object->type;
+        switch (type) {
+        case ObjType::map:
+        case ObjType::table:
+            append_map_patches(object_id, before_object, after_object, patches);
+            break;
+        case ObjType::list:
+            append_list_patches(object_id, before_object, after_object, patches);
+            break;
+        case ObjType::text:
+            append_text_patches(object_id, before_object, after_object, patches);
+            break;
+        }
+    });
+    return patches;
+}
+
 auto Document::merge(const Document& other) -> std::expected<void, Error> {
     return apply_changes(other.get_changes());
+}
+
+auto Document::merge_with_patches(const Document& other)
+    -> std::expected<std::vector<Patch>, Error> {
+    return apply_changes_with_patches(other.get_changes());
 }
 
 auto Document::get_changes() const -> std::vector<Change> {
@@ -540,6 +841,18 @@ auto Document::apply_changes(const std::vector<Change>& changes) -> std::expecte
     }
     admit_changes(*state_, *admissions);
     return {};
+}
+
+auto Document::apply_changes_with_patches(const std::vector<Change>& changes)
+    -> std::expected<std::vector<Patch>, Error> {
+    auto lock = std::unique_lock{mutex_};
+    const auto admissions = validate_changes(*state_, changes);
+    if (!admissions) {
+        return std::unexpected{admissions.error()};
+    }
+    const auto before = state_->objects;
+    admit_changes(*state_, *admissions);
+    return visible_state_patches(before, state_->objects);
 }
 
 auto Document::get_heads() const -> std::vector<ChangeHash> {
@@ -751,6 +1064,19 @@ auto Document::load(std::span<const std::byte> data) -> std::optional<Document> 
     return doc;
 }
 
+auto Document::load_with_patches(std::span<const std::byte> data, Document& document)
+    -> std::expected<std::vector<Patch>, Error> {
+    auto loaded = load(data);
+    if (!loaded) {
+        return std::unexpected{
+            Error{ErrorKind::invalid_document, "document data is malformed or corrupt"}};
+    }
+    const auto empty = detail::DocState{};
+    auto patches = visible_state_patches(empty.objects, loaded->state_->objects);
+    document = std::move(*loaded);
+    return patches;
+}
+
 // -- Phase 5: Sync Protocol ---------------------------------------------------
 
 // SyncState encode/decode
@@ -947,12 +1273,29 @@ auto Document::generate_sync_message(SyncState& sync_state) const
 
 auto Document::receive_sync_message(SyncState& sync_state, const SyncMessage& message)
     -> std::expected<void, Error> {
-    auto result = apply_changes(message.changes);
+    const auto result = apply_changes(message.changes);
     if (!result) {
         return std::unexpected{result.error()};
     }
 
     auto lock = std::unique_lock{mutex_};
+    update_sync_state_after_receive(sync_state, message);
+    return {};
+}
+
+auto Document::receive_sync_message_with_patches(SyncState& sync_state, const SyncMessage& message)
+    -> std::expected<std::vector<Patch>, Error> {
+    auto result = apply_changes_with_patches(message.changes);
+    if (!result) {
+        return std::unexpected{result.error()};
+    }
+
+    auto lock = std::unique_lock{mutex_};
+    update_sync_state_after_receive(sync_state, message);
+    return result;
+}
+
+void Document::update_sync_state_after_receive(SyncState& sync_state, const SyncMessage& message) {
 
     // Clear in-flight flag (ack)
     sync_state.in_flight_ = false;
@@ -1020,7 +1363,6 @@ auto Document::receive_sync_message(SyncState& sync_state, const SyncMessage& me
     sync_state.their_have_ = message.have;
     sync_state.their_heads_ = message.heads;
     sync_state.their_need_ = message.need;
-    return {};
 }
 
 // -- Phase 6: Patches ---------------------------------------------------------

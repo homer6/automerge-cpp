@@ -374,6 +374,42 @@ BENCHMARK(bm_sync_full_round_trip);
 // Patches
 // =============================================================================
 
+static auto make_remote_changes() -> std::vector<Change> {
+    auto source = make_doc();
+    source.transact([](auto& tx) {
+        for (auto index = 0; index < 100; ++index) {
+            tx.put(root, "remote" + std::to_string(index), std::int64_t{index});
+        }
+    });
+    return source.get_changes();
+}
+
+static void bm_apply_changes_without_patches(benchmark::State& state) {
+    const auto changes = make_remote_changes();
+    for (auto _ : state) {
+        state.PauseTiming();
+        auto target = make_doc();
+        state.ResumeTiming();
+        auto result = target.apply_changes(changes);
+        benchmark::DoNotOptimize(result);
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(bm_apply_changes_without_patches);
+
+static void bm_apply_changes_with_patches(benchmark::State& state) {
+    const auto changes = make_remote_changes();
+    for (auto _ : state) {
+        state.PauseTiming();
+        auto target = make_doc();
+        state.ResumeTiming();
+        auto result = target.apply_changes_with_patches(changes);
+        benchmark::DoNotOptimize(result);
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(bm_apply_changes_with_patches);
+
 static void bm_transact_with_patches(benchmark::State& state) {
     auto doc = make_doc();
     std::int64_t val = 0;

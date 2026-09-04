@@ -2374,6 +2374,283 @@ TEST(Document, transact_with_patches_empty_transaction) {
     EXPECT_TRUE(patches.empty());
 }
 
+TEST(Document, merge_with_patches_matches_visible_map_diff_in_both_directions) {
+    auto left = make_doc(1);
+    left.transact([](auto& tx) { tx.put(root, "base", std::int64_t{0}); });
+    auto right = left.fork();
+    left.transact([](auto& tx) {
+        tx.put(root, "left", std::int64_t{1});
+        tx.put(root, "overlap", std::int64_t{10});
+    });
+    right.transact([](auto& tx) {
+        tx.put(root, "right", std::int64_t{2});
+        tx.put(root, "overlap", std::int64_t{20});
+    });
+    const auto winning_overlap =
+        left.actor_id() < right.actor_id() ? std::int64_t{20} : std::int64_t{10};
+
+    const auto left_patches = left.merge_with_patches(right);
+    ASSERT_TRUE(left_patches.has_value());
+    const auto expected_left = std::vector<Patch>{
+        Patch{
+            .obj = root,
+            .key = std::string{"overlap"},
+            .action =
+                PatchPut{
+                    .value = Value{ScalarValue{winning_overlap}},
+                    .conflict = true,
+                },
+        },
+        Patch{
+            .obj = root,
+            .key = std::string{"right"},
+            .action =
+                PatchPut{
+                    .value = Value{ScalarValue{std::int64_t{2}}},
+                    .conflict = false,
+                },
+        },
+    };
+    EXPECT_EQ(*left_patches, expected_left);
+
+    const auto right_patches = right.merge_with_patches(left);
+    ASSERT_TRUE(right_patches.has_value());
+    const auto expected_right = std::vector<Patch>{
+        Patch{
+            .obj = root,
+            .key = std::string{"left"},
+            .action =
+                PatchPut{
+                    .value = Value{ScalarValue{std::int64_t{1}}},
+                    .conflict = false,
+                },
+        },
+        Patch{
+            .obj = root,
+            .key = std::string{"overlap"},
+            .action =
+                PatchPut{
+                    .value = Value{ScalarValue{winning_overlap}},
+                    .conflict = true,
+                },
+        },
+    };
+    EXPECT_EQ(*right_patches, expected_right);
+    EXPECT_EQ(left.get(root, "overlap"), right.get(root, "overlap"));
+    EXPECT_EQ(left.get_all(root, "overlap").size(), 2u);
+    EXPECT_EQ(right.get_all(root, "overlap").size(), 2u);
+}
+
+TEST(Document, apply_changes_with_patches_reports_remote_list_insert_and_delete) {
+    auto source = make_doc(1);
+    const auto list_id = source.transact([](auto& tx) {
+        const auto list = tx.put_object(root, "items", ObjType::list);
+        tx.insert(list, 0, std::string{"a"});
+        tx.insert(list, 1, std::string{"b"});
+        tx.insert(list, 2, std::string{"c"});
+        return list;
+    });
+    auto target = make_doc(2);
+    ASSERT_TRUE(target.apply_changes(source.get_changes()).has_value());
+
+    source.transact([&](auto& tx) {
+        tx.insert(list_id, 1, std::string{"x"});
+        tx.delete_index(list_id, 3);
+    });
+    const auto changes = source.get_changes();
+    const auto patches = target.apply_changes_with_patches({changes.back()});
+
+    ASSERT_TRUE(patches.has_value());
+    const auto expected = std::vector<Patch>{
+        Patch{
+            .obj = list_id,
+            .key = list_index(1),
+            .action =
+                PatchInsert{
+                    .index = 1,
+                    .value = Value{ScalarValue{std::string{"x"}}},
+                },
+        },
+        Patch{
+            .obj = list_id,
+            .key = list_index(3),
+            .action = PatchDelete{.index = 3, .count = 1},
+        },
+    };
+    EXPECT_EQ(*patches, expected);
+    EXPECT_EQ(target.values(list_id), source.values(list_id));
+}
+
+TEST(Document, apply_changes_with_patches_reports_remote_text_splice) {
+    auto source = make_doc(1);
+    const auto text_id = source.transact([](auto& tx) {
+        const auto text = tx.put_object(root, "body", ObjType::text);
+        tx.splice_text(text, 0, 0, "Hello world");
+        return text;
+    });
+    auto target = make_doc(2);
+    ASSERT_TRUE(target.apply_changes(source.get_changes()).has_value());
+
+    source.transact([&](auto& tx) { tx.splice_text(text_id, 6, 5, "CRDT"); });
+    const auto changes = source.get_changes();
+    const auto patches = target.apply_changes_with_patches({changes.back()});
+
+    ASSERT_TRUE(patches.has_value());
+    const auto expected = std::vector<Patch>{
+        Patch{
+            .obj = text_id,
+            .key = list_index(6),
+            .action =
+                PatchSpliceText{
+                    .index = 6,
+                    .delete_count = 5,
+                    .text = "CRDT",
+                },
+        },
+    };
+    EXPECT_EQ(*patches, expected);
+    EXPECT_EQ(target.text(text_id), "Hello CRDT");
+}
+
+TEST(Document, apply_changes_with_patches_reports_queued_change_when_dependency_arrives) {
+    auto source = make_doc(1);
+    source.transact([](auto& tx) { tx.put(root, "dependency", std::int64_t{1}); });
+    source.transact([](auto& tx) { tx.put(root, "dependent", std::int64_t{2}); });
+    const auto changes = source.get_changes();
+    ASSERT_EQ(changes.size(), 2u);
+
+    auto target = make_doc(2);
+    const auto queued_patches = target.apply_changes_with_patches({changes[1]});
+    ASSERT_TRUE(queued_patches.has_value());
+    EXPECT_TRUE(queued_patches->empty());
+
+    const auto applied_patches = target.apply_changes_with_patches({changes[0]});
+    ASSERT_TRUE(applied_patches.has_value());
+    const auto expected = std::vector<Patch>{
+        Patch{
+            .obj = root,
+            .key = std::string{"dependency"},
+            .action =
+                PatchPut{
+                    .value = Value{ScalarValue{std::int64_t{1}}},
+                    .conflict = false,
+                },
+        },
+        Patch{
+            .obj = root,
+            .key = std::string{"dependent"},
+            .action =
+                PatchPut{
+                    .value = Value{ScalarValue{std::int64_t{2}}},
+                    .conflict = false,
+                },
+        },
+    };
+    EXPECT_EQ(*applied_patches, expected);
+    EXPECT_EQ(target.get<std::int64_t>(root, "dependent"), 2);
+}
+
+TEST(Document, receive_sync_message_with_patches_reports_remote_changes) {
+    auto source = make_doc(1);
+    source.transact([](auto& tx) { tx.put(root, "synced", std::int64_t{7}); });
+    auto target = make_doc(2);
+    auto source_sync = SyncState{};
+    auto target_sync = SyncState{};
+    const auto opening = source.generate_sync_message(source_sync);
+    ASSERT_TRUE(opening.has_value());
+    const auto opening_patches = target.receive_sync_message_with_patches(target_sync, *opening);
+    ASSERT_TRUE(opening_patches.has_value());
+    EXPECT_TRUE(opening_patches->empty());
+    const auto reply = target.generate_sync_message(target_sync);
+    ASSERT_TRUE(reply.has_value());
+    ASSERT_TRUE(source.receive_sync_message(source_sync, *reply).has_value());
+    const auto message = source.generate_sync_message(source_sync);
+    ASSERT_TRUE(message.has_value());
+
+    const auto patches = target.receive_sync_message_with_patches(target_sync, *message);
+
+    ASSERT_TRUE(patches.has_value());
+    const auto expected = std::vector<Patch>{
+        Patch{
+            .obj = root,
+            .key = std::string{"synced"},
+            .action =
+                PatchPut{
+                    .value = Value{ScalarValue{std::int64_t{7}}},
+                    .conflict = false,
+                },
+        },
+    };
+    EXPECT_EQ(*patches, expected);
+    EXPECT_EQ(target.get<std::int64_t>(root, "synced"), 7);
+}
+
+TEST(Document, load_with_patches_materializes_saved_document) {
+    auto source = make_doc(1);
+    auto list_id = ObjId{};
+    source.transact([&](auto& tx) {
+        tx.put(root, "title", std::string{"Saved"});
+        list_id = tx.put_object(root, "items", ObjType::list);
+        tx.insert(list_id, 0, std::string{"a"});
+        tx.insert(list_id, 1, std::string{"b"});
+    });
+    const auto bytes = source.save();
+    auto loaded = make_doc(9);
+
+    const auto patches = Document::load_with_patches(bytes, loaded);
+
+    ASSERT_TRUE(patches.has_value());
+    const auto expected = std::vector<Patch>{
+        Patch{
+            .obj = root,
+            .key = std::string{"items"},
+            .action = PatchPut{.value = Value{ObjType::list}, .conflict = false},
+        },
+        Patch{
+            .obj = root,
+            .key = std::string{"title"},
+            .action =
+                PatchPut{
+                    .value = Value{ScalarValue{std::string{"Saved"}}},
+                    .conflict = false,
+                },
+        },
+        Patch{
+            .obj = list_id,
+            .key = list_index(0),
+            .action =
+                PatchInsert{
+                    .index = 0,
+                    .value = Value{ScalarValue{std::string{"a"}}},
+                },
+        },
+        Patch{
+            .obj = list_id,
+            .key = list_index(1),
+            .action =
+                PatchInsert{
+                    .index = 1,
+                    .value = Value{ScalarValue{std::string{"b"}}},
+                },
+        },
+    };
+    EXPECT_EQ(*patches, expected);
+    EXPECT_EQ(loaded.get<std::string>(root, "title"), "Saved");
+    EXPECT_EQ(loaded.values(list_id), source.values(list_id));
+}
+
+TEST(Document, load_with_patches_rejects_invalid_data_without_replacing_output) {
+    auto document = make_doc(1);
+    document.transact([](auto& tx) { tx.put(root, "keep", std::int64_t{1}); });
+    const auto invalid = std::array<std::byte, 5>{};
+
+    const auto result = Document::load_with_patches(invalid, document);
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().kind, ErrorKind::invalid_document);
+    EXPECT_EQ(document.get<std::int64_t>(root, "keep"), 1);
+}
+
 // =============================================================================
 // Phase 6: Historical Reads (Time Travel)
 // =============================================================================

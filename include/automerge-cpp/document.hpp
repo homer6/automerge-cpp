@@ -233,6 +233,9 @@ public:
     /// @return An error if a received change contradicts this document's history.
     auto merge(const Document& other) -> std::expected<void, Error>;
 
+    /// Merge another document and return patches for the visible state transition.
+    auto merge_with_patches(const Document& other) -> std::expected<std::vector<Patch>, Error>;
+
     /// Get all changes in this document's history.
     auto get_changes() const -> std::vector<Change>;
 
@@ -253,6 +256,12 @@ public:
     /// @return An error if a change is malformed or contradicts this document's
     ///   actor sequence history.
     auto apply_changes(const std::vector<Change>& changes) -> std::expected<void, Error>;
+
+    /// Apply external changes and return patches for the visible state transition.
+    ///
+    /// Patches include queued changes that become ready because of this call.
+    auto apply_changes_with_patches(const std::vector<Change>& changes)
+        -> std::expected<std::vector<Patch>, Error>;
 
     /// Get the current DAG leaf hashes (heads).
     auto get_heads() const -> std::vector<ChangeHash>;
@@ -286,6 +295,15 @@ public:
     /// @return The loaded document, or nullopt if the data is invalid.
     static auto load(std::span<const std::byte> data) -> std::optional<Document>;
 
+    /// Load a document and return patches that materialize its visible state.
+    ///
+    /// The output document is replaced only after the input is validated.
+    /// @param data The binary data to load from.
+    /// @param document Receives the loaded document on success.
+    /// @return Patches from an empty document to the loaded state, or an error.
+    static auto load_with_patches(std::span<const std::byte> data, Document& document)
+        -> std::expected<std::vector<Patch>, Error>;
+
     // -- Sync Protocol --------------------------------------------------------
 
     /// Generate the next sync message to send to a peer.
@@ -300,6 +318,10 @@ public:
     ///   document's actor sequence history.
     auto receive_sync_message(SyncState& sync_state, const SyncMessage& message)
         -> std::expected<void, Error>;
+
+    /// Process a sync message and return patches for the visible state transition.
+    auto receive_sync_message_with_patches(SyncState& sync_state, const SyncMessage& message)
+        -> std::expected<std::vector<Patch>, Error>;
 
     // -- Patches --------------------------------------------------------------
 
@@ -410,6 +432,9 @@ private:
 
     /// Internal: convert pending ops to patches.
     static auto ops_to_patches_internal(const std::vector<Op>& ops) -> std::vector<Patch>;
+
+    /// Update peer bookkeeping after received changes have been admitted.
+    void update_sync_state_after_receive(SyncState& sync_state, const SyncMessage& message);
 
     /// Internal: walk a path of Props to resolve a nested value.
     auto get_path_impl(std::span<const Prop> path) const -> std::optional<Value>;

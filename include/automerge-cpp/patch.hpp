@@ -66,8 +66,8 @@ using PatchAction = std::variant<
 
 /// A single patch describing one atomic change to the document.
 ///
-/// Patches are produced by Document::transact_with_patches() and
-/// describe the externally visible effects of a transaction.
+/// Patches are produced by Document patch-returning methods and describe
+/// the externally visible effects of a local or remote state transition.
 struct Patch {
     ObjId obj;            ///< The object that was modified.
     Prop key;             ///< The property or index that was modified.

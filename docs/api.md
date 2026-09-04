@@ -186,11 +186,14 @@ doc.object_type(ObjId) -> std::optional<ObjType>     // map, list, text, table
 ```cpp
 doc.fork()                                  -> Document              // deep copy with unique actor
 doc.merge(const Document&)                  -> std::expected<void, Error>
+doc.merge_with_patches(const Document&)     -> std::expected<std::vector<Patch>, Error>
 doc.get_changes()                           -> std::vector<Change>   // full change history
 doc.get_changes_since(std::vector<ChangeHash>) -> std::vector<Change>
 doc.get_changes_added(const Document&)      -> std::vector<Change>   // changes in the argument
 doc.get_last_local_change()                 -> std::optional<Change>
 doc.apply_changes(std::vector<Change>)      -> std::expected<void, Error>
+doc.apply_changes_with_patches(std::vector<Change>)
+                                              -> std::expected<std::vector<Patch>, Error>
 doc.get_heads()                             -> std::vector<ChangeHash>  // current DAG leaves
 doc.get_missing_deps(std::vector<ChangeHash>) -> std::vector<ChangeHash>
 ```
@@ -202,6 +205,8 @@ doc.save()                                  -> std::vector<std::byte>
 doc.save_incremental()                      -> std::vector<std::byte>
 doc.load_incremental(std::span<const std::byte>) -> std::expected<std::size_t, Error>
 Document::load(std::span<const std::byte>)  -> std::optional<Document>
+Document::load_with_patches(std::span<const std::byte>, Document& output)
+                                              -> std::expected<std::vector<Patch>, Error>
 ```
 
 ### Sync Protocol
@@ -209,6 +214,8 @@ Document::load(std::span<const std::byte>)  -> std::optional<Document>
 ```cpp
 doc.generate_sync_message(SyncState&)       -> std::optional<SyncMessage>
 doc.receive_sync_message(SyncState&, const SyncMessage&) -> std::expected<void, Error>
+doc.receive_sync_message_with_patches(SyncState&, const SyncMessage&)
+                                              -> std::expected<std::vector<Patch>, Error>
 ```
 
 ### Historical Reads — Time Travel
@@ -1049,6 +1056,20 @@ for (const auto& patch : patches) {
     }, patch.action);
 }
 ```
+
+Remote changes use the same patch actions:
+
+```cpp
+auto patches = doc.apply_changes_with_patches(changes);
+auto merged = doc.merge_with_patches(other);
+auto received = doc.receive_sync_message_with_patches(sync_state, message);
+
+auto loaded = am::Document{};
+auto initial = am::Document::load_with_patches(bytes, loaded);
+```
+
+See the [remote patches guide](remote-patches.md) for queued dependency,
+conflict, and loading behavior.
 
 ### Time Travel
 
