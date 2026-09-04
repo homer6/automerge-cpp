@@ -5,6 +5,7 @@
 
 #include <automerge-cpp/change.hpp>
 #include <automerge-cpp/cursor.hpp>
+#include <automerge-cpp/error.hpp>
 #include <automerge-cpp/mark.hpp>
 #include <automerge-cpp/patch.hpp>
 #include <automerge-cpp/sync_state.hpp>
@@ -16,6 +17,7 @@
 
 #include <concepts>
 #include <cstddef>
+#include <expected>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -225,16 +227,28 @@ public:
     /// Merge another document's unseen changes into this one.
     ///
     /// Merge is commutative, associative, and idempotent.
-    void merge(const Document& other);
+    /// @return An error if a received change contradicts this document's history.
+    auto merge(const Document& other) -> std::expected<void, Error>;
 
     /// Get all changes in this document's history.
     auto get_changes() const -> std::vector<Change>;
 
     /// Apply a set of changes from another document.
-    void apply_changes(const std::vector<Change>& changes);
+    ///
+    /// Duplicate changes are ignored. Changes whose dependencies are not yet
+    /// present are retained until their dependencies arrive. All supplied
+    /// changes are validated before the document is modified.
+    /// @return An error if a change is malformed or contradicts this document's
+    ///   actor sequence history.
+    auto apply_changes(const std::vector<Change>& changes) -> std::expected<void, Error>;
 
     /// Get the current DAG leaf hashes (heads).
     auto get_heads() const -> std::vector<ChangeHash>;
+
+    /// Get hashes needed to resolve queued changes and the supplied heads.
+    ///
+    /// Hashes for changes already queued locally are omitted.
+    auto get_missing_deps(const std::vector<ChangeHash>& heads) const -> std::vector<ChangeHash>;
 
     // -- Binary Serialization -------------------------------------------------
 
@@ -260,7 +274,10 @@ public:
     /// Process a sync message received from a peer.
     /// @param sync_state The per-peer sync state (modified in place).
     /// @param message The received message to process.
-    void receive_sync_message(SyncState& sync_state, const SyncMessage& message);
+    /// @return An error if a received change is malformed or contradicts this
+    ///   document's actor sequence history.
+    auto receive_sync_message(SyncState& sync_state, const SyncMessage& message)
+        -> std::expected<void, Error>;
 
     // -- Patches --------------------------------------------------------------
 

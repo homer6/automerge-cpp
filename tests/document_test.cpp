@@ -7,6 +7,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <iostream>
 #include <map>
 #include <set>
 #include <string>
@@ -3867,12 +3869,193 @@ TEST(Document, apply_changes_twice_is_idempotent) {
     auto changes = doc1.get_changes();
 
     auto doc2 = Document{};
-    doc2.apply_changes(changes);
-    doc2.apply_changes(changes);  // Apply same changes again
+    ASSERT_TRUE(doc2.apply_changes(changes).has_value());
+    ASSERT_TRUE(doc2.apply_changes(changes).has_value());
 
-    // Should still have just 1 key with value 42
     EXPECT_EQ(doc2.length(root), 1u);
     EXPECT_EQ(get_int_val(doc2.get(root, "key")), 42);
+    EXPECT_EQ(doc2.get_changes().size(), changes.size());
+    EXPECT_EQ(doc2.get_heads(), doc1.get_heads());
+}
+
+TEST(Document, apply_changes_queues_a_change_until_its_dependency_arrives) {
+    auto source = make_doc(1);
+    source.transact([](auto& tx) { tx.put(root, "first", std::int64_t{1}); });
+    source.transact([](auto& tx) { tx.put(root, "second", std::int64_t{2}); });
+    const auto changes = source.get_changes();
+    ASSERT_EQ(changes.size(), 2u);
+
+    auto target = Document{};
+    ASSERT_TRUE(target.apply_changes({changes[1]}).has_value());
+    EXPECT_TRUE(target.get_changes().empty());
+    EXPECT_EQ(target.get_missing_deps({}), changes[1].deps);
+
+    ASSERT_TRUE(target.apply_changes({changes[0]}).has_value());
+    EXPECT_EQ(target.get_changes(), changes);
+    EXPECT_EQ(target.get_heads(), source.get_heads());
+}
+
+TEST(Document, apply_changes_resolves_three_queued_changes_in_dependency_order) {
+    auto source = make_doc(1);
+    source.transact([](auto& tx) { tx.put(root, "first", std::int64_t{1}); });
+    source.transact([](auto& tx) { tx.put(root, "second", std::int64_t{2}); });
+    source.transact([](auto& tx) { tx.put(root, "third", std::int64_t{3}); });
+    const auto changes = source.get_changes();
+    ASSERT_EQ(changes.size(), 3u);
+
+    auto target = Document{};
+    ASSERT_TRUE(target.apply_changes({changes[2]}).has_value());
+    EXPECT_EQ(target.get_missing_deps({}), changes[2].deps);
+    ASSERT_TRUE(target.apply_changes({changes[1]}).has_value());
+    EXPECT_EQ(target.get_missing_deps({}), changes[1].deps);
+    ASSERT_TRUE(target.apply_changes({changes[0]}).has_value());
+
+    EXPECT_EQ(target.get_changes(), changes);
+    EXPECT_EQ(target.get_heads(), source.get_heads());
+    EXPECT_EQ(get_int_val(target.get(root, "first")), 1);
+    EXPECT_EQ(get_int_val(target.get(root, "second")), 2);
+    EXPECT_EQ(get_int_val(target.get(root, "third")), 3);
+}
+
+TEST(Document, merge_uses_checked_change_application) {
+    auto source = make_doc(1);
+    source.transact([](auto& tx) { tx.put(root, "key", std::int64_t{42}); });
+    const auto changes = source.get_changes();
+
+    auto target = Document{};
+    ASSERT_TRUE(target.merge(source).has_value());
+    ASSERT_TRUE(target.merge(source).has_value());
+
+    EXPECT_EQ(target.get_changes(), changes);
+    EXPECT_EQ(target.get_heads(), source.get_heads());
+}
+
+TEST(Document, receive_sync_message_ignores_resent_changes) {
+    auto source = make_doc(1);
+    source.transact([](auto& tx) { tx.put(root, "key", std::int64_t{42}); });
+
+    auto target = Document{};
+    auto source_sync_state = SyncState{};
+    auto target_sync_state = SyncState{};
+    const auto greeting = source.generate_sync_message(source_sync_state);
+    ASSERT_TRUE(greeting.has_value());
+    ASSERT_TRUE(target.receive_sync_message(target_sync_state, *greeting).has_value());
+    const auto response = target.generate_sync_message(target_sync_state);
+    ASSERT_TRUE(response.has_value());
+    ASSERT_TRUE(source.receive_sync_message(source_sync_state, *response).has_value());
+    const auto message = source.generate_sync_message(source_sync_state);
+    ASSERT_TRUE(message.has_value());
+    ASSERT_FALSE(message->changes.empty());
+
+    ASSERT_TRUE(target.receive_sync_message(target_sync_state, *message).has_value());
+    ASSERT_TRUE(target.receive_sync_message(target_sync_state, *message).has_value());
+
+    EXPECT_EQ(target.get_changes(), source.get_changes());
+    EXPECT_EQ(target.get_heads(), source.get_heads());
+}
+
+TEST(Document, apply_changes_rejects_conflicting_actor_sequence_without_mutation) {
+    auto source = make_doc(1);
+    source.transact([](auto& tx) { tx.put(root, "first", std::int64_t{1}); });
+    source.transact([](auto& tx) { tx.put(root, "second", std::int64_t{2}); });
+    const auto changes = source.get_changes();
+    ASSERT_EQ(changes.size(), 2u);
+
+    auto target = Document{};
+    ASSERT_TRUE(target.apply_changes({changes[0]}).has_value());
+    const auto heads_before = target.get_heads();
+    const auto changes_before = target.get_changes();
+    auto conflicting = changes[1];
+    conflicting.seq = changes[0].seq;
+
+    const auto result = target.apply_changes({conflicting});
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().kind, ErrorKind::invalid_change);
+    EXPECT_EQ(result.error().message, "change actor sequence contradicts document history");
+    EXPECT_EQ(target.get_heads(), heads_before);
+    EXPECT_EQ(target.get_changes(), changes_before);
+    EXPECT_FALSE(target.get(root, "second").has_value());
+}
+
+TEST(Document, apply_changes_rejects_conflicting_supplied_sequences_without_mutation) {
+    auto source = make_doc(1);
+    source.transact([](auto& tx) { tx.put(root, "first", std::int64_t{1}); });
+    source.transact([](auto& tx) { tx.put(root, "second", std::int64_t{2}); });
+    const auto changes = source.get_changes();
+    ASSERT_EQ(changes.size(), 2u);
+    auto conflicting = changes[1];
+    conflicting.seq = changes[0].seq;
+
+    auto target = Document{};
+    const auto result = target.apply_changes({changes[0], conflicting});
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().kind, ErrorKind::invalid_change);
+    EXPECT_EQ(result.error().message, "change actor sequence contradicts another supplied change");
+    EXPECT_TRUE(target.get_heads().empty());
+    EXPECT_TRUE(target.get_changes().empty());
+    EXPECT_FALSE(target.get(root, "first").has_value());
+}
+
+TEST(Document, apply_changes_rejects_malformed_operations_without_mutation) {
+    auto source = make_doc(1);
+    source.transact([](auto& tx) { tx.put(root, "key", std::int64_t{42}); });
+    auto malformed = source.get_changes().front();
+    const auto different_actor = make_doc(2).actor_id();
+    malformed.operations.front().id.actor = different_actor;
+
+    auto target = Document{};
+    const auto result = target.apply_changes({malformed});
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().kind, ErrorKind::invalid_change);
+    EXPECT_EQ(result.error().message,
+              "change operations do not match its actor or operation range");
+    EXPECT_TRUE(target.get_heads().empty());
+    EXPECT_TRUE(target.get_changes().empty());
+    EXPECT_FALSE(target.get(root, "key").has_value());
+}
+
+TEST(Document, apply_changes_one_at_a_time_scales_with_batch_application) {
+    auto source = make_doc(1);
+    source.transact([](auto& tx) {
+        for (auto index = std::size_t{0}; index < 50'000; ++index) {
+            tx.put(root, "base-" + std::to_string(index), static_cast<std::int64_t>(index));
+        }
+    });
+    for (auto index = std::size_t{0}; index < 5'000; ++index) {
+        source.transact([&](auto& tx) {
+            tx.put(root, "change-" + std::to_string(index), static_cast<std::int64_t>(index));
+        });
+    }
+    const auto all_changes = source.get_changes();
+    const auto changes = std::vector<Change>{all_changes.begin() + 1, all_changes.end()};
+    ASSERT_EQ(changes.size(), 5'000u);
+
+    auto drip = Document{};
+    ASSERT_TRUE(drip.apply_changes({all_changes.front()}).has_value());
+    const auto drip_started = std::chrono::steady_clock::now();
+    for (const auto& change : changes) {
+        ASSERT_TRUE(drip.apply_changes({change}).has_value());
+    }
+    const auto drip_elapsed = std::chrono::steady_clock::now() - drip_started;
+
+    auto batch = Document{};
+    ASSERT_TRUE(batch.apply_changes({all_changes.front()}).has_value());
+    const auto batch_started = std::chrono::steady_clock::now();
+    ASSERT_TRUE(batch.apply_changes(changes).has_value());
+    const auto batch_elapsed = std::chrono::steady_clock::now() - batch_started;
+
+    const auto drip_microseconds =
+        std::chrono::duration_cast<std::chrono::microseconds>(drip_elapsed);
+    const auto batch_microseconds =
+        std::chrono::duration_cast<std::chrono::microseconds>(batch_elapsed);
+    std::cout << "apply_changes drip: " << drip_microseconds.count()
+              << " us; batch: " << batch_microseconds.count() << " us\n";
+    EXPECT_LE(drip_microseconds, batch_microseconds * 4);
+    EXPECT_EQ(drip.get_heads(), batch.get_heads());
+    EXPECT_EQ(drip.get_changes(), batch.get_changes());
 }
 
 TEST(Document, three_way_merge_with_all_operations) {

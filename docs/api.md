@@ -174,10 +174,11 @@ doc.object_type(ObjId) -> std::optional<ObjType>     // map, list, text, table
 
 ```cpp
 doc.fork()                                  -> Document              // deep copy with unique actor
-doc.merge(const Document&)                  -> void                  // apply unseen changes
+doc.merge(const Document&)                  -> std::expected<void, Error>
 doc.get_changes()                           -> std::vector<Change>   // full change history
-doc.apply_changes(std::vector<Change>)      -> void                  // apply remote changes
+doc.apply_changes(std::vector<Change>)      -> std::expected<void, Error>
 doc.get_heads()                             -> std::vector<ChangeHash>  // current DAG leaves
+doc.get_missing_deps(std::vector<ChangeHash>) -> std::vector<ChangeHash>
 ```
 
 ### Binary Serialization
@@ -191,7 +192,7 @@ Document::load(std::span<const std::byte>)  -> std::optional<Document>
 
 ```cpp
 doc.generate_sync_message(SyncState&)       -> std::optional<SyncMessage>
-doc.receive_sync_message(SyncState&, const SyncMessage&) -> void
+doc.receive_sync_message(SyncState&, const SyncMessage&) -> std::expected<void, Error>
 ```
 
 ### Historical Reads — Time Travel

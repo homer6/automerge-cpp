@@ -62,6 +62,9 @@ struct DocState {
 
     // Change tracking (Phase 3)
     std::vector<Change> change_history;
+    std::unordered_map<ChangeHash, Change> pending_changes;
+    std::unordered_map<ChangeHash, std::unordered_set<ChangeHash>> pending_dependents;
+    std::unordered_map<ActorId, std::unordered_map<std::uint64_t, ChangeHash>> pending_sequences;
     std::vector<ChangeHash> heads;
     std::map<ActorId, std::uint64_t> clock;  // actor -> max seq seen
     std::uint64_t local_seq = 0;
@@ -719,12 +722,16 @@ struct DocState {
         -> std::vector<ChangeHash> {
         ensure_hash_index();
         auto result = std::vector<ChangeHash>{};
-        for (const auto& h : their_heads) {
-            if (!cached_hash_index_.contains(h) &&
-                std::ranges::find(result, h) == result.end()) {
-                result.push_back(h);
+        auto add_if_missing = [&](const ChangeHash& hash) {
+            if (!cached_hash_index_.contains(hash) && !pending_changes.contains(hash) &&
+                std::ranges::find(result, hash) == result.end()) {
+                result.push_back(hash);
             }
-        }
+        };
+        std::ranges::for_each(their_heads, add_if_missing);
+        std::ranges::for_each(pending_changes, [&](const auto& entry) {
+            std::ranges::for_each(entry.second.deps, add_if_missing);
+        });
         return result;
     }
 
