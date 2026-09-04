@@ -229,7 +229,7 @@ See [docs/plans/architecture.md](docs/plans/architecture.md) for the full design
 
 ## Testing
 
-592 tests across 15 test files. Uses Google Test (fetched via CMake FetchContent).
+597 tests across 15 test files. Uses Google Test (fetched via CMake FetchContent).
 
 | Test File | Count | Covers |
 |-----------|-------|--------|
@@ -239,7 +239,7 @@ See [docs/plans/architecture.md](docs/plans/architecture.md) for the full design
 | `op_test.cpp` | 4 | Op, OpType |
 | `change_test.cpp` | 4 | Change |
 | `change_hash_fixture_test.cpp` | 1 | automerge-rs change chunk hash compatibility |
-| `document_test.cpp` | 266 | Document core, merge, serialization, sync, patches, time travel, cursors, marks, thread safety, conflict resolution, list concurrency, counters, save/load edge cases, large data stress, text/marks, sync protocol, typed get<T>(), scalar overloads, batch ops, operator[], get_path, get_scalar, overload helper, List/Map initializers, bare initializer lists, STL containers |
+| `document_test.cpp` | 294 | Document core, merge, serialization, sync, patches, time travel, cursors, marks, thread safety, conflict resolution, list concurrency, counters, save/load edge cases, large data stress, text/marks, sync protocol, typed get<T>(), scalar overloads, batch ops, operator[], get_path, get_scalar, overload helper, List/Map initializers, bare initializer lists, STL containers, external change application, transaction rollback |
 | `leb128_test.cpp` | 22 | LEB128 encode/decode |
 | `rle_test.cpp` | 69 | RLE encoder/decoder round-trips |
 | `delta_encoder_test.cpp` | 11 | Delta encoder/decoder round-trips |

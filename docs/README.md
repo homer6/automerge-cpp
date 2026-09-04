@@ -11,6 +11,7 @@ One file per subject. A page says what exists, why, how to verify it, and how to
 | [`benchmark-results-linux.md`](benchmark-results-linux.md) | Benchmark results (Linux) |
 | [`change-application.md`](change-application.md) | Checked external change application and pending dependencies |
 | [`change-hashes.md`](change-hashes.md) | Upstream-compatible change hash definition and fixtures |
+| [`transactions/rollback.md`](transactions/rollback.md) | Transaction rollback design and verification |
 | [`plans/`](plans/) | Design plans that preceded implementation |
 | `Doxyfile` | Doxygen configuration for the generated reference |
 

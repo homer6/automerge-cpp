@@ -12,7 +12,7 @@ This is a **from-scratch** reimplementation, not a wrapper. It mirrors the upstr
 Automerge semantics while embracing idiomatic C++23: algebraic types, ranges pipelines,
 strong types, and an API inspired by [nlohmann/json](https://github.com/nlohmann/json).
 
-**592 tests passing** across 15 test files. Deep [nlohmann/json](https://github.com/nlohmann/json) interoperability included.
+**597 tests passing** across 15 test files. Deep [nlohmann/json](https://github.com/nlohmann/json) interoperability included.
 
 ## Quick Example
 
@@ -250,7 +250,7 @@ a full working example.
 
 ### Quality and Performance
 
-- **592 tests** across 15 test files
+- **597 tests** across 15 test files
 - **Fuzz testing**: libFuzzer targets for `Document::load()`, LEB128, and change chunk parsing
 - **Static analysis**: clang-tidy CI with `bugprone-*`, `performance-*`, `clang-analyzer-*`
 - **Sanitizer CI**: Address Sanitizer + Undefined Behavior Sanitizer
@@ -347,7 +347,7 @@ automerge-cpp/
     encoding/                 #   LEB128, RLE, delta, boolean codecs
     storage/                  #   columnar binary format
     sync/                     #   bloom filter for sync protocol
-  tests/                      # 592 tests (Google Test)
+  tests/                      # 597 tests (Google Test)
   examples/                   # 7 example programs
   benchmarks/                 # performance benchmarks (Google Benchmark)
   docs/                       # documentation
@@ -388,6 +388,7 @@ Seven example programs in `examples/`:
 - [JSON Integration Guide](docs/json-integration.md) — import/export, Pointer, Patch, Merge Patch, flatten, ADL serialization
 - [API Reference](docs/api.md) — every public type, method, and usage examples
 - [Benchmark Results](docs/benchmark-results.md) — performance measurements
+- [Transaction Rollback](docs/transactions/rollback.md) — transaction atomicity and rollback design
 - [Style Guide](docs/style.md) — coding style (Ben Deane's modern C++ principles)
 - [Architecture](docs/plans/architecture.md) — design, types, modules
 - [Roadmap](docs/plans/roadmap.md) — phased development plan with status

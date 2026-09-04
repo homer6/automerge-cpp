@@ -405,9 +405,14 @@ template <typename Fn>
 auto Document::transact(Fn&& fn) -> std::invoke_result_t<Fn, Transaction&> {
     auto lock = std::unique_lock{mutex_};
     auto tx = Transaction{*state_};
-    auto result = fn(tx);
-    tx.commit();
-    return result;
+    try {
+        auto result = fn(tx);
+        tx.commit();
+        return result;
+    } catch (...) {
+        tx.rollback();
+        throw;
+    }
 }
 
 template <typename Fn>
@@ -417,8 +422,13 @@ template <typename Fn>
 void Document::transact(Fn&& fn) {
     auto lock = std::unique_lock{mutex_};
     auto tx = Transaction{*state_};
-    fn(tx);
-    tx.commit();
+    try {
+        fn(tx);
+        tx.commit();
+    } catch (...) {
+        tx.rollback();
+        throw;
+    }
 }
 
 template <typename Fn>
@@ -428,10 +438,15 @@ auto Document::transact_with_patches(Fn&& fn)
     -> std::pair<std::invoke_result_t<Fn, Transaction&>, std::vector<Patch>> {
     auto lock = std::unique_lock{mutex_};
     auto tx = Transaction{*state_};
-    auto result = fn(tx);
-    auto ops = tx.pending_ops_;
-    tx.commit();
-    return {std::move(result), ops_to_patches_internal(ops)};
+    try {
+        auto result = fn(tx);
+        auto ops = tx.pending_ops_;
+        tx.commit();
+        return {std::move(result), ops_to_patches_internal(ops)};
+    } catch (...) {
+        tx.rollback();
+        throw;
+    }
 }
 
 template <typename... Props>

@@ -11,6 +11,7 @@
 #include <iostream>
 #include <map>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -511,6 +512,118 @@ auto get_int_val(const std::optional<Value>& val) -> std::int64_t {
 // Helper: extract string from a Value (unwraps optional, asserts presence)
 auto get_str(const std::optional<Value>& val) -> std::string {
     return std::get<std::string>(std::get<ScalarValue>(*val));
+}
+
+TEST(Transaction, throwing_lambda_restores_document_and_history) {
+    auto doc = make_doc(7);
+    auto list_id = ObjId{};
+    auto text_id = ObjId{};
+    doc.transact([&](Transaction& tx) {
+        tx.put(root, "title", "original");
+        tx.put(root, "kept", std::int64_t{8});
+        tx.put(root, "count", Counter{3});
+        list_id = tx.put_object(root, "items", ObjType::list);
+        tx.insert(list_id, 0, std::int64_t{10});
+        tx.insert(list_id, 1, std::int64_t{20});
+        text_id = tx.put_object(root, "text", ObjType::text);
+        tx.splice_text(text_id, 0, 0, "abc");
+    });
+
+    const auto bytes_before = doc.save();
+    const auto heads_before = doc.get_heads();
+    const auto changes_before = doc.get_changes();
+
+    EXPECT_THROW(doc.transact([&](Transaction& tx) {
+        tx.put(root, "title", "changed");
+        tx.delete_key(root, "kept");
+        tx.increment(root, "count", 4);
+        tx.insert(list_id, 1, std::int64_t{15});
+        tx.set(list_id, 0, std::int64_t{11});
+        tx.delete_index(list_id, 2);
+        tx.splice_text(text_id, 1, 1, "Z");
+        tx.mark(text_id, 0, 2, "bold", true);
+        const auto scratch = tx.put_object(root, "scratch", ObjType::map);
+        tx.put(scratch, "temporary", true);
+        throw std::runtime_error{"stop"};
+    }),
+                 std::runtime_error);
+
+    EXPECT_EQ(doc.save(), bytes_before);
+    EXPECT_EQ(doc.get_heads(), heads_before);
+    EXPECT_EQ(doc.get_changes(), changes_before);
+
+    auto expected = doc;
+    expected.transact([](Transaction& tx) { tx.put(root, "after", std::int64_t{99}); });
+    doc.transact([](Transaction& tx) { tx.put(root, "after", std::int64_t{99}); });
+    EXPECT_EQ(doc.save(), expected.save());
+}
+
+TEST(Transaction, explicit_rollback_is_idempotent_and_prevents_commit) {
+    auto doc = make_doc(8);
+    doc.transact([](Transaction& tx) { tx.put(root, "value", std::int64_t{1}); });
+    const auto bytes_before = doc.save();
+
+    doc.transact([](Transaction& tx) {
+        tx.put(root, "value", std::int64_t{2});
+        tx.put(root, "temporary", true);
+        tx.rollback();
+        tx.rollback();
+
+        EXPECT_EQ(tx.get(root, "value"), Value{ScalarValue{std::int64_t{1}}});
+        EXPECT_FALSE(tx.get(root, "temporary").has_value());
+    });
+
+    EXPECT_EQ(doc.save(), bytes_before);
+}
+
+TEST(Transaction, throwing_return_value_lambda_rolls_back) {
+    auto doc = make_doc(9);
+    const auto bytes_before = doc.save();
+
+    EXPECT_THROW(doc.transact([](Transaction& tx) -> int {
+        tx.put(root, "temporary", true);
+        throw std::runtime_error{"stop"};
+    }),
+                 std::runtime_error);
+
+    EXPECT_EQ(doc.save(), bytes_before);
+}
+
+TEST(Transaction, reads_see_pending_nested_writes) {
+    auto doc = make_doc(10);
+    doc.transact([](Transaction& tx) {
+        const auto config = tx.put_object(root, "config", ObjType::map);
+        tx.put(config, "enabled", true);
+        const auto items = tx.put_object(config, "items", ObjType::list);
+        tx.insert(items, 0, "first");
+        tx.insert(items, 1, "second");
+
+        EXPECT_EQ(tx.get_obj_id(root, "config"), config);
+        EXPECT_EQ(tx.get(config, "enabled"), Value{ScalarValue{true}});
+        EXPECT_EQ(tx.get_obj_id(config, "items"), items);
+        EXPECT_EQ(tx.length(items), 2u);
+        EXPECT_EQ(tx.get(items, std::size_t{1}), Value{ScalarValue{std::string{"second"}}});
+    });
+}
+
+TEST(Transaction, committed_change_bytes_remain_stable) {
+    auto doc = make_doc(42);
+    doc.transact([](Transaction& tx) { tx.put(root, "stable", std::int64_t{42}); });
+
+    const auto bytes = doc.save();
+    auto actual = std::string{};
+    actual.reserve(bytes.size() * 2);
+    static constexpr auto hex = std::string_view{"0123456789abcdef"};
+    for (const auto byte : bytes) {
+        const auto value = std::to_integer<unsigned int>(byte);
+        actual.push_back(hex[value >> 4]);
+        actual.push_back(hex[value & 0x0f]);
+    }
+
+    EXPECT_EQ(actual,
+              "856f4a83516cfee5013400102a00000000000000000000000000000001"
+              "01000000061508340142025602570170027f06737461626c65017f017f142a"
+              "7f00");
 }
 
 TEST(Document, fork_creates_independent_copy) {

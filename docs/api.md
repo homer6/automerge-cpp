@@ -249,6 +249,23 @@ Created internally by `Document::transact()`. Provides all mutation operations.
 #include <automerge-cpp/transaction.hpp>
 ```
 
+### Atomicity and rollback
+
+`transact()` commits only when its callable returns successfully. If the callable throws,
+the document is restored and the exception is rethrown. `Transaction::rollback()` may be
+called explicitly to discard its writes; it is idempotent and prevents a later commit.
+Reads through the transaction observe its writes before commit.
+
+```cpp
+doc.transact([](Transaction& tx) {
+    tx.put(root, "draft", "discarded");
+    tx.rollback();
+});
+```
+
+For the implementation design and benchmark measurements, see
+[Transaction Rollback](transactions/rollback.md).
+
 ### Map Operations
 
 ```cpp

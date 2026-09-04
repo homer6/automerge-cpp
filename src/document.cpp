@@ -107,8 +107,13 @@ void Document::set_actor_id(ActorId id) {
 void Document::transact(const std::function<void(Transaction&)>& fn) {
     auto lock = std::unique_lock{mutex_};
     auto tx = Transaction{*state_};
-    fn(tx);
-    tx.commit();
+    try {
+        fn(tx);
+        tx.commit();
+    } catch (...) {
+        tx.rollback();
+        throw;
+    }
 }
 
 auto Document::get(const ObjId& obj, std::string_view key) const -> std::optional<Value> {
@@ -972,13 +977,18 @@ auto Document::transact_with_patches(const std::function<void(Transaction&)>& fn
     -> std::vector<Patch> {
     auto lock = std::unique_lock{mutex_};
     auto tx = Transaction{*state_};
-    fn(tx);
+    try {
+        fn(tx);
 
-    // Capture ops before commit moves them
-    auto ops = tx.pending_ops_;
-    tx.commit();
+        // Capture ops before commit moves them
+        auto ops = tx.pending_ops_;
+        tx.commit();
 
-    return ops_to_patches(ops);
+        return ops_to_patches(ops);
+    } catch (...) {
+        tx.rollback();
+        throw;
+    }
 }
 
 // -- Phase 6: Historical reads ------------------------------------------------

@@ -11,7 +11,10 @@
 #include <concepts>
 #include <cstddef>
 #include <initializer_list>
+#include <memory>
+#include <optional>
 #include <ranges>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -19,7 +22,10 @@
 
 namespace automerge_cpp {
 
-namespace detail { struct DocState; }
+namespace detail {
+struct DocState;
+struct TransactionRollback;
+} // namespace detail
 
 /// A mutation interface for modifying a Document.
 ///
@@ -39,6 +45,20 @@ class Transaction {
     explicit Transaction(detail::DocState& state);
 
 public:
+    ~Transaction();
+
+    Transaction(const Transaction&) = delete;
+    auto operator=(const Transaction&) -> Transaction& = delete;
+    Transaction(Transaction&&) = delete;
+    auto operator=(Transaction&&) -> Transaction& = delete;
+
+    /// Discard every operation made by this transaction.
+    ///
+    /// Restores document data, heads, sequence numbers, and operation counters
+    /// to their values when the transaction began. Calling rollback more than
+    /// once has no effect. A rolled-back transaction cannot be committed.
+    void rollback();
+
     /// Set a scalar value at a map key.
     /// @param obj The map object to modify.
     /// @param key The key to set.
@@ -456,7 +476,7 @@ private:
 
     detail::DocState& state_;
     std::vector<Op> pending_ops_;
-    std::uint64_t start_op_{0};
+    std::unique_ptr<detail::TransactionRollback> rollback_state_;
 };
 
 }  // namespace automerge_cpp
