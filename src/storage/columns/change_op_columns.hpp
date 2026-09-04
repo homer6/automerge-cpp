@@ -47,32 +47,42 @@
 
 namespace automerge_cpp::storage {
 
-// Map OpType + Value to upstream action code.
-// make_object(map/table) → 0, put → 1, make_object(list/text) → 2,
-// del → 3, increment → 4, mark → 5
+// Map OpType + Value to the upstream action code.
 inline auto op_to_action_code(const Op& op) -> std::uint64_t {
     switch (op.action) {
     case OpType::make_object: {
-        auto* ot = std::get_if<ObjType>(&op.value);
-        if (ot && (*ot == ObjType::list || *ot == ObjType::text)) {
-            return 2; // make list/text
+        const auto* object_type = std::get_if<ObjType>(&op.value);
+        if (!object_type) {
+            return 0;
         }
-        return 0; // make map/table
+        switch (*object_type) {
+        case ObjType::map:
+            return 0;
+        case ObjType::list:
+            return 2;
+        case ObjType::text:
+            return 4;
+        case ObjType::table:
+            return 6;
+        }
+        return 0;
     }
     case OpType::put:
         return 1;
     case OpType::del:
         return 3;
     case OpType::increment:
-        return 4;
-    case OpType::mark:
         return 5;
+    case OpType::mark:
+        return 7;
     case OpType::insert: {
-        // insert_object carries ObjType; encode like make_object
-        if (const auto* ot = std::get_if<ObjType>(&op.value)) {
-            return (*ot == ObjType::list || *ot == ObjType::text) ? 2 : 0;
+        if (std::holds_alternative<ObjType>(op.value)) {
+            return op_to_action_code(Op{
+                .action = OpType::make_object,
+                .value = op.value,
+            });
         }
-        return 1; // scalar insert uses put action code
+        return 1;
     }
     case OpType::splice_text:
         return 1;
@@ -171,6 +181,10 @@ inline auto encode_change_ops(const std::vector<Op>& ops, const std::vector<Acto
             std::holds_alternative<ObjType>(op.value);
         if (is_object_creation) {
             encode_value(Value{ScalarValue{Null{}}}, val_meta, val_raw);
+        } else if (op.action == OpType::increment) {
+            const auto* scalar = std::get_if<ScalarValue>(&op.value);
+            const auto* counter = scalar ? std::get_if<Counter>(scalar) : nullptr;
+            encode_value(Value{ScalarValue{counter ? counter->value : 0}}, val_meta, val_raw);
         } else {
             encode_value(op.value, val_meta, val_raw);
         }
@@ -392,18 +406,13 @@ inline auto decode_change_ops(const std::vector<RawColumn>& columns,
 
         // Map action code + insert flag to OpType + Value
         if (is_insert) {
-            if (action_code == 0 || action_code == 2) {
-                // insert_object: recover ObjType from encoded uint value
+            if (action_code == 0 || action_code == 2 || action_code == 4 || action_code == 6) {
                 op.action = OpType::insert;
-                if (const auto* sv = std::get_if<ScalarValue>(&*value)) {
-                    if (const auto* v = std::get_if<std::uint64_t>(sv)) {
-                        op.value = Value{static_cast<ObjType>(*v)};
-                    } else {
-                        op.value = Value{action_code == 0 ? ObjType::map : ObjType::list};
-                    }
-                } else {
-                    op.value = Value{action_code == 0 ? ObjType::map : ObjType::list};
-                }
+                const auto object_type = action_code == 0   ? ObjType::map
+                                         : action_code == 2 ? ObjType::list
+                                         : action_code == 4 ? ObjType::text
+                                                            : ObjType::table;
+                op.value = Value{object_type};
             } else {
                 // Scalar insert or splice_text
                 op.action = OpType::insert;
@@ -416,46 +425,41 @@ inline auto decode_change_ops(const std::vector<RawColumn>& columns,
             }
         } else {
             switch (action_code) {
-            case 0: { // make map/table
+            case 0:
                 op.action = OpType::make_object;
-                // Recover exact ObjType from encoded value
-                if (const auto* sv = std::get_if<ScalarValue>(&*value)) {
-                    if (const auto* v = std::get_if<std::uint64_t>(sv)) {
-                        op.value = Value{static_cast<ObjType>(*v)};
-                    } else {
-                        op.value = Value{ObjType::map};
-                    }
-                } else {
-                    op.value = Value{ObjType::map};
-                }
+                op.value = Value{ObjType::map};
                 break;
-            }
-            case 1: // put
+            case 1:
                 op.action = OpType::put;
                 op.value = *value;
                 break;
-            case 2: { // make list/text
+            case 2:
                 op.action = OpType::make_object;
-                if (const auto* sv = std::get_if<ScalarValue>(&*value)) {
-                    if (const auto* v = std::get_if<std::uint64_t>(sv)) {
-                        op.value = Value{static_cast<ObjType>(*v)};
-                    } else {
-                        op.value = Value{ObjType::list};
-                    }
-                } else {
-                    op.value = Value{ObjType::list};
-                }
+                op.value = Value{ObjType::list};
                 break;
-            }
-            case 3: // del
+            case 3:
                 op.action = OpType::del;
                 op.value = *value;
                 break;
-            case 4: // increment
-                op.action = OpType::increment;
-                op.value = *value;
+            case 4:
+                op.action = OpType::make_object;
+                op.value = Value{ObjType::text};
                 break;
-            case 5: // mark
+            case 5: {
+                op.action = OpType::increment;
+                const auto* scalar = std::get_if<ScalarValue>(&*value);
+                const auto* delta = scalar ? std::get_if<std::int64_t>(scalar) : nullptr;
+                if (!delta) {
+                    return std::nullopt;
+                }
+                op.value = Value{ScalarValue{Counter{*delta}}};
+                break;
+            }
+            case 6:
+                op.action = OpType::make_object;
+                op.value = Value{ObjType::table};
+                break;
+            case 7:
                 op.action = OpType::mark;
                 op.value = *value;
                 break;

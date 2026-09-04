@@ -22,6 +22,11 @@ fn write_fixture(name: &str, document: &mut AutoCommit) {
         format!("{hashes}\n"),
     )
     .unwrap();
+    fs::write(
+        fixture_directory.join(format!("{name}.document.am")),
+        document.save(),
+    )
+    .unwrap();
 }
 
 fn map_puts() -> AutoCommit {
@@ -64,9 +69,39 @@ fn two_actor_merge() -> AutoCommit {
     first
 }
 
+fn write_incremental_fixture() {
+    let fixture_directory = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let mut document = AutoCommit::new().with_actor(actor(0x66));
+
+    document.put(ROOT, "stage", "b".repeat(400)).unwrap();
+    document.commit();
+    fs::write(
+        fixture_directory.join("incremental_base.am"),
+        document.save(),
+    )
+    .unwrap();
+
+    document.put(ROOT, "first", 1).unwrap();
+    document.commit();
+    fs::write(
+        fixture_directory.join("incremental_first.am"),
+        document.save_incremental(),
+    )
+    .unwrap();
+
+    document.put(ROOT, "second", 2).unwrap();
+    document.commit();
+    fs::write(
+        fixture_directory.join("incremental_second.am"),
+        document.save_incremental(),
+    )
+    .unwrap();
+}
+
 fn main() {
     write_fixture("map_puts", &mut map_puts());
     write_fixture("list_inserts", &mut list_inserts());
     write_fixture("text_splice", &mut text_splice());
     write_fixture("two_actor_merge", &mut two_actor_merge());
+    write_incremental_fixture();
 }

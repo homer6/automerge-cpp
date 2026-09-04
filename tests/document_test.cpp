@@ -998,6 +998,123 @@ TEST(Document, get_changes_returns_history) {
     EXPECT_EQ(changes[0].actor, doc.actor_id());
 }
 
+TEST(Document, get_changes_since_returns_two_actor_descendants) {
+    auto document = make_doc(1);
+    document.transact([](auto& transaction) {
+        // Establish the common ancestor.
+        transaction.put(root, "base", std::int64_t{0});
+    });
+    const auto base_heads = document.get_heads();
+
+    auto other = document.fork();
+    other.transact([](auto& transaction) {
+        // Add a change under the second actor.
+        transaction.put(root, "other", std::int64_t{2});
+    });
+    document.transact([](auto& transaction) {
+        // Add a concurrent change under the first actor.
+        transaction.put(root, "local", std::int64_t{1});
+    });
+    ASSERT_TRUE(document.merge(other).has_value());
+
+    const auto changes = document.get_changes_since(base_heads);
+    ASSERT_EQ(changes.size(), 2u);
+    const auto actors = std::set<ActorId>{changes[0].actor, changes[1].actor};
+    EXPECT_EQ(actors, (std::set<ActorId>{document.actor_id(), other.actor_id()}));
+}
+
+TEST(Document, get_changes_added_returns_changes_missing_from_this_document) {
+    auto document = make_doc(1);
+    document.transact([](auto& transaction) {
+        // Establish the common ancestor.
+        transaction.put(root, "base", std::int64_t{0});
+    });
+
+    auto other = document.fork();
+    other.transact([](auto& transaction) {
+        // Add the change that should be reported.
+        transaction.put(root, "other", std::int64_t{2});
+    });
+    document.transact([](auto& transaction) {
+        // Add a change that only the receiver has.
+        transaction.put(root, "local", std::int64_t{1});
+    });
+
+    const auto added = document.get_changes_added(other);
+    ASSERT_EQ(added.size(), 1u);
+    EXPECT_EQ(added.front(), other.get_changes().back());
+}
+
+TEST(Document, get_last_local_change_ignores_newer_remote_changes) {
+    auto document = make_doc(1);
+    document.transact([](auto& transaction) {
+        // Create the latest local change.
+        transaction.put(root, "local", std::int64_t{1});
+    });
+    const auto expected = document.get_changes().back();
+
+    auto other = document.fork();
+    other.transact([](auto& transaction) {
+        // Create a later change under the remote actor.
+        transaction.put(root, "other", std::int64_t{2});
+    });
+    ASSERT_TRUE(document.merge(other).has_value());
+
+    const auto local = document.get_last_local_change();
+    ASSERT_TRUE(local.has_value());
+    EXPECT_EQ(*local, expected);
+}
+
+TEST(Document, save_incremental_advances_after_full_and_incremental_saves) {
+    auto document = make_doc(1);
+    EXPECT_FALSE(document.save().empty());
+    EXPECT_TRUE(document.save_incremental().empty());
+
+    document.transact([](auto& transaction) {
+        // Create the first increment.
+        transaction.put(root, "first", std::int64_t{1});
+    });
+    const auto first = document.save_incremental();
+    EXPECT_FALSE(first.empty());
+    EXPECT_TRUE(document.save_incremental().empty());
+
+    document.transact([](auto& transaction) {
+        // Create an increment that depends on the first.
+        transaction.put(root, "second", std::int64_t{2});
+    });
+    const auto second = document.save_incremental();
+    EXPECT_FALSE(second.empty());
+
+    auto loaded = Document{};
+    const auto queued = loaded.load_incremental(second);
+    ASSERT_TRUE(queued.has_value());
+    EXPECT_EQ(*queued, 0u);
+
+    const auto applied = loaded.load_incremental(first);
+    ASSERT_TRUE(applied.has_value());
+    EXPECT_EQ(*applied, 2u);
+    EXPECT_EQ(loaded.get<std::int64_t>(root, "first"), 1);
+    EXPECT_EQ(loaded.get<std::int64_t>(root, "second"), 2);
+}
+
+TEST(Document, load_incremental_rejects_corrupt_data_without_mutation) {
+    auto source = make_doc(1);
+    source.transact([](auto& transaction) {
+        // Produce a valid change chunk before corrupting it.
+        transaction.put(root, "value", std::int64_t{1});
+    });
+    auto bytes = source.save_incremental();
+    ASSERT_FALSE(bytes.empty());
+    bytes.front() ^= std::byte{0xff};
+
+    auto document = make_doc(2);
+    const auto before_heads = document.get_heads();
+    const auto result = document.load_incremental(bytes);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(document.get_heads(), before_heads);
+    EXPECT_TRUE(document.get_changes().empty());
+}
+
 TEST(Document, apply_changes_from_another_doc) {
     auto doc1 = make_doc(1);
     doc1.transact([](auto& tx) {

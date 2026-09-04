@@ -183,6 +183,9 @@ doc.object_type(ObjId) -> std::optional<ObjType>     // map, list, text, table
 doc.fork()                                  -> Document              // deep copy with unique actor
 doc.merge(const Document&)                  -> std::expected<void, Error>
 doc.get_changes()                           -> std::vector<Change>   // full change history
+doc.get_changes_since(std::vector<ChangeHash>) -> std::vector<Change>
+doc.get_changes_added(const Document&)      -> std::vector<Change>   // changes in the argument
+doc.get_last_local_change()                 -> std::optional<Change>
 doc.apply_changes(std::vector<Change>)      -> std::expected<void, Error>
 doc.get_heads()                             -> std::vector<ChangeHash>  // current DAG leaves
 doc.get_missing_deps(std::vector<ChangeHash>) -> std::vector<ChangeHash>
@@ -192,6 +195,8 @@ doc.get_missing_deps(std::vector<ChangeHash>) -> std::vector<ChangeHash>
 
 ```cpp
 doc.save()                                  -> std::vector<std::byte>
+doc.save_incremental()                      -> std::vector<std::byte>
+doc.load_incremental(std::span<const std::byte>) -> std::expected<std::size_t, Error>
 Document::load(std::span<const std::byte>)  -> std::optional<Document>
 ```
 
@@ -973,6 +978,23 @@ if (auto loaded = am::Document::load(bytes)) {
     auto val = loaded->get<std::string>(am::root, "key");
 }
 ```
+
+`save()` writes the complete nonempty history as upstream change chunks and advances the
+incremental cursor. `save_incremental()` writes changes since the latest save. Incremental loading
+accepts either those change chunks or an upstream compact document chunk:
+
+```cpp
+auto base = doc.save();
+doc.transact([](auto& tx) { tx.put(am::root, "next", 2); });
+auto update = doc.save_incremental();
+
+auto replica = am::Document{};
+replica.load_incremental(base);
+replica.load_incremental(update);
+```
+
+See [Incremental save, load, and change queries](incremental-save.md) for cursor, error, and format
+details.
 
 ### Sync Protocol
 

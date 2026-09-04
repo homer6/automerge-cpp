@@ -12,7 +12,7 @@ This is a **from-scratch** reimplementation, not a wrapper. It mirrors the upstr
 Automerge semantics while embracing idiomatic C++23: algebraic types, ranges pipelines,
 strong types, and an API inspired by [nlohmann/json](https://github.com/nlohmann/json).
 
-**598 tests passing** across 15 test files. Deep [nlohmann/json](https://github.com/nlohmann/json) interoperability included.
+**605 tests passing** across 15 test files. Deep [nlohmann/json](https://github.com/nlohmann/json) interoperability included.
 
 ## Quick Example
 
@@ -233,7 +233,8 @@ a full working example.
 
 ### Serialization and Sync
 
-- **Binary serialization**: `save()` / `load()` with upstream-compatible change chunks
+- **Binary serialization**: full and incremental save/load with upstream-compatible chunks
+- **Change queries**: changes since heads, changes added by another document, latest local change
 - **Columnar encoding**: RLE, delta, and boolean encoders matching upstream Rust format
 - **DEFLATE compression**: raw DEFLATE for columns exceeding 256 bytes
 - **SHA-256 checksums**: chunk envelope with integrity validation
@@ -250,7 +251,7 @@ a full working example.
 
 ### Quality and Performance
 
-- **598 tests** across 15 test files
+- **605 tests** across 15 test files
 - **Fuzz testing**: libFuzzer targets for `Document::load()`, LEB128, and change chunk parsing
 - **Static analysis**: clang-tidy CI with `bugprone-*`, `performance-*`, `clang-analyzer-*`
 - **Sanitizer CI**: Address Sanitizer + Undefined Behavior Sanitizer
@@ -347,7 +348,7 @@ automerge-cpp/
     encoding/                 #   LEB128, RLE, delta, boolean codecs
     storage/                  #   columnar binary format
     sync/                     #   bloom filter for sync protocol
-  tests/                      # 598 tests (Google Test)
+  tests/                      # 605 tests (Google Test)
   examples/                   # 7 example programs
   benchmarks/                 # performance benchmarks (Google Benchmark)
   docs/                       # documentation
@@ -393,6 +394,7 @@ Seven example programs in `examples/`:
 - [Architecture](docs/plans/architecture.md) — design, types, modules
 - [Roadmap](docs/plans/roadmap.md) — phased development plan with status
 - [Change Hashes](docs/change-hashes.md) — hash definition, compatibility, and fixtures
+- [Incremental Save and Load](docs/incremental-save.md) — incremental persistence and change queries
 
 ## Design Philosophy
 

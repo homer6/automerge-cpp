@@ -103,7 +103,57 @@ TEST(ChangeHashFixture, matches_automerge_rs_change_chunks) {
         ASSERT_TRUE(document.has_value()) << fixture_name;
         EXPECT_EQ(document->get_changes().size(), expected_hashes.size()) << fixture_name;
         EXPECT_EQ(document->get_heads(), expected_heads) << fixture_name;
+
+        auto compact_document = Document{};
+        const auto compact_result = compact_document.load_incremental(
+            read_bytes(fixture_path(std::string{fixture_name} + ".document.am")));
+        ASSERT_TRUE(compact_result.has_value()) << fixture_name;
+        EXPECT_EQ(*compact_result, expected_hashes.size()) << fixture_name;
+        EXPECT_EQ(compact_document.get_heads(), expected_heads) << fixture_name;
     }
+}
+
+TEST(IncrementalSaveFixture, matches_automerge_rs_change_chunks) {
+    auto actor_bytes = std::array<std::byte, automerge_cpp::ActorId::size>{};
+    actor_bytes.fill(std::byte{0x66});
+    auto document = Document{};
+    document.set_actor_id(automerge_cpp::ActorId{actor_bytes});
+    document.transact([](auto& transaction) {
+        transaction.put(automerge_cpp::root, "stage", std::string(400, 'b'));
+    });
+    static_cast<void>(document.save());
+
+    document.transact([](auto& transaction) {
+        // Create the first incremental change.
+        transaction.put(automerge_cpp::root, "first", std::int64_t{1});
+    });
+    EXPECT_EQ(document.save_incremental(), read_bytes(fixture_path("incremental_first.am")));
+
+    document.transact([](auto& transaction) {
+        // Create the second incremental change.
+        transaction.put(automerge_cpp::root, "second", std::int64_t{2});
+    });
+    EXPECT_EQ(document.save_incremental(), read_bytes(fixture_path("incremental_second.am")));
+    EXPECT_TRUE(document.save_incremental().empty());
+}
+
+TEST(IncrementalLoadFixture, applies_automerge_rs_document_and_change_chunks) {
+    auto document = Document{};
+    const auto base = document.load_incremental(read_bytes(fixture_path("incremental_base.am")));
+    ASSERT_TRUE(base.has_value()) << base.error().message;
+    EXPECT_EQ(*base, 1u);
+    EXPECT_EQ(document.get<std::string>(automerge_cpp::root, "stage"), std::string(400, 'b'));
+
+    const auto first = document.load_incremental(read_bytes(fixture_path("incremental_first.am")));
+    ASSERT_TRUE(first.has_value()) << first.error().message;
+    EXPECT_EQ(*first, 1u);
+    EXPECT_EQ(document.get<std::int64_t>(automerge_cpp::root, "first"), 1);
+
+    const auto second =
+        document.load_incremental(read_bytes(fixture_path("incremental_second.am")));
+    ASSERT_TRUE(second.has_value()) << second.error().message;
+    EXPECT_EQ(*second, 1u);
+    EXPECT_EQ(document.get<std::int64_t>(automerge_cpp::root, "second"), 2);
 }
 
 } // namespace

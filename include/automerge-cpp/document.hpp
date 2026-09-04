@@ -235,6 +235,15 @@ public:
     /// Get all changes in this document's history.
     auto get_changes() const -> std::vector<Change>;
 
+    /// Get changes not reachable from the supplied heads.
+    auto get_changes_since(const std::vector<ChangeHash>& heads) const -> std::vector<Change>;
+
+    /// Get changes present in another document but absent from this document.
+    auto get_changes_added(const Document& other) const -> std::vector<Change>;
+
+    /// Get the latest change authored by this document's current actor.
+    auto get_last_local_change() const -> std::optional<Change>;
+
     /// Apply a set of changes from another document.
     ///
     /// Duplicate changes are ignored. Changes whose dependencies are not yet
@@ -254,9 +263,19 @@ public:
 
     // -- Binary Serialization -------------------------------------------------
 
-    /// Serialize the document to binary format.
-    /// @return The serialized bytes (v2 chunk-based format).
+    /// Serialize the complete history as upstream-compatible change chunks.
+    /// Also advances the cursor used by save_incremental().
     auto save() const -> std::vector<std::byte>;
+
+    /// Serialize changes added since the latest save or incremental save.
+    /// @return Concatenated upstream-compatible change chunks, or an empty
+    ///   vector when there are no new changes.
+    auto save_incremental() const -> std::vector<std::byte>;
+
+    /// Apply change chunks or an upstream document chunk to this document.
+    /// @return The number of changes applied immediately. Changes waiting for
+    ///   unavailable dependencies are retained by the checked apply path.
+    auto load_incremental(std::span<const std::byte> data) -> std::expected<std::size_t, Error>;
 
     /// Load a document from binary data.
     ///
@@ -395,6 +414,7 @@ private:
 
     std::unique_ptr<detail::DocState> state_;
     std::shared_ptr<thread_pool> pool_;
+    mutable std::vector<ChangeHash> save_heads_;
     mutable std::shared_mutex mutex_;
     bool read_locking_ = true;
 };

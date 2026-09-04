@@ -12,6 +12,7 @@ One file per subject. A page says what exists, why, how to verify it, and how to
 | [`change-application.md`](change-application.md) | Checked external change application and pending dependencies |
 | [`change-hashes.md`](change-hashes.md) | Upstream-compatible change hash definition and fixtures |
 | [`transactions/rollback.md`](transactions/rollback.md) | Transaction rollback design and verification |
+| [`incremental-save.md`](incremental-save.md) | Incremental persistence and public change-set queries |
 | [`plans/`](plans/) | Design plans that preceded implementation |
 | `Doxyfile` | Doxygen configuration for the generated reference |
 

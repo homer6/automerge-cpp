@@ -35,9 +35,14 @@ graph. Recreate or export those documents before upgrading.
 
 `tests/fixtures/generator/` is a standalone Rust package pinned to automerge 0.7.4. It creates
 fixed-actor examples for map puts, list inserts, text splicing, and a two-actor merge. For each
-case it writes an incremental saved change stream (`.am`) and one lower-case hexadecimal change
-hash per line (`.hashes`). The incremental stream is chosen because it contains the complete
-upstream change chunks that define the hashes.
+case it writes an incremental saved change stream (`.am`), a compact full save (`.document.am`),
+and one lower-case hexadecimal change hash per line (`.hashes`). The incremental stream contains
+the complete upstream change chunks that define the hashes; the compact saves exercise document
+chunk reconstruction during incremental load.
+
+The generator also writes `incremental_base.am`, `incremental_first.am`, and
+`incremental_second.am`. These capture a compressed full save followed by two incremental saves
+from a fixed actor.
 
 Regenerate the committed fixtures with:
 

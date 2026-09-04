@@ -1,15 +1,17 @@
 #include <automerge-cpp/document.hpp>
+
 #include <automerge-cpp/cursor.hpp>
 #include <automerge-cpp/mark.hpp>
 #include <automerge-cpp/patch.hpp>
+#include <automerge-cpp/thread_pool.hpp>
 
 #include "doc_state.hpp"
-#include <automerge-cpp/thread_pool.hpp>
 #include "encoding/leb128.hpp"
-#include "storage/serializer.hpp"
-#include "storage/deserializer.hpp"
-#include "storage/chunk.hpp"
 #include "storage/change_chunk.hpp"
+#include "storage/chunk.hpp"
+#include "storage/deserializer.hpp"
+#include "storage/document_chunk.hpp"
+#include "storage/serializer.hpp"
 #include "sync/bloom_filter.hpp"
 
 #include <algorithm>
@@ -89,27 +91,29 @@ Document::Document(std::shared_ptr<thread_pool> pool)
 Document::~Document() = default;
 
 Document::Document(Document&& other) noexcept
-    : state_{std::move(other.state_)},
-      pool_{std::move(other.pool_)} {}
+    : state_{std::move(other.state_)}, pool_{std::move(other.pool_)},
+      save_heads_{std::move(other.save_heads_)} {}
 
 auto Document::operator=(Document&& other) noexcept -> Document& {
     if (this != &other) {
         auto lock = std::unique_lock{mutex_};
         state_ = std::move(other.state_);
         pool_ = std::move(other.pool_);
+        save_heads_ = std::move(other.save_heads_);
     }
     return *this;
 }
 
 Document::Document(const Document& other)
-    : state_{std::make_unique<detail::DocState>(*other.state_)},
-      pool_{other.pool_} {}
+    : state_{std::make_unique<detail::DocState>(*other.state_)}, pool_{other.pool_},
+      save_heads_{other.save_heads_} {}
 
 auto Document::operator=(const Document& other) -> Document& {
     if (this != &other) {
         auto lock = std::unique_lock{mutex_};
         state_ = std::make_unique<detail::DocState>(*other.state_);
         pool_ = other.pool_;
+        save_heads_ = other.save_heads_;
     }
     return *this;
 }
@@ -456,6 +460,32 @@ auto Document::get_changes() const -> std::vector<Change> {
     return state_->change_history;
 }
 
+auto Document::get_changes_since(const std::vector<ChangeHash>& heads) const
+    -> std::vector<Change> {
+    auto guard = read_guard();
+    return state_->get_changes_by_hash(state_->get_changes_since(heads));
+}
+
+auto Document::get_changes_added(const Document& other) const -> std::vector<Change> {
+    const auto other_changes = other.get_changes();
+    auto guard = read_guard();
+    auto result = std::vector<Change>{};
+    result.reserve(other_changes.size());
+    std::ranges::copy_if(other_changes, std::back_inserter(result), [&](const Change& change) {
+        return !state_->has_change_hash(detail::DocState::compute_change_hash(change));
+    });
+    return result;
+}
+
+auto Document::get_last_local_change() const -> std::optional<Change> {
+    auto guard = read_guard();
+    const auto change = std::ranges::find_if(
+        state_->change_history.rbegin(),
+        state_->change_history.rend(),
+        [&](const Change& candidate) { return candidate.actor == state_->actor; });
+    return change == state_->change_history.rend() ? std::nullopt : std::optional<Change>{*change};
+}
+
 auto Document::apply_changes(const std::vector<Change>& changes) -> std::expected<void, Error> {
     auto lock = std::unique_lock{mutex_};
     const auto admissions = validate_changes(*state_, changes);
@@ -480,7 +510,7 @@ auto Document::get_missing_deps(const std::vector<ChangeHash>& heads) const
 // -- Phase 4: Binary Serialization --------------------------------------------
 
 auto Document::save() const -> std::vector<std::byte> {
-    auto guard = read_guard();
+    auto lock = std::unique_lock{mutex_};
     auto output = std::vector<std::byte>{};
     for (const auto& change : state_->change_history) {
         const auto chunk = storage::serialize_change_chunk(change);
@@ -491,6 +521,24 @@ auto Document::save() const -> std::vector<std::byte> {
         auto body = std::vector<std::byte>{std::byte{0x43}};
         body.insert(body.end(), state_->actor.bytes.begin(), state_->actor.bytes.end());
         storage::write_chunk(storage::ChunkType::document, body, output);
+    }
+    if (!output.empty()) {
+        save_heads_ = state_->heads;
+    }
+    return output;
+}
+
+auto Document::save_incremental() const -> std::vector<std::byte> {
+    auto lock = std::unique_lock{mutex_};
+    const auto hashes = state_->get_changes_since(save_heads_);
+    const auto changes = state_->get_changes_by_hash(hashes);
+    auto output = std::vector<std::byte>{};
+    std::ranges::for_each(changes, [&](const Change& change) {
+        const auto chunk = storage::serialize_change_chunk(change);
+        output.insert(output.end(), chunk.begin(), chunk.end());
+    });
+    if (!output.empty()) {
+        save_heads_ = state_->heads;
     }
     return output;
 }
@@ -551,26 +599,40 @@ static auto parse_change_stream(std::span<const std::byte> data) -> std::optiona
         }
 
         const auto chunk_size = header->body_offset + header->body_length;
-        const auto parsed_change = storage::parse_change_chunk(remaining.first(chunk_size));
-        if (!parsed_change)
-            return std::nullopt;
-
-        if (changes.empty()) {
-            local_actor = parsed_change->change.actor;
-        }
-        for (const auto& dependency : parsed_change->change.deps) {
-            std::erase(heads, dependency);
-        }
-        heads.push_back(parsed_change->hash);
-        clock[parsed_change->change.actor] =
-            std::max(clock[parsed_change->change.actor], parsed_change->change.seq);
-        if (parsed_change->change.actor == local_actor) {
-            local_seq = std::max(local_seq, parsed_change->change.seq);
-            for (const auto& operation : parsed_change->change.operations) {
-                next_counter = std::max(next_counter, operation.id.counter + 1);
+        auto chunk_changes = std::vector<Change>{};
+        if (header->type == storage::ChunkType::change) {
+            const auto parsed_change = storage::parse_change_chunk(remaining.first(chunk_size));
+            if (!parsed_change) {
+                return std::nullopt;
             }
+            chunk_changes.push_back(parsed_change->change);
+        } else if (header->type == storage::ChunkType::document) {
+            const auto parsed_changes = storage::parse_document_chunk(remaining.first(chunk_size));
+            if (!parsed_changes) {
+                return std::nullopt;
+            }
+            chunk_changes = *parsed_changes;
+        } else {
+            return std::nullopt;
         }
-        changes.push_back(parsed_change->change);
+
+        std::ranges::for_each(chunk_changes, [&](const Change& change) {
+            const auto hash = detail::DocState::compute_change_hash(change);
+            if (changes.empty()) {
+                local_actor = change.actor;
+            }
+            std::ranges::for_each(
+                change.deps, [&](const ChangeHash& dependency) { std::erase(heads, dependency); });
+            heads.push_back(hash);
+            clock[change.actor] = std::max(clock[change.actor], change.seq);
+            if (change.actor == local_actor) {
+                local_seq = std::max(local_seq, change.seq);
+                std::ranges::for_each(change.operations, [&](const Op& operation) {
+                    next_counter = std::max(next_counter, operation.id.counter + 1);
+                });
+            }
+            changes.push_back(change);
+        });
         position += chunk_size;
     }
 
@@ -582,6 +644,30 @@ static auto parse_change_stream(std::span<const std::byte> data) -> std::optiona
         .heads = std::move(heads),
         .clock = std::move(clock),
     };
+}
+
+auto Document::load_incremental(std::span<const std::byte> data)
+    -> std::expected<std::size_t, Error> {
+    if (data.empty()) {
+        return std::size_t{0};
+    }
+    auto parsed = parse_empty_document(data);
+    if (!parsed) {
+        parsed = parse_change_stream(data);
+    }
+    if (!parsed) {
+        return std::unexpected{
+            Error{ErrorKind::invalid_document, "incremental data is not a valid chunk stream"}};
+    }
+
+    auto lock = std::unique_lock{mutex_};
+    const auto admissions = validate_changes(*state_, parsed->changes);
+    if (!admissions) {
+        return std::unexpected{admissions.error()};
+    }
+    const auto before = state_->change_history.size();
+    admit_changes(*state_, *admissions);
+    return state_->change_history.size() - before;
 }
 
 auto Document::load(std::span<const std::byte> data) -> std::optional<Document> {
