@@ -1,14 +1,17 @@
 #include <automerge-cpp/automerge.hpp>
 
 #include "../src/storage/change_chunk.hpp"
+#include "../src/storage/document_chunk_writer.hpp"
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -40,6 +43,76 @@ auto read_lines(const std::filesystem::path& path) -> std::vector<std::string> {
         lines.push_back(std::move(line));
     }
     return lines;
+}
+
+auto inflate_document_chunk(std::span<const std::byte> chunk)
+    -> std::optional<std::vector<std::byte>> {
+    namespace storage = automerge_cpp::storage;
+
+    const auto header = storage::parse_chunk_header(chunk);
+    if (!header || header->type != storage::ChunkType::document ||
+        header->body_offset + header->body_length != chunk.size() ||
+        !storage::validate_chunk_checksum(*header, chunk)) {
+        return std::nullopt;
+    }
+
+    const auto body = chunk.subspan(header->body_offset, header->body_length);
+    auto position = std::size_t{0};
+    const auto actor_count = storage::read_document_uleb(body, position);
+    if (!actor_count || *actor_count > body.size()) {
+        return std::nullopt;
+    }
+    for (auto index = std::uint64_t{0}; index < *actor_count; ++index) {
+        const auto actor_length = storage::read_document_uleb(body, position);
+        if (!actor_length || *actor_length > body.size() - std::min(position, body.size())) {
+            return std::nullopt;
+        }
+        position += static_cast<std::size_t>(*actor_length);
+    }
+
+    const auto head_count = storage::read_document_uleb(body, position);
+    if (!head_count || *head_count > body.size() / ChangeHash::size) {
+        return std::nullopt;
+    }
+    const auto head_bytes = static_cast<std::size_t>(*head_count) * ChangeHash::size;
+    if (head_bytes > body.size() - std::min(position, body.size())) {
+        return std::nullopt;
+    }
+    position += head_bytes;
+
+    const auto layout_position = position;
+    const auto change_layout = storage::parse_document_column_layout(body, position);
+    const auto operation_layout = storage::parse_document_column_layout(body, position);
+    if (!change_layout || !operation_layout) {
+        return std::nullopt;
+    }
+    const auto change_columns = storage::read_document_columns(body, position, *change_layout);
+    const auto operation_columns =
+        storage::read_document_columns(body, position, *operation_layout);
+    if (!change_columns || !operation_columns) {
+        return std::nullopt;
+    }
+
+    const auto suffix_position = position;
+    for (auto index = std::uint64_t{0}; index < *head_count; ++index) {
+        if (!storage::read_document_uleb(body, position)) {
+            return std::nullopt;
+        }
+    }
+    if (position != body.size()) {
+        return std::nullopt;
+    }
+
+    auto inflated_body = std::vector<std::byte>{body.begin(), body.begin() + layout_position};
+    storage::write_document_column_layout(*change_columns, inflated_body);
+    storage::write_document_column_layout(*operation_columns, inflated_body);
+    storage::write_document_column_data(*change_columns, inflated_body);
+    storage::write_document_column_data(*operation_columns, inflated_body);
+    inflated_body.insert(inflated_body.end(), body.begin() + suffix_position, body.end());
+
+    auto inflated_chunk = std::vector<std::byte>{};
+    storage::write_chunk(storage::ChunkType::document, inflated_body, inflated_chunk);
+    return inflated_chunk;
 }
 
 auto to_hex(const ChangeHash& hash) -> std::string {
@@ -213,7 +286,11 @@ TEST(ChangeHashFixture, matches_automerge_rs_change_chunks) {
         const auto encoded_document = document->save_compact();
         const auto expected_document =
             read_bytes(fixture_path(std::string{fixture_name} + ".document.am"));
-        EXPECT_EQ(encoded_document, expected_document) << fixture_name;
+        const auto inflated_document = inflate_document_chunk(encoded_document);
+        const auto inflated_expected_document = inflate_document_chunk(expected_document);
+        ASSERT_TRUE(inflated_document.has_value()) << fixture_name;
+        ASSERT_TRUE(inflated_expected_document.has_value()) << fixture_name;
+        EXPECT_EQ(*inflated_document, *inflated_expected_document) << fixture_name;
 
         auto compact_document = Document{};
         const auto compact_result = compact_document.load_incremental(
@@ -221,7 +298,6 @@ TEST(ChangeHashFixture, matches_automerge_rs_change_chunks) {
         ASSERT_TRUE(compact_result.has_value()) << fixture_name;
         EXPECT_EQ(*compact_result, expected_hashes.size()) << fixture_name;
         EXPECT_EQ(compact_document.get_heads(), expected_heads) << fixture_name;
-        EXPECT_EQ(compact_document.save(), bytes) << fixture_name;
     }
 
     auto actor_bytes = std::array<std::byte, automerge_cpp::ActorId::size>{};
@@ -292,6 +368,7 @@ TEST_P(AutomergeRsFixture, round_trips_in_cpp) {
 
     auto decoded_hashes = std::vector<std::string>{};
     auto expected_heads = std::vector<ChangeHash>{};
+    auto encoded_document = std::vector<std::byte>{};
     auto offset = std::size_t{0};
     while (offset < bytes.size()) {
         const auto remaining = std::span<const std::byte>{bytes}.subspan(offset);
@@ -320,6 +397,7 @@ TEST_P(AutomergeRsFixture, round_trips_in_cpp) {
         auto empty_document = Document{};
         EXPECT_TRUE(empty_document.save_incremental().empty());
         expect_fixture_state(fixture_name, empty_document);
+        encoded_document = empty_document.save_compact();
     } else {
         const auto document = Document::load(bytes);
         ASSERT_TRUE(document.has_value());
@@ -327,6 +405,7 @@ TEST_P(AutomergeRsFixture, round_trips_in_cpp) {
         EXPECT_EQ(document->get_heads(), expected_heads);
         EXPECT_EQ(document->save(), bytes);
         expect_fixture_state(fixture_name, *document);
+        encoded_document = document->save_compact();
     }
 
     auto compact_document = Document{};
@@ -337,6 +416,12 @@ TEST_P(AutomergeRsFixture, round_trips_in_cpp) {
     EXPECT_EQ(*compact_result, expected_hashes.size());
     EXPECT_EQ(compact_document.get_heads(), expected_heads);
     expect_fixture_state(fixture_name, compact_document);
+
+    const auto inflated_document = inflate_document_chunk(encoded_document);
+    const auto inflated_compact_bytes = inflate_document_chunk(compact_bytes);
+    ASSERT_TRUE(inflated_document.has_value());
+    ASSERT_TRUE(inflated_compact_bytes.has_value());
+    EXPECT_EQ(*inflated_document, *inflated_compact_bytes);
 }
 
 INSTANTIATE_TEST_SUITE_P(Compatibility,

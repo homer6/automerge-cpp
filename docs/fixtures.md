@@ -35,13 +35,24 @@ focused change-hash regressions.
 
 The always-enabled C++ fixture tests load every committed Rust change stream and compact document.
 For change streams they decode each change, verify its hash, re-encode the chunk byte-identically,
-and require `Document::save()` to reproduce the full stream.
+and require `Document::save()` to reproduce the full stream. Compact documents are compared after
+inflating each deflated column and clearing its deflate flag. The resulting raw columns must match
+byte for byte. DEFLATE permits multiple valid byte streams for the same input, and zlib output can
+differ by platform, so comparing the compressed payload itself would test the compressor rather
+than Automerge compatibility. Loading a compact document verifies its change count, heads, and
+hydrated state, but does not require `save()` to reproduce the source change-stream order because
+that order is not retained by the compact format.
 
 When Cargo is available, CTest also runs the reverse direction. A C++ fixture writer creates both
 the change stream and `save_compact()` document chunk for each supported case under the build
 directory. The Rust generator loads each file and compares its change count, operation count, actor
 count, and hydrated state with the committed Rust case. The reverse test has the CTest labels
 `compatibility` and `cargo`; it is not registered when Cargo is unavailable.
+
+Sync fixtures remain exact-byte comparisons because sync messages contain change chunks, which this
+implementation does not compress. The reverse compact-document check continues to use normal
+compression, so automerge-rs loading the C++ output proves that the emitted DEFLATE streams are
+valid.
 
 ## Regeneration
 
