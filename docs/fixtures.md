@@ -62,4 +62,6 @@ ctest --test-dir build --output-on-failure -L compatibility
 
 Regeneration is deterministic because every case uses fixed actor IDs, values, operation order,
 messages, and timestamps. Review generated binary changes together with the generator source and
-this table.
+this table. When several queued concurrent changes become ready together, C++ applies them in
+descending change-hash order so expanded change streams are identical across standard-library
+implementations.

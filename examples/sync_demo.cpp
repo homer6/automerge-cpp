@@ -55,11 +55,12 @@ int main() {
     peer_b.set_actor_id(am::ActorId{id_b});
 
     std::printf("Peer A has %zu keys, Peer B has %zu keys\n",
-                peer_a.length(am::root), peer_b.length(am::root));
+                *peer_a.length(am::root),
+                *peer_b.length(am::root));
 
     auto msgs = sync_peers(peer_a, peer_b);
     std::printf("Synced in %d messages\n", msgs);
-    std::printf("Peer B now has %zu keys\n", peer_b.length(am::root));
+    std::printf("Peer B now has %zu keys\n", *peer_b.length(am::root));
 
     // --- Scenario 2: Bidirectional sync ---
     std::printf("\n=== Scenario 2: Bidirectional sync ===\n");
@@ -71,13 +72,13 @@ int main() {
         tx.put(am::root, "from_b", "hello from B");
     });
 
-    std::printf("Peer A keys: %zu, Peer B keys: %zu\n",
-                peer_a.length(am::root), peer_b.length(am::root));
+    std::printf(
+        "Peer A keys: %zu, Peer B keys: %zu\n", *peer_a.length(am::root), *peer_b.length(am::root));
 
     msgs = sync_peers(peer_a, peer_b);
     std::printf("Synced in %d messages\n", msgs);
-    std::printf("Peer A keys: %zu, Peer B keys: %zu\n",
-                peer_a.length(am::root), peer_b.length(am::root));
+    std::printf(
+        "Peer A keys: %zu, Peer B keys: %zu\n", *peer_a.length(am::root), *peer_b.length(am::root));
 
     // --- Scenario 3: Three-peer transitive sync ---
     std::printf("\n=== Scenario 3: Three-peer relay ===\n");
@@ -95,7 +96,7 @@ int main() {
     msgs = sync_peers(peer_b, peer_c);
     std::printf("B->C synced in %d messages\n", msgs);
 
-    if (auto val = peer_c.get<std::string>(am::root, "relay_test")) {
+    if (auto val = *peer_c.get<std::string>(am::root, "relay_test")) {
         std::printf("Peer C received: \"%s\"\n", val->c_str());
     }
 

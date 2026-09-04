@@ -153,45 +153,122 @@ void Document::set_actor_id(ActorId id) {
     state_->local_seq = clock == state_->clock.end() ? 0 : clock->second;
 }
 
-void Document::transact(const std::function<void(Transaction&)>& fn, CommitOptions options) {
+auto Document::transact(const std::function<void(Transaction&)>& fn, CommitOptions options)
+    -> std::expected<void, Error> {
     auto lock = std::unique_lock{mutex_};
     auto tx = Transaction{*state_};
     try {
         fn(tx);
-        tx.commit(std::move(options));
+        return tx.commit(std::move(options));
     } catch (...) {
-        tx.rollback();
+        static_cast<void>(tx.rollback());
         throw;
     }
 }
 
-auto Document::get(const ObjId& obj, std::string_view key) const -> std::optional<Value> {
+static auto validate_object(const detail::DocState& state,
+                            const ObjId& obj,
+                            std::initializer_list<ObjType> allowed_types = {})
+    -> std::expected<const detail::ObjectState*, Error> {
+    const auto* object = state.get_object(obj);
+    if (!object) {
+        return std::unexpected{
+            Error{ErrorKind::invalid_obj_id, "object identifier does not exist"}};
+    }
+    if (allowed_types.size() != 0 &&
+        std::ranges::find(allowed_types, object->type) == allowed_types.end()) {
+        return std::unexpected{
+            Error{ErrorKind::invalid_object_type, "object has the wrong type for this operation"}};
+    }
+    return object;
+}
+
+static auto validate_key(std::string_view key) -> std::expected<void, Error> {
+    if (!detail::split_utf8_scalars(key)) {
+        return std::unexpected{Error{ErrorKind::invalid_key, "map keys must be valid UTF-8"}};
+    }
+    return {};
+}
+
+static auto validate_index(const detail::DocState& state, const ObjId& obj, std::size_t index)
+    -> std::expected<void, Error> {
+    const auto object = validate_object(state, obj, {ObjType::list, ObjType::text});
+    if (!object) {
+        return std::unexpected{object.error()};
+    }
+    if (index >= state.list_length(obj)) {
+        return std::unexpected{
+            Error{ErrorKind::index_out_of_bounds, "list or text index is out of bounds"}};
+    }
+    return {};
+}
+
+static auto validate_heads(const detail::DocState& state, const std::vector<ChangeHash>& heads)
+    -> std::expected<void, Error> {
+    const auto unknown = std::ranges::find_if(
+        heads, [&](const ChangeHash& hash) { return !state.has_change_hash(hash); });
+    if (unknown != heads.end()) {
+        return std::unexpected{
+            Error{ErrorKind::invalid_change, "historical heads are not present in the document"}};
+    }
+    return {};
+}
+
+auto Document::get(const ObjId& obj, std::string_view key) const
+    -> std::expected<std::optional<Value>, Error> {
     auto guard = read_guard();
+    const auto object = validate_object(*state_, obj, {ObjType::map, ObjType::table});
+    if (!object) {
+        return std::unexpected{object.error()};
+    }
+    const auto valid_key = validate_key(key);
+    if (!valid_key) {
+        return std::unexpected{valid_key.error()};
+    }
     return state_->map_get(obj, std::string{key});
 }
 
-auto Document::get_all(const ObjId& obj, std::string_view key) const -> std::vector<Value> {
+auto Document::get_all(const ObjId& obj, std::string_view key) const
+    -> std::expected<std::vector<Value>, Error> {
     auto guard = read_guard();
+    const auto object = validate_object(*state_, obj, {ObjType::map, ObjType::table});
+    if (!object) {
+        return std::unexpected{object.error()};
+    }
+    const auto valid_key = validate_key(key);
+    if (!valid_key) {
+        return std::unexpected{valid_key.error()};
+    }
     return state_->map_get_all(obj, std::string{key});
 }
 
-auto Document::get(const ObjId& obj, std::size_t index) const -> std::optional<Value> {
+auto Document::get(const ObjId& obj, std::size_t index) const
+    -> std::expected<std::optional<Value>, Error> {
     auto guard = read_guard();
+    const auto valid_index = validate_index(*state_, obj, index);
+    if (!valid_index) {
+        return std::unexpected{valid_index.error()};
+    }
     return state_->list_get(obj, index);
 }
 
-auto Document::keys(const ObjId& obj) const -> std::vector<std::string> {
+auto Document::keys(const ObjId& obj) const -> std::expected<std::vector<std::string>, Error> {
     auto guard = read_guard();
+    const auto object = validate_object(*state_, obj, {ObjType::map, ObjType::table});
+    if (!object) {
+        return std::unexpected{object.error()};
+    }
     return state_->map_keys(obj);
 }
 
-auto Document::values(const ObjId& obj) const -> std::vector<Value> {
+auto Document::values(const ObjId& obj) const -> std::expected<std::vector<Value>, Error> {
     auto guard = read_guard();
-    const auto type = state_->object_type(obj);
-    if (!type)
-        return {};
+    const auto object = validate_object(*state_, obj);
+    if (!object) {
+        return std::unexpected{object.error()};
+    }
 
-    switch (*type) {
+    switch ((*object)->type) {
     case ObjType::map:
     case ObjType::table:
         return state_->map_values(obj);
@@ -202,30 +279,56 @@ auto Document::values(const ObjId& obj) const -> std::vector<Value> {
     return {};
 }
 
-auto Document::length(const ObjId& obj) const -> std::size_t {
+auto Document::length(const ObjId& obj) const -> std::expected<std::size_t, Error> {
     auto guard = read_guard();
+    const auto object = validate_object(*state_, obj);
+    if (!object) {
+        return std::unexpected{object.error()};
+    }
     return state_->object_length(obj);
 }
 
-auto Document::text(const ObjId& obj) const -> std::string {
+auto Document::text(const ObjId& obj) const -> std::expected<std::string, Error> {
     auto guard = read_guard();
+    const auto object = validate_object(*state_, obj, {ObjType::text});
+    if (!object) {
+        return std::unexpected{object.error()};
+    }
     return state_->text_content(obj);
 }
 
-auto Document::object_type(const ObjId& obj) const -> std::optional<ObjType> {
+auto Document::object_type(const ObjId& obj) const -> std::expected<ObjType, Error> {
     auto guard = read_guard();
-    return state_->object_type(obj);
+    const auto object = validate_object(*state_, obj);
+    if (!object) {
+        return std::unexpected{object.error()};
+    }
+    return (*object)->type;
 }
 
 // -- Child object lookup ------------------------------------------------------
 
-auto Document::get_obj_id(const ObjId& obj, std::string_view key) const -> std::optional<ObjId> {
+auto Document::get_obj_id(const ObjId& obj, std::string_view key) const
+    -> std::expected<std::optional<ObjId>, Error> {
     auto guard = read_guard();
+    const auto object = validate_object(*state_, obj, {ObjType::map, ObjType::table});
+    if (!object) {
+        return std::unexpected{object.error()};
+    }
+    const auto valid_key = validate_key(key);
+    if (!valid_key) {
+        return std::unexpected{valid_key.error()};
+    }
     return state_->get_obj_id_for_key(obj, std::string{key});
 }
 
-auto Document::get_obj_id(const ObjId& obj, std::size_t index) const -> std::optional<ObjId> {
+auto Document::get_obj_id(const ObjId& obj, std::size_t index) const
+    -> std::expected<std::optional<ObjId>, Error> {
     auto guard = read_guard();
+    const auto valid_index = validate_index(*state_, obj, index);
+    if (!valid_index) {
+        return std::unexpected{valid_index.error()};
+    }
     return state_->get_obj_id_for_index(obj, index);
 }
 
@@ -376,11 +479,10 @@ static void remove_queued_change(detail::DocState& state, const ChangeHash& hash
 }
 
 static void apply_ready_changes(detail::DocState& state) {
-    auto ready_hashes = std::vector<ChangeHash>{};
-    ready_hashes.reserve(state.pending_changes.size());
+    auto ready_hashes = std::set<ChangeHash>{};
     std::ranges::for_each(state.pending_changes, [&](const auto& entry) {
         if (dependencies_are_available(state, entry.second)) {
-            ready_hashes.push_back(entry.first);
+            ready_hashes.insert(entry.first);
         }
     });
     const auto pending_count = state.pending_changes.size();
@@ -388,8 +490,8 @@ static void apply_ready_changes(detail::DocState& state) {
         if (ready_hashes.empty()) {
             return;
         }
-        const auto hash = ready_hashes.back();
-        ready_hashes.pop_back();
+        const auto hash = *ready_hashes.rbegin();
+        ready_hashes.erase(hash);
         const auto ready = state.pending_changes.find(hash);
         if (ready == state.pending_changes.end() ||
             !dependencies_are_available(state, ready->second)) {
@@ -412,7 +514,7 @@ static void apply_ready_changes(detail::DocState& state) {
             const auto pending = state.pending_changes.find(dependent);
             if (pending != state.pending_changes.end() &&
                 dependencies_are_available(state, pending->second)) {
-                ready_hashes.push_back(dependent);
+                ready_hashes.insert(dependent);
             }
         });
     });
@@ -836,9 +938,13 @@ auto Document::get_changes() const -> std::vector<Change> {
 }
 
 auto Document::get_changes_since(const std::vector<ChangeHash>& heads) const
-    -> std::vector<Change> {
+    -> std::expected<std::vector<Change>, Error> {
     auto lock = std::unique_lock{mutex_};
     state_->materialize_changes();
+    const auto valid_heads = validate_heads(*state_, heads);
+    if (!valid_heads) {
+        return std::unexpected{valid_heads.error()};
+    }
     return state_->get_changes_by_hash(state_->get_changes_since(heads));
 }
 
@@ -849,8 +955,13 @@ auto Document::get_changes_added(const Document& other) const -> std::vector<Cha
         return state_->compaction_checkpoint ? state_->compaction_checkpoint->heads
                                              : std::vector<ChangeHash>{};
     }();
-    const auto other_changes =
-        checkpoint_heads.empty() ? other.get_changes() : other.get_changes_since(checkpoint_heads);
+    auto other_lock = std::unique_lock{other.mutex_};
+    other.state_->materialize_changes();
+    const auto hashes = checkpoint_heads.empty()
+                            ? other.state_->all_change_hashes()
+                            : other.state_->get_changes_since(checkpoint_heads);
+    const auto other_changes = other.state_->get_changes_by_hash(hashes);
+    other_lock.unlock();
     auto lock = std::unique_lock{mutex_};
     state_->materialize_changes();
     auto result = std::vector<Change>{};
@@ -1114,22 +1225,26 @@ auto Document::load_incremental(std::span<const std::byte> data)
     return state_->change_history.size() - before;
 }
 
-auto Document::load(std::span<const std::byte> data) -> std::optional<Document> {
-    if (data.size() < 5)
-        return std::nullopt;
+auto Document::load(std::span<const std::byte> data) -> std::expected<Document, Error> {
+    if (data.size() < 5) {
+        return std::unexpected{Error{ErrorKind::invalid_document, "document data is too short"}};
+    }
     auto parsed = parse_empty_document(data);
     if (!parsed) {
         parsed = parse_change_stream(data);
     }
-    if (!parsed)
-        return std::nullopt;
+    if (!parsed) {
+        return std::unexpected{
+            Error{ErrorKind::invalid_document, "document data is malformed or corrupt"}};
+    }
 
     const auto changes_are_valid = std::ranges::all_of(
         parsed->changes, [](const Change& change) { return validate_change(change).has_value(); });
 
     auto doc = Document{1u}; // no pool — caller can assign one later
     if (!changes_are_valid || !validate_text_operations(*doc.state_, parsed->changes)) {
-        return std::nullopt;
+        return std::unexpected{
+            Error{ErrorKind::invalid_document, "document contains invalid changes"}};
     }
     if (!parsed->changes.empty()) {
         doc.set_actor_id(parsed->local_actor);
@@ -1208,15 +1323,17 @@ static void prune_shallow_objects(detail::DocState& state) {
     });
 }
 
-auto Document::load_shallow(std::span<const std::byte> data) -> std::optional<Document> {
+auto Document::load_shallow(std::span<const std::byte> data) -> std::expected<Document, Error> {
     const auto header = storage::parse_chunk_header(data);
     if (!header || header->type != storage::ChunkType::document ||
         header->body_offset + header->body_length != data.size()) {
-        return std::nullopt;
+        return std::unexpected{
+            Error{ErrorKind::invalid_document, "shallow document chunk is malformed"}};
     }
     auto decoded = storage::parse_shallow_document_chunk(data);
     if (!decoded) {
-        return std::nullopt;
+        return std::unexpected{
+            Error{ErrorKind::invalid_document, "shallow document chunk is corrupt"}};
     }
 
     auto document = Document{1u};
@@ -1437,6 +1554,12 @@ auto Document::generate_sync_message(SyncState& sync_state) const -> std::option
 
 static auto validate_sync_message(const detail::DocState& state, const SyncMessage& message)
     -> std::expected<std::vector<ChangeAdmission>, Error> {
+    for (const auto& have : message.have) {
+        if (!sync::BloomFilter::from_bytes(have.bloom_bytes)) {
+            return std::unexpected{
+                Error{ErrorKind::sync_error, "sync message contains an invalid bloom filter"}};
+        }
+    }
     if (!message.encoding_cache || message.encoding_cache->changes != message.changes ||
         message.encoding_cache->encoded_changes.size() != message.changes.size()) {
         return validate_changes(state, message.changes);
@@ -1666,7 +1789,8 @@ static auto ops_to_patches(const std::vector<Op>& ops) -> std::vector<Patch> {
 }
 
 auto Document::transact_with_patches(const std::function<void(Transaction&)>& fn,
-                                     CommitOptions options) -> std::vector<Patch> {
+                                     CommitOptions options)
+    -> std::expected<std::vector<Patch>, Error> {
     auto lock = std::unique_lock{mutex_};
     auto tx = Transaction{*state_};
     try {
@@ -1674,11 +1798,14 @@ auto Document::transact_with_patches(const std::function<void(Transaction&)>& fn
 
         // Capture ops before commit moves them
         auto ops = tx.pending_ops_;
-        tx.commit(std::move(options));
+        const auto committed = tx.commit(std::move(options));
+        if (!committed) {
+            return std::unexpected{committed.error()};
+        }
 
         return ops_to_patches(ops);
     } catch (...) {
-        tx.rollback();
+        static_cast<void>(tx.rollback());
         throw;
     }
 }
@@ -1687,39 +1814,74 @@ auto Document::transact_with_patches(const std::function<void(Transaction&)>& fn
 
 auto Document::get_at(const ObjId& obj,
                       std::string_view key,
-                      const std::vector<ChangeHash>& heads) const -> std::optional<Value> {
+                      const std::vector<ChangeHash>& heads) const
+    -> std::expected<std::optional<Value>, Error> {
     auto lock = std::unique_lock{mutex_};
     state_->materialize_changes();
+    const auto valid_heads = validate_heads(*state_, heads);
+    if (!valid_heads) {
+        return std::unexpected{valid_heads.error()};
+    }
     auto snapshot = state_->rebuild_state_at(heads);
+    const auto object = validate_object(snapshot, obj, {ObjType::map, ObjType::table});
+    if (!object) {
+        return std::unexpected{object.error()};
+    }
+    const auto valid_key = validate_key(key);
+    if (!valid_key) {
+        return std::unexpected{valid_key.error()};
+    }
     return snapshot.map_get(obj, std::string{key});
 }
 
 auto Document::get_at(const ObjId& obj,
                       std::size_t index,
-                      const std::vector<ChangeHash>& heads) const -> std::optional<Value> {
+                      const std::vector<ChangeHash>& heads) const
+    -> std::expected<std::optional<Value>, Error> {
     auto lock = std::unique_lock{mutex_};
     state_->materialize_changes();
+    const auto valid_heads = validate_heads(*state_, heads);
+    if (!valid_heads) {
+        return std::unexpected{valid_heads.error()};
+    }
     auto snapshot = state_->rebuild_state_at(heads);
+    const auto valid_index = validate_index(snapshot, obj, index);
+    if (!valid_index) {
+        return std::unexpected{valid_index.error()};
+    }
     return snapshot.list_get(obj, index);
 }
 
 auto Document::keys_at(const ObjId& obj, const std::vector<ChangeHash>& heads) const
-    -> std::vector<std::string> {
+    -> std::expected<std::vector<std::string>, Error> {
     auto lock = std::unique_lock{mutex_};
     state_->materialize_changes();
+    const auto valid_heads = validate_heads(*state_, heads);
+    if (!valid_heads) {
+        return std::unexpected{valid_heads.error()};
+    }
     auto snapshot = state_->rebuild_state_at(heads);
+    const auto object = validate_object(snapshot, obj, {ObjType::map, ObjType::table});
+    if (!object) {
+        return std::unexpected{object.error()};
+    }
     return snapshot.map_keys(obj);
 }
 
 auto Document::values_at(const ObjId& obj, const std::vector<ChangeHash>& heads) const
-    -> std::vector<Value> {
+    -> std::expected<std::vector<Value>, Error> {
     auto lock = std::unique_lock{mutex_};
     state_->materialize_changes();
+    const auto valid_heads = validate_heads(*state_, heads);
+    if (!valid_heads) {
+        return std::unexpected{valid_heads.error()};
+    }
     auto snapshot = state_->rebuild_state_at(heads);
-    auto type = snapshot.object_type(obj);
-    if (!type)
-        return {};
-    switch (*type) {
+    const auto object = validate_object(snapshot, obj);
+    if (!object) {
+        return std::unexpected{object.error()};
+    }
+    switch ((*object)->type) {
     case ObjType::map:
     case ObjType::table:
         return snapshot.map_values(obj);
@@ -1731,34 +1893,68 @@ auto Document::values_at(const ObjId& obj, const std::vector<ChangeHash>& heads)
 }
 
 auto Document::length_at(const ObjId& obj, const std::vector<ChangeHash>& heads) const
-    -> std::size_t {
+    -> std::expected<std::size_t, Error> {
     auto lock = std::unique_lock{mutex_};
     state_->materialize_changes();
+    const auto valid_heads = validate_heads(*state_, heads);
+    if (!valid_heads) {
+        return std::unexpected{valid_heads.error()};
+    }
     auto snapshot = state_->rebuild_state_at(heads);
+    const auto object = validate_object(snapshot, obj);
+    if (!object) {
+        return std::unexpected{object.error()};
+    }
     return snapshot.object_length(obj);
 }
 
 auto Document::text_at(const ObjId& obj, const std::vector<ChangeHash>& heads) const
-    -> std::string {
+    -> std::expected<std::string, Error> {
     auto lock = std::unique_lock{mutex_};
     state_->materialize_changes();
+    const auto valid_heads = validate_heads(*state_, heads);
+    if (!valid_heads) {
+        return std::unexpected{valid_heads.error()};
+    }
     auto snapshot = state_->rebuild_state_at(heads);
+    const auto object = validate_object(snapshot, obj, {ObjType::text});
+    if (!object) {
+        return std::unexpected{object.error()};
+    }
     return snapshot.text_content(obj);
 }
 
 // -- Phase 6: Cursors ---------------------------------------------------------
 
-auto Document::cursor(const ObjId& obj, std::size_t index) const -> std::optional<Cursor> {
+auto Document::cursor(const ObjId& obj, std::size_t index) const -> std::expected<Cursor, Error> {
     auto guard = read_guard();
-    auto id = state_->list_element_id_at(obj, index);
-    if (!id)
-        return std::nullopt;
+    const auto valid_index = validate_index(*state_, obj, index);
+    if (!valid_index) {
+        return std::unexpected{valid_index.error()};
+    }
+    const auto id = state_->list_element_id_at(obj, index);
+    if (!id) {
+        return std::unexpected{
+            Error{ErrorKind::invalid_cursor, "cursor position could not be resolved"}};
+    }
     return Cursor{*id};
 }
 
 auto Document::resolve_cursor(const ObjId& obj, const Cursor& cur) const
-    -> std::optional<std::size_t> {
+    -> std::expected<std::optional<std::size_t>, Error> {
     auto guard = read_guard();
+    const auto object = validate_object(*state_, obj, {ObjType::list, ObjType::text});
+    if (!object) {
+        return std::unexpected{object.error()};
+    }
+    const auto belongs_to_object =
+        std::ranges::any_of((*object)->list_elements, [&](const detail::ListElement& element) {
+            return element.insert_id == cur.position;
+        });
+    if (!belongs_to_object) {
+        return std::unexpected{
+            Error{ErrorKind::invalid_cursor, "cursor does not belong to the requested object"}};
+    }
     return state_->find_element_visible_index(obj, cur.position);
 }
 
@@ -1785,16 +1981,28 @@ static auto collect_marks(const detail::DocState& state, const ObjId& obj) -> st
     return result;
 }
 
-auto Document::marks(const ObjId& obj) const -> std::vector<Mark> {
+auto Document::marks(const ObjId& obj) const -> std::expected<std::vector<Mark>, Error> {
     auto guard = read_guard();
+    const auto object = validate_object(*state_, obj, {ObjType::list, ObjType::text});
+    if (!object) {
+        return std::unexpected{object.error()};
+    }
     return collect_marks(*state_, obj);
 }
 
 auto Document::marks_at(const ObjId& obj, const std::vector<ChangeHash>& heads) const
-    -> std::vector<Mark> {
+    -> std::expected<std::vector<Mark>, Error> {
     auto lock = std::unique_lock{mutex_};
     state_->materialize_changes();
+    const auto valid_heads = validate_heads(*state_, heads);
+    if (!valid_heads) {
+        return std::unexpected{valid_heads.error()};
+    }
     auto snapshot = state_->rebuild_state_at(heads);
+    const auto object = validate_object(snapshot, obj, {ObjType::list, ObjType::text});
+    if (!object) {
+        return std::unexpected{object.error()};
+    }
     return collect_marks(snapshot, obj);
 }
 
@@ -1804,44 +2012,71 @@ auto Document::ops_to_patches_internal(const std::vector<Op>& ops) -> std::vecto
     return ops_to_patches(ops);
 }
 
-auto Document::get_path_impl(std::span<const Prop> path) const -> std::optional<Value> {
+auto Document::get_path_impl(std::span<const Prop> path) const
+    -> std::expected<std::optional<Value>, Error> {
     auto guard = read_guard();
-    if (path.empty())
-        return std::nullopt;
+    if (path.empty()) {
+        return std::unexpected{Error{ErrorKind::invalid_key, "path must not be empty"}};
+    }
 
     auto current_obj = root;
 
+    const auto read_prop = [&](const ObjId& object_id,
+                               const Prop& prop) -> std::expected<std::optional<Value>, Error> {
+        return std::visit(
+            overload{
+                [&](const std::string& key) -> std::expected<std::optional<Value>, Error> {
+                    const auto object =
+                        validate_object(*state_, object_id, {ObjType::map, ObjType::table});
+                    if (!object) {
+                        return std::unexpected{object.error()};
+                    }
+                    const auto valid_key = validate_key(key);
+                    if (!valid_key) {
+                        return std::unexpected{valid_key.error()};
+                    }
+                    return state_->map_get(object_id, key);
+                },
+                [&](std::size_t index) -> std::expected<std::optional<Value>, Error> {
+                    const auto valid_index = validate_index(*state_, object_id, index);
+                    if (!valid_index) {
+                        return std::unexpected{valid_index.error()};
+                    }
+                    return state_->list_get(object_id, index);
+                },
+            },
+            prop);
+    };
+
     // Walk all but the last path element to resolve intermediate ObjIds.
     for (std::size_t i = 0; i + 1 < path.size(); ++i) {
-        auto val = std::visit(
-            overload{
-                [&](const std::string& key) { return state_->map_get(current_obj, key); },
-                [&](std::size_t index) { return state_->list_get(current_obj, index); },
-            },
-            path[i]);
-
-        if (!val)
+        auto value = read_prop(current_obj, path[i]);
+        if (!value) {
+            return std::unexpected{value.error()};
+        }
+        if (!*value) {
             return std::nullopt;
+        }
 
         // The value must be an ObjType to continue navigating.
-        if (!is_object(*val))
-            return std::nullopt;
+        if (!is_object(**value)) {
+            return std::unexpected{
+                Error{ErrorKind::invalid_value_type, "path traversal requires an object value"}};
+        }
 
         // We need the ObjId, not the ObjType. For intermediate objects,
         // the ObjId is the OpId that created them. We look it up via
         // the internal state's object-at-key resolution.
         auto obj_id = state_->get_obj_id_at(current_obj, path[i]);
-        if (!obj_id)
-            return std::nullopt;
+        if (!obj_id) {
+            return std::unexpected{
+                Error{ErrorKind::invalid_obj_id, "path object identifier could not be resolved"}};
+        }
         current_obj = *obj_id;
     }
 
     // Final element: return the value.
-    return std::visit(overload{
-                          [&](const std::string& key) { return state_->map_get(current_obj, key); },
-                          [&](std::size_t index) { return state_->list_get(current_obj, index); },
-                      },
-                      path.back());
+    return read_prop(current_obj, path.back());
 }
 
 } // namespace automerge_cpp

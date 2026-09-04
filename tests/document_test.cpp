@@ -91,9 +91,9 @@ TEST(Document, root_is_a_map) {
 
 TEST(Document, root_starts_empty) {
     const auto doc = Document{};
-    EXPECT_EQ(doc.length(root), 0u);
-    EXPECT_TRUE(doc.keys(root).empty());
-    EXPECT_TRUE(doc.values(root).empty());
+    EXPECT_EQ(*doc.length(root), 0u);
+    EXPECT_TRUE((*doc.keys(root)).empty());
+    EXPECT_TRUE((*doc.values(root)).empty());
 }
 
 // -- Map put and get ----------------------------------------------------------
@@ -104,7 +104,7 @@ TEST(Document, put_and_get_int) {
         tx.put(root, "x", std::int64_t{42});
     });
 
-    auto val = doc.get(root, "x");
+    auto val = *doc.get(root, "x");
     ASSERT_TRUE(val.has_value());
     auto sv = std::get<ScalarValue>(*val);
     EXPECT_EQ(std::get<std::int64_t>(sv), 42);
@@ -116,7 +116,7 @@ TEST(Document, put_and_get_string) {
         tx.put(root, "name", std::string{"Alice"});
     });
 
-    auto val = doc.get(root, "name");
+    auto val = *doc.get(root, "name");
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(std::get<std::string>(std::get<ScalarValue>(*val)), "Alice");
 }
@@ -127,7 +127,7 @@ TEST(Document, put_and_get_bool) {
         tx.put(root, "active", true);
     });
 
-    auto val = doc.get(root, "active");
+    auto val = *doc.get(root, "active");
     ASSERT_TRUE(val.has_value());
     EXPECT_TRUE(std::get<bool>(std::get<ScalarValue>(*val)));
 }
@@ -138,7 +138,7 @@ TEST(Document, put_and_get_double) {
         tx.put(root, "pi", 3.14);
     });
 
-    auto val = doc.get(root, "pi");
+    auto val = *doc.get(root, "pi");
     ASSERT_TRUE(val.has_value());
     EXPECT_DOUBLE_EQ(std::get<double>(std::get<ScalarValue>(*val)), 3.14);
 }
@@ -149,7 +149,7 @@ TEST(Document, put_and_get_null) {
         tx.put(root, "nothing", Null{});
     });
 
-    auto val = doc.get(root, "nothing");
+    auto val = *doc.get(root, "nothing");
     ASSERT_TRUE(val.has_value());
     EXPECT_TRUE(std::holds_alternative<Null>(std::get<ScalarValue>(*val)));
 }
@@ -163,14 +163,14 @@ TEST(Document, put_overwrites_previous_value) {
         tx.put(root, "x", std::int64_t{2});
     });
 
-    auto val = doc.get(root, "x");
+    auto val = *doc.get(root, "x");
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(*val)), 2);
 }
 
 TEST(Document, get_missing_key_returns_nullopt) {
     const auto doc = Document{};
-    EXPECT_FALSE(doc.get(root, "nonexistent").has_value());
+    EXPECT_FALSE((*doc.get(root, "nonexistent")).has_value());
 }
 
 // -- Map delete ---------------------------------------------------------------
@@ -184,8 +184,8 @@ TEST(Document, delete_key_removes_value) {
         tx.delete_key(root, "x");
     });
 
-    EXPECT_FALSE(doc.get(root, "x").has_value());
-    EXPECT_EQ(doc.length(root), 0u);
+    EXPECT_FALSE((*doc.get(root, "x")).has_value());
+    EXPECT_EQ(*doc.length(root), 0u);
 }
 
 // -- Keys and values ----------------------------------------------------------
@@ -198,7 +198,7 @@ TEST(Document, keys_returns_all_keys_sorted) {
         tx.put(root, "b", std::int64_t{2});
     });
 
-    auto k = doc.keys(root);
+    auto k = *doc.keys(root);
     ASSERT_EQ(k.size(), 3u);
     // std::map keeps keys sorted
     EXPECT_EQ(k[0], "a");
@@ -213,7 +213,7 @@ TEST(Document, values_returns_values_in_key_order) {
         tx.put(root, "a", std::int64_t{1});
     });
 
-    auto v = doc.values(root);
+    auto v = *doc.values(root);
     ASSERT_EQ(v.size(), 2u);
     // values follow key order (a, b)
     EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(v[0])), 1);
@@ -226,7 +226,7 @@ TEST(Document, length_of_map) {
         tx.put(root, "a", std::int64_t{1});
         tx.put(root, "b", std::int64_t{2});
     });
-    EXPECT_EQ(doc.length(root), 2u);
+    EXPECT_EQ(*doc.length(root), 2u);
 }
 
 // -- Nested objects -----------------------------------------------------------
@@ -236,7 +236,7 @@ TEST(Document, put_object_creates_nested_map) {
     auto nested_id = ObjId{};
 
     doc.transact([&](auto& tx) {
-        nested_id = tx.put_object(root, "meta", ObjType::map);
+        nested_id = *tx.put_object(root, "meta", ObjType::map);
         tx.put(nested_id, "version", std::int64_t{1});
     });
 
@@ -244,7 +244,7 @@ TEST(Document, put_object_creates_nested_map) {
     ASSERT_TRUE(type.has_value());
     EXPECT_EQ(*type, ObjType::map);
 
-    auto val = doc.get(nested_id, "version");
+    auto val = *doc.get(nested_id, "version");
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(*val)), 1);
 }
@@ -254,18 +254,18 @@ TEST(Document, put_object_creates_nested_list) {
     auto list_id = ObjId{};
 
     doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "items", ObjType::list);
+        list_id = *tx.put_object(root, "items", ObjType::list);
         tx.insert(list_id, 0, std::string{"first"});
         tx.insert(list_id, 1, std::string{"second"});
     });
 
-    EXPECT_EQ(doc.length(list_id), 2u);
+    EXPECT_EQ(*doc.length(list_id), 2u);
 
-    auto v0 = doc.get(list_id, std::size_t{0});
+    auto v0 = *doc.get(list_id, std::size_t{0});
     ASSERT_TRUE(v0.has_value());
     EXPECT_EQ(std::get<std::string>(std::get<ScalarValue>(*v0)), "first");
 
-    auto v1 = doc.get(list_id, std::size_t{1});
+    auto v1 = *doc.get(list_id, std::size_t{1});
     ASSERT_TRUE(v1.has_value());
     EXPECT_EQ(std::get<std::string>(std::get<ScalarValue>(*v1)), "second");
 }
@@ -276,12 +276,12 @@ TEST(Document, deeply_nested_objects) {
     auto level2 = ObjId{};
 
     doc.transact([&](auto& tx) {
-        level1 = tx.put_object(root, "level1", ObjType::map);
-        level2 = tx.put_object(level1, "level2", ObjType::map);
+        level1 = *tx.put_object(root, "level1", ObjType::map);
+        level2 = *tx.put_object(level1, "level2", ObjType::map);
         tx.put(level2, "deep", std::int64_t{99});
     });
 
-    auto val = doc.get(level2, "deep");
+    auto val = *doc.get(level2, "deep");
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(*val)), 99);
 }
@@ -293,16 +293,19 @@ TEST(Document, list_insert_and_get) {
     auto list_id = ObjId{};
 
     doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "list", ObjType::list);
+        list_id = *tx.put_object(root, "list", ObjType::list);
         tx.insert(list_id, 0, std::int64_t{10});
         tx.insert(list_id, 1, std::int64_t{20});
         tx.insert(list_id, 2, std::int64_t{30});
     });
 
-    EXPECT_EQ(doc.length(list_id), 3u);
-    EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(*doc.get(list_id, std::size_t{0}))), 10);
-    EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(*doc.get(list_id, std::size_t{1}))), 20);
-    EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(*doc.get(list_id, std::size_t{2}))), 30);
+    EXPECT_EQ(*doc.length(list_id), 3u);
+    EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(**doc.get(list_id, std::size_t{0}))),
+              10);
+    EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(**doc.get(list_id, std::size_t{1}))),
+              20);
+    EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(**doc.get(list_id, std::size_t{2}))),
+              30);
 }
 
 TEST(Document, list_insert_at_beginning) {
@@ -310,12 +313,12 @@ TEST(Document, list_insert_at_beginning) {
     auto list_id = ObjId{};
 
     doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "list", ObjType::list);
+        list_id = *tx.put_object(root, "list", ObjType::list);
         tx.insert(list_id, 0, std::int64_t{2});
         tx.insert(list_id, 0, std::int64_t{1});  // insert at head
     });
 
-    auto vals = doc.values(list_id);
+    auto vals = *doc.values(list_id);
     ASSERT_EQ(vals.size(), 2u);
     EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(vals[0])), 1);
     EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(vals[1])), 2);
@@ -326,14 +329,14 @@ TEST(Document, list_set_overwrites_element) {
     auto list_id = ObjId{};
 
     doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "list", ObjType::list);
+        list_id = *tx.put_object(root, "list", ObjType::list);
         tx.insert(list_id, 0, std::int64_t{1});
     });
     doc.transact([&](auto& tx) {
         tx.set(list_id, 0, std::int64_t{99});
     });
 
-    auto val = doc.get(list_id, std::size_t{0});
+    auto val = *doc.get(list_id, std::size_t{0});
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(*val)), 99);
 }
@@ -343,7 +346,7 @@ TEST(Document, list_delete_removes_element) {
     auto list_id = ObjId{};
 
     doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "list", ObjType::list);
+        list_id = *tx.put_object(root, "list", ObjType::list);
         tx.insert(list_id, 0, std::int64_t{1});
         tx.insert(list_id, 1, std::int64_t{2});
         tx.insert(list_id, 2, std::int64_t{3});
@@ -352,8 +355,8 @@ TEST(Document, list_delete_removes_element) {
         tx.delete_index(list_id, 1);  // delete middle element
     });
 
-    EXPECT_EQ(doc.length(list_id), 2u);
-    auto vals = doc.values(list_id);
+    EXPECT_EQ(*doc.length(list_id), 2u);
+    auto vals = *doc.values(list_id);
     EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(vals[0])), 1);
     EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(vals[1])), 3);
 }
@@ -363,11 +366,13 @@ TEST(Document, list_get_out_of_bounds_returns_nullopt) {
     auto list_id = ObjId{};
 
     doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "list", ObjType::list);
+        list_id = *tx.put_object(root, "list", ObjType::list);
         tx.insert(list_id, 0, std::int64_t{1});
     });
 
-    EXPECT_FALSE(doc.get(list_id, std::size_t{5}).has_value());
+    const auto result = doc.get(list_id, std::size_t{5});
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().kind, ErrorKind::index_out_of_bounds);
 }
 
 TEST(Document, insert_object_into_list) {
@@ -376,13 +381,13 @@ TEST(Document, insert_object_into_list) {
     auto nested_map = ObjId{};
 
     doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "list", ObjType::list);
-        nested_map = tx.insert_object(list_id, 0, ObjType::map);
+        list_id = *tx.put_object(root, "list", ObjType::list);
+        nested_map = *tx.insert_object(list_id, 0, ObjType::map);
         tx.put(nested_map, "key", std::string{"value"});
     });
 
-    EXPECT_EQ(doc.length(list_id), 1u);
-    auto val = doc.get(nested_map, "key");
+    EXPECT_EQ(*doc.length(list_id), 1u);
+    auto val = *doc.get(nested_map, "key");
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(std::get<std::string>(std::get<ScalarValue>(*val)), "value");
 }
@@ -394,12 +399,12 @@ TEST(Document, text_splice_insert) {
     auto text_id = ObjId{};
 
     doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "content", ObjType::text);
+        text_id = *tx.put_object(root, "content", ObjType::text);
         tx.splice_text(text_id, 0, 0, "Hello");
     });
 
-    EXPECT_EQ(doc.text(text_id), "Hello");
-    EXPECT_EQ(doc.length(text_id), 5u);
+    EXPECT_EQ(*doc.text(text_id), "Hello");
+    EXPECT_EQ(*doc.length(text_id), 5u);
 }
 
 TEST(Document, text_splice_append) {
@@ -407,14 +412,14 @@ TEST(Document, text_splice_append) {
     auto text_id = ObjId{};
 
     doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "content", ObjType::text);
+        text_id = *tx.put_object(root, "content", ObjType::text);
         tx.splice_text(text_id, 0, 0, "Hello");
     });
     doc.transact([&](auto& tx) {
         tx.splice_text(text_id, 5, 0, " World");
     });
 
-    EXPECT_EQ(doc.text(text_id), "Hello World");
+    EXPECT_EQ(*doc.text(text_id), "Hello World");
 }
 
 TEST(Document, text_splice_delete) {
@@ -422,14 +427,14 @@ TEST(Document, text_splice_delete) {
     auto text_id = ObjId{};
 
     doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "content", ObjType::text);
+        text_id = *tx.put_object(root, "content", ObjType::text);
         tx.splice_text(text_id, 0, 0, "Hello World");
     });
     doc.transact([&](auto& tx) {
         tx.splice_text(text_id, 5, 6, "");  // delete " World"
     });
 
-    EXPECT_EQ(doc.text(text_id), "Hello");
+    EXPECT_EQ(*doc.text(text_id), "Hello");
 }
 
 TEST(Document, text_splice_replace) {
@@ -437,14 +442,14 @@ TEST(Document, text_splice_replace) {
     auto text_id = ObjId{};
 
     doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "content", ObjType::text);
+        text_id = *tx.put_object(root, "content", ObjType::text);
         tx.splice_text(text_id, 0, 0, "Hello World");
     });
     doc.transact([&](auto& tx) {
         tx.splice_text(text_id, 5, 6, " C++");  // replace " World" with " C++"
     });
 
-    EXPECT_EQ(doc.text(text_id), "Hello C++");
+    EXPECT_EQ(*doc.text(text_id), "Hello C++");
 }
 
 TEST(Document, text_splice_uses_unicode_scalar_indices) {
@@ -452,11 +457,11 @@ TEST(Document, text_splice_uses_unicode_scalar_indices) {
     auto text_id = ObjId{};
 
     const auto initial = doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "content", ObjType::text);
+        text_id = *tx.put_object(root, "content", ObjType::text);
         return tx.splice_text(text_id, 0, 0, "é界👩‍👩‍👧‍👦é");
     });
     ASSERT_TRUE(initial.has_value());
-    EXPECT_EQ(doc.length(text_id), 11u);
+    EXPECT_EQ(*doc.length(text_id), 11u);
 
     const auto replaced_accent =
         doc.transact([&](auto& tx) { return tx.splice_text(text_id, 0, 1, "à"); });
@@ -471,8 +476,8 @@ TEST(Document, text_splice_uses_unicode_scalar_indices) {
     EXPECT_TRUE(replaced_cjk.has_value());
     EXPECT_TRUE(split_grapheme.has_value());
     EXPECT_TRUE(replaced_combining_mark.has_value());
-    EXPECT_EQ(doc.text(text_id), "à猫👩‍👩X‍👧‍👦ë");
-    EXPECT_EQ(doc.length(text_id), 12u);
+    EXPECT_EQ(*doc.text(text_id), "à猫👩‍👩X‍👧‍👦ë");
+    EXPECT_EQ(*doc.length(text_id), 12u);
 }
 
 TEST(Document, text_splice_emits_one_op_per_unicode_scalar) {
@@ -482,7 +487,7 @@ TEST(Document, text_splice_emits_one_op_per_unicode_scalar) {
         std::vector<std::string>{"é", "界", "👩", "‍", "👩", "‍", "👧", "‍", "👦", "e", "́"};
 
     const auto result = doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "content", ObjType::text);
+        text_id = *tx.put_object(root, "content", ObjType::text);
         return tx.splice_text(text_id, 0, 0, "é界👩‍👩‍👧‍👦é");
     });
     ASSERT_TRUE(result.has_value());
@@ -505,7 +510,7 @@ TEST(Document, text_splice_rejects_invalid_utf8_without_mutation) {
     auto doc = Document{};
     auto text_id = ObjId{};
     doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "content", ObjType::text);
+        text_id = *tx.put_object(root, "content", ObjType::text);
         tx.splice_text(text_id, 0, 0, "valid");
     });
     const auto heads_before = doc.get_heads();
@@ -524,11 +529,11 @@ TEST(Document, text_splice_rejects_invalid_utf8_without_mutation) {
         const auto result =
             doc.transact([&](auto& tx) { return tx.splice_text(text_id, 0, 1, text); });
         ASSERT_FALSE(result.has_value());
-        EXPECT_EQ(result.error().kind, ErrorKind::invalid_operation);
+        EXPECT_EQ(result.error().kind, ErrorKind::invalid_utf8);
         EXPECT_EQ(result.error().message, "text must be valid UTF-8");
     }
 
-    EXPECT_EQ(doc.text(text_id), "valid");
+    EXPECT_EQ(*doc.text(text_id), "valid");
     EXPECT_EQ(doc.get_heads(), heads_before);
 }
 
@@ -536,7 +541,7 @@ TEST(Document, apply_changes_rejects_text_ops_with_multiple_scalars) {
     auto source = Document{};
     auto text_id = ObjId{};
     source.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "content", ObjType::text);
+        text_id = *tx.put_object(root, "content", ObjType::text);
         tx.splice_text(text_id, 0, 0, "x");
     });
     auto changes = source.get_changes();
@@ -549,14 +554,14 @@ TEST(Document, apply_changes_rejects_text_ops_with_multiple_scalars) {
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().kind, ErrorKind::invalid_change);
-    EXPECT_EQ(target.length(root), 0u);
+    EXPECT_EQ(*target.length(root), 0u);
 }
 
 TEST(Document, concurrent_inserts_in_multibyte_text_merge_as_valid_utf8) {
     auto base = Document{};
     auto text_id = ObjId{};
     base.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "content", ObjType::text);
+        text_id = *tx.put_object(root, "content", ObjType::text);
         tx.splice_text(text_id, 0, 0, "é界🙂");
     });
     auto first = base.fork();
@@ -567,20 +572,20 @@ TEST(Document, concurrent_inserts_in_multibyte_text_merge_as_valid_utf8) {
     const auto merge_result = first.merge(second);
 
     ASSERT_TRUE(merge_result.has_value());
-    const auto merged = first.text(text_id);
+    const auto merged = *first.text(text_id);
     EXPECT_NE(merged.find("é"), std::string::npos);
     EXPECT_NE(merged.find("界"), std::string::npos);
     EXPECT_NE(merged.find("🙂"), std::string::npos);
     EXPECT_NE(merged.find("猫"), std::string::npos);
     EXPECT_NE(merged.find("🚀"), std::string::npos);
-    EXPECT_EQ(first.length(text_id), 5u);
+    EXPECT_EQ(*first.length(text_id), 5u);
 }
 
 TEST(Document, marks_and_cursors_use_unicode_scalar_indices) {
     auto doc = Document{};
     auto text_id = ObjId{};
     doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "content", ObjType::text);
+        text_id = *tx.put_object(root, "content", ObjType::text);
         tx.splice_text(text_id, 0, 0, "é界👩‍👩‍👧‍👦é");
         tx.mark(text_id, 1, 9, "bold", true);
     });
@@ -589,11 +594,11 @@ TEST(Document, marks_and_cursors_use_unicode_scalar_indices) {
 
     doc.transact([&](auto& tx) { tx.splice_text(text_id, 1, 0, "猫"); });
 
-    const auto marks = doc.marks(text_id);
+    const auto marks = *doc.marks(text_id);
     ASSERT_EQ(marks.size(), 1u);
     EXPECT_EQ(marks[0].start, 2u);
     EXPECT_EQ(marks[0].end, 10u);
-    const auto resolved = doc.resolve_cursor(text_id, *cursor);
+    const auto resolved = *doc.resolve_cursor(text_id, *cursor);
     ASSERT_TRUE(resolved.has_value());
     EXPECT_EQ(*resolved, 9u);
 }
@@ -602,28 +607,27 @@ TEST(Document, unicode_text_patches_use_scalar_indices) {
     auto doc = Document{};
     auto text_id = ObjId{};
     doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "content", ObjType::text);
+        text_id = *tx.put_object(root, "content", ObjType::text);
         tx.splice_text(text_id, 0, 0, "é界🙂");
     });
 
-    auto [result, patches] =
-        doc.transact_with_patches([&](auto& tx) { return tx.splice_text(text_id, 1, 1, "猫🚀"); });
+    auto patches =
+        *doc.transact_with_patches([&](auto& tx) { return tx.splice_text(text_id, 1, 1, "猫🚀"); });
 
-    ASSERT_TRUE(result.has_value());
     ASSERT_EQ(patches.size(), 1u);
     const auto* splice = std::get_if<PatchSpliceText>(&patches[0].action);
     ASSERT_NE(splice, nullptr);
     EXPECT_EQ(splice->index, 1u);
     EXPECT_EQ(splice->delete_count, 1u);
     EXPECT_EQ(splice->text, "猫🚀");
-    EXPECT_EQ(doc.text(text_id), "é猫🚀🙂");
+    EXPECT_EQ(*doc.text(text_id), "é猫🚀🙂");
 }
 
 TEST(Document, unicode_text_save_load_round_trip) {
     auto doc = Document{};
     auto text_id = ObjId{};
     doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "content", ObjType::text);
+        text_id = *tx.put_object(root, "content", ObjType::text);
         tx.splice_text(text_id, 0, 0, "café 世界 👩‍👩‍👧‍👦 é");
     });
 
@@ -631,8 +635,8 @@ TEST(Document, unicode_text_save_load_round_trip) {
     const auto loaded = Document::load(bytes);
 
     ASSERT_TRUE(loaded.has_value());
-    EXPECT_EQ(loaded->text(text_id), "café 世界 👩‍👩‍👧‍👦 é");
-    EXPECT_EQ(loaded->length(text_id), 18u);
+    EXPECT_EQ(*loaded->text(text_id), "café 世界 👩‍👩‍👧‍👦 é");
+    EXPECT_EQ(*loaded->length(text_id), 18u);
 }
 
 // -- Counter operations -------------------------------------------------------
@@ -646,7 +650,7 @@ TEST(Document, counter_put_and_increment) {
         tx.increment(root, "views", 5);
     });
 
-    auto val = doc.get(root, "views");
+    auto val = *doc.get(root, "views");
     ASSERT_TRUE(val.has_value());
     auto counter = std::get<Counter>(std::get<ScalarValue>(*val));
     EXPECT_EQ(counter.value, 5);
@@ -662,11 +666,11 @@ TEST(Document, counter_multiple_increments) {
         tx.increment(root, "count", -1);
     });
 
-    auto val = doc.get(root, "views");
+    auto val = *doc.get(root, "views");
     // "views" doesn't exist, "count" does
     EXPECT_FALSE(val.has_value());
 
-    val = doc.get(root, "count");
+    val = *doc.get(root, "count");
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(std::get<Counter>(std::get<ScalarValue>(*val)).value, 12);
 }
@@ -685,9 +689,9 @@ TEST(Document, copy_creates_independent_document) {
     });
 
     // doc1 unchanged
-    EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(*doc1.get(root, "x"))), 1);
+    EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(**doc1.get(root, "x"))), 1);
     // doc2 has new value
-    EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(*doc2.get(root, "x"))), 2);
+    EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(**doc2.get(root, "x"))), 2);
 }
 
 // -- Multiple transactions ----------------------------------------------------
@@ -696,9 +700,7 @@ TEST(Document, multiple_transactions_accumulate) {
     auto doc = Document{};
     auto list_id = ObjId{};
 
-    doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "items", ObjType::list);
-    });
+    doc.transact([&](auto& tx) { list_id = *tx.put_object(root, "items", ObjType::list); });
     doc.transact([&](auto& tx) {
         tx.insert(list_id, 0, std::string{"a"});
     });
@@ -709,8 +711,8 @@ TEST(Document, multiple_transactions_accumulate) {
         tx.insert(list_id, 2, std::string{"c"});
     });
 
-    EXPECT_EQ(doc.length(list_id), 3u);
-    EXPECT_EQ(doc.length(root), 1u);
+    EXPECT_EQ(*doc.length(list_id), 3u);
+    EXPECT_EQ(*doc.length(root), 1u);
 }
 
 // -- get_all (conflicts — single actor always has 1) --------------------------
@@ -721,14 +723,14 @@ TEST(Document, get_all_single_actor_returns_one_value) {
         tx.put(root, "key", std::int64_t{42});
     });
 
-    auto all = doc.get_all(root, "key");
+    auto all = *doc.get_all(root, "key");
     ASSERT_EQ(all.size(), 1u);
     EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(all[0])), 42);
 }
 
 TEST(Document, get_all_missing_key_returns_empty) {
     const auto doc = Document{};
-    EXPECT_TRUE(doc.get_all(root, "missing").empty());
+    EXPECT_TRUE((*doc.get_all(root, "missing")).empty());
 }
 
 // -- Phase 3: Fork and Merge --------------------------------------------------
@@ -760,10 +762,10 @@ TEST(Transaction, throwing_lambda_restores_document_and_history) {
         tx.put(root, "title", "original");
         tx.put(root, "kept", std::int64_t{8});
         tx.put(root, "count", Counter{3});
-        list_id = tx.put_object(root, "items", ObjType::list);
+        list_id = *tx.put_object(root, "items", ObjType::list);
         tx.insert(list_id, 0, std::int64_t{10});
         tx.insert(list_id, 1, std::int64_t{20});
-        text_id = tx.put_object(root, "text", ObjType::text);
+        text_id = *tx.put_object(root, "text", ObjType::text);
         tx.splice_text(text_id, 0, 0, "abc");
     });
 
@@ -780,7 +782,7 @@ TEST(Transaction, throwing_lambda_restores_document_and_history) {
         tx.delete_index(list_id, 2);
         tx.splice_text(text_id, 1, 1, "Z");
         tx.mark(text_id, 0, 2, "bold", true);
-        const auto scratch = tx.put_object(root, "scratch", ObjType::map);
+        const auto scratch = *tx.put_object(root, "scratch", ObjType::map);
         tx.put(scratch, "temporary", true);
         throw std::runtime_error{"stop"};
     }),
@@ -796,7 +798,7 @@ TEST(Transaction, throwing_lambda_restores_document_and_history) {
     EXPECT_EQ(doc.save(), expected.save());
 }
 
-TEST(Transaction, explicit_rollback_is_idempotent_and_prevents_commit) {
+TEST(Transaction, explicit_rollback_prevents_commit_and_reports_reuse) {
     auto doc = make_doc(8);
     doc.transact([](Transaction& tx) { tx.put(root, "value", std::int64_t{1}); });
     const auto bytes_before = doc.save();
@@ -804,11 +806,13 @@ TEST(Transaction, explicit_rollback_is_idempotent_and_prevents_commit) {
     doc.transact([](Transaction& tx) {
         tx.put(root, "value", std::int64_t{2});
         tx.put(root, "temporary", true);
-        tx.rollback();
-        tx.rollback();
-
-        EXPECT_EQ(tx.get(root, "value"), Value{ScalarValue{std::int64_t{1}}});
-        EXPECT_FALSE(tx.get(root, "temporary").has_value());
+        ASSERT_TRUE(tx.rollback());
+        const auto second_rollback = tx.rollback();
+        ASSERT_FALSE(second_rollback);
+        EXPECT_EQ(second_rollback.error().kind, ErrorKind::inactive_transaction);
+        const auto read = tx.get(root, "value");
+        ASSERT_FALSE(read);
+        EXPECT_EQ(read.error().kind, ErrorKind::inactive_transaction);
     });
 
     EXPECT_EQ(doc.save(), bytes_before);
@@ -819,23 +823,24 @@ TEST(Transaction, rollback_restores_multibyte_text_scalar_splice) {
     auto text_id = ObjId{};
     const auto original = std::string{"é界👩‍👩‍👧‍👦é"};
     doc.transact([&](Transaction& tx) {
-        text_id = tx.put_object(root, "text", ObjType::text);
+        text_id = *tx.put_object(root, "text", ObjType::text);
         ASSERT_TRUE(tx.splice_text(text_id, 0, 0, original).has_value());
     });
     const auto bytes_before = doc.save();
 
     doc.transact([&](Transaction& tx) {
         ASSERT_TRUE(tx.splice_text(text_id, 2, 7, "猫🚀").has_value());
-        EXPECT_EQ(tx.text(text_id), "é界猫🚀é");
+        EXPECT_EQ(*tx.text(text_id), "é界猫🚀é");
 
-        tx.rollback();
+        ASSERT_TRUE(tx.rollback());
 
-        EXPECT_EQ(tx.text(text_id), original);
-        EXPECT_EQ(tx.length(text_id), 11u);
+        const auto read = tx.text(text_id);
+        ASSERT_FALSE(read);
+        EXPECT_EQ(read.error().kind, ErrorKind::inactive_transaction);
     });
 
     EXPECT_EQ(doc.save(), bytes_before);
-    EXPECT_EQ(doc.text(text_id), original);
+    EXPECT_EQ(*doc.text(text_id), original);
 }
 
 TEST(Transaction, throwing_return_value_lambda_rolls_back) {
@@ -854,9 +859,9 @@ TEST(Transaction, throwing_return_value_lambda_rolls_back) {
 TEST(Transaction, reads_see_pending_nested_writes) {
     auto doc = make_doc(10);
     doc.transact([](Transaction& tx) {
-        const auto config = tx.put_object(root, "config", ObjType::map);
+        const auto config = *tx.put_object(root, "config", ObjType::map);
         tx.put(config, "enabled", true);
-        const auto items = tx.put_object(config, "items", ObjType::list);
+        const auto items = *tx.put_object(config, "items", ObjType::list);
         tx.insert(items, 0, "first");
         tx.insert(items, 1, "second");
 
@@ -915,15 +920,15 @@ TEST(Transaction, all_document_transaction_forms_accept_commit_options) {
     auto doc = make_doc(13);
 
     const auto object =
-        doc.transact([](Transaction& tx) { return tx.put_object(root, "items", ObjType::list); },
-                     CommitOptions{.message = "create items", .time = std::int64_t{1000}});
-    const auto [result, result_patches] = doc.transact_with_patches(
+        *doc.transact([](Transaction& tx) { return *tx.put_object(root, "items", ObjType::list); },
+                      CommitOptions{.message = "create items", .time = std::int64_t{1000}});
+    const auto [result, result_patches] = *doc.transact_with_patches(
         [&](Transaction& tx) {
             tx.insert(object, 0, "first");
             return std::int64_t{7};
         },
         CommitOptions{.message = "insert first", .time = std::int64_t{2000}});
-    const auto void_patches = doc.transact_with_patches(
+    const auto void_patches = *doc.transact_with_patches(
         [&](Transaction& tx) { tx.insert(object, 1, "second"); },
         CommitOptions{.message = "insert second", .time = std::int64_t{3000}});
 
@@ -1036,15 +1041,15 @@ TEST(Document, fork_creates_independent_copy) {
     auto forked = doc.fork();
 
     // Forked has the same value
-    EXPECT_EQ(get_int_val(forked.get(root, "x")), 10);
+    EXPECT_EQ(get_int_val(*forked.get(root, "x")), 10);
 
     // Mutations are independent
     forked.transact([](auto& tx) {
         tx.put(root, "x", std::int64_t{20});
     });
 
-    EXPECT_EQ(get_int_val(doc.get(root, "x")), 10);
-    EXPECT_EQ(get_int_val(forked.get(root, "x")), 20);
+    EXPECT_EQ(get_int_val(*doc.get(root, "x")), 10);
+    EXPECT_EQ(get_int_val(*forked.get(root, "x")), 20);
 }
 
 TEST(Document, fork_has_different_actor_id) {
@@ -1067,9 +1072,9 @@ TEST(Document, merge_combines_independent_map_edits) {
     doc1.merge(doc2);
 
     // doc1 has both keys
-    EXPECT_EQ(get_int_val(doc1.get(root, "x")), 1);
-    EXPECT_EQ(get_int_val(doc1.get(root, "y")), 2);
-    EXPECT_EQ(doc1.length(root), 2u);
+    EXPECT_EQ(get_int_val(*doc1.get(root, "x")), 1);
+    EXPECT_EQ(get_int_val(*doc1.get(root, "y")), 2);
+    EXPECT_EQ(*doc1.length(root), 2u);
 }
 
 TEST(Document, merge_concurrent_map_edits_creates_conflict) {
@@ -1087,11 +1092,11 @@ TEST(Document, merge_concurrent_map_edits_creates_conflict) {
     doc1.merge(doc2);
 
     // get_all should return both conflicting values
-    auto all = doc1.get_all(root, "x");
+    auto all = *doc1.get_all(root, "x");
     EXPECT_EQ(all.size(), 2u);
 
     // get returns the winner (highest OpId)
-    auto winner = doc1.get(root, "x");
+    auto winner = *doc1.get(root, "x");
     ASSERT_TRUE(winner.has_value());
     // The winner should be one of the two values
     auto winner_int = get_int_val(winner);
@@ -1107,7 +1112,7 @@ TEST(Document, merge_concurrent_list_inserts_rga_ordering) {
     auto doc2 = doc1.fork();
 
     // Get the list ObjId from both docs
-    auto list1_val = doc1.get(root, "list");
+    auto list1_val = *doc1.get(root, "list");
     ASSERT_TRUE(list1_val.has_value());
     auto list1_type = std::get<ObjType>(*list1_val);
     EXPECT_EQ(list1_type, ObjType::list);
@@ -1120,7 +1125,7 @@ TEST(Document, merge_concurrent_list_inserts_rga_ordering) {
     doc1 = make_doc(1);
     auto list_id = ObjId{};
     doc1.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "list", ObjType::list);
+        list_id = *tx.put_object(root, "list", ObjType::list);
         tx.insert(list_id, 0, std::string{"A"});
     });
 
@@ -1137,8 +1142,8 @@ TEST(Document, merge_concurrent_list_inserts_rga_ordering) {
     doc1.merge(doc2);
 
     // After merge, list should have 3 elements: A, then B and C in deterministic order
-    EXPECT_EQ(doc1.length(list_id), 3u);
-    auto vals = doc1.values(list_id);
+    EXPECT_EQ(*doc1.length(list_id), 3u);
+    auto vals = *doc1.values(list_id);
     ASSERT_EQ(vals.size(), 3u);
     // First element is always A
     EXPECT_EQ(std::get<std::string>(std::get<ScalarValue>(vals[0])), "A");
@@ -1152,7 +1157,7 @@ TEST(Document, merge_concurrent_text_edits) {
     auto doc1 = make_doc(1);
     auto text_id = ObjId{};
     doc1.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "text", ObjType::text);
+        text_id = *tx.put_object(root, "text", ObjType::text);
         tx.splice_text(text_id, 0, 0, "Hello");
     });
 
@@ -1170,7 +1175,7 @@ TEST(Document, merge_concurrent_text_edits) {
 
     doc1.merge(doc2);
 
-    auto result = doc1.text(text_id);
+    auto result = *doc1.text(text_id);
     // Both edits should be present
     EXPECT_TRUE(result.find("Hello") != std::string::npos);
     EXPECT_TRUE(result.find("World") != std::string::npos);
@@ -1194,7 +1199,7 @@ TEST(Document, merge_concurrent_counter_increments) {
 
     doc1.merge(doc2);
 
-    auto val = doc1.get(root, "count");
+    auto val = *doc1.get(root, "count");
     ASSERT_TRUE(val.has_value());
     auto counter = std::get<Counter>(std::get<ScalarValue>(*val));
     // 0 + 5 (from doc1) + 3 (from doc2 merge) = 8
@@ -1222,7 +1227,7 @@ TEST(Document, merge_concurrent_delete_and_put) {
 
     // The concurrent put should survive the delete (it supersedes the old value
     // independently — the delete only removes what it saw)
-    auto val = doc1.get(root, "x");
+    auto val = *doc1.get(root, "x");
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(get_int_val(val), 2);
 }
@@ -1250,12 +1255,12 @@ TEST(Document, merge_is_commutative) {
     result_ba.merge(doc1);
 
     // Both should have the same keys and values
-    auto keys_ab = result_ab.keys(root);
-    auto keys_ba = result_ba.keys(root);
+    auto keys_ab = *result_ab.keys(root);
+    auto keys_ba = *result_ba.keys(root);
     EXPECT_EQ(keys_ab, keys_ba);
 
     for (const auto& key : keys_ab) {
-        EXPECT_EQ(result_ab.get(root, key), result_ba.get(root, key));
+        EXPECT_EQ(*result_ab.get(root, key), *result_ba.get(root, key));
     }
 }
 
@@ -1271,15 +1276,15 @@ TEST(Document, merge_is_idempotent) {
     });
 
     doc1.merge(doc2);
-    auto keys_first = doc1.keys(root);
-    auto x_first = doc1.get(root, "x");
-    auto y_first = doc1.get(root, "y");
+    auto keys_first = *doc1.keys(root);
+    auto x_first = *doc1.get(root, "x");
+    auto y_first = *doc1.get(root, "y");
 
     // Merge again — should be a no-op
     doc1.merge(doc2);
-    EXPECT_EQ(doc1.keys(root), keys_first);
-    EXPECT_EQ(doc1.get(root, "x"), x_first);
-    EXPECT_EQ(doc1.get(root, "y"), y_first);
+    EXPECT_EQ(*doc1.keys(root), keys_first);
+    EXPECT_EQ(*doc1.get(root, "x"), x_first);
+    EXPECT_EQ(*doc1.get(root, "y"), y_first);
 }
 
 TEST(Document, merge_has_identity) {
@@ -1288,15 +1293,15 @@ TEST(Document, merge_has_identity) {
         tx.put(root, "x", std::int64_t{42});
     });
 
-    auto keys_before = doc.keys(root);
-    auto val_before = doc.get(root, "x");
+    auto keys_before = *doc.keys(root);
+    auto val_before = *doc.get(root, "x");
 
     // Merge with an empty document
     auto empty = Document{};
     doc.merge(empty);
 
-    EXPECT_EQ(doc.keys(root), keys_before);
-    EXPECT_EQ(doc.get(root, "x"), val_before);
+    EXPECT_EQ(*doc.keys(root), keys_before);
+    EXPECT_EQ(*doc.get(root, "x"), val_before);
 }
 
 TEST(Document, three_way_merge) {
@@ -1326,11 +1331,11 @@ TEST(Document, three_way_merge) {
     doc1.merge(doc2);
     doc1.merge(doc3);
 
-    EXPECT_EQ(doc1.length(root), 4u);  // base, a, b, c
-    EXPECT_EQ(get_int_val(doc1.get(root, "base")), 0);
-    EXPECT_EQ(get_int_val(doc1.get(root, "a")), 1);
-    EXPECT_EQ(get_int_val(doc1.get(root, "b")), 2);
-    EXPECT_EQ(get_int_val(doc1.get(root, "c")), 3);
+    EXPECT_EQ(*doc1.length(root), 4u); // base, a, b, c
+    EXPECT_EQ(get_int_val(*doc1.get(root, "base")), 0);
+    EXPECT_EQ(get_int_val(*doc1.get(root, "a")), 1);
+    EXPECT_EQ(get_int_val(*doc1.get(root, "b")), 2);
+    EXPECT_EQ(get_int_val(*doc1.get(root, "c")), 3);
 }
 
 TEST(Document, get_changes_returns_history) {
@@ -1368,7 +1373,7 @@ TEST(Document, get_changes_since_returns_two_actor_descendants) {
     });
     ASSERT_TRUE(document.merge(other).has_value());
 
-    const auto changes = document.get_changes_since(base_heads);
+    const auto changes = *document.get_changes_since(base_heads);
     ASSERT_EQ(changes.size(), 2u);
     const auto actors = std::set<ActorId>{changes[0].actor, changes[1].actor};
     EXPECT_EQ(actors, (std::set<ActorId>{document.actor_id(), other.actor_id()}));
@@ -1444,8 +1449,8 @@ TEST(Document, save_incremental_advances_after_full_and_incremental_saves) {
     const auto applied = loaded.load_incremental(first);
     ASSERT_TRUE(applied.has_value());
     EXPECT_EQ(*applied, 2u);
-    EXPECT_EQ(loaded.get<std::int64_t>(root, "first"), 1);
-    EXPECT_EQ(loaded.get<std::int64_t>(root, "second"), 2);
+    EXPECT_EQ(*loaded.get<std::int64_t>(root, "first"), 1);
+    EXPECT_EQ(*loaded.get<std::int64_t>(root, "second"), 2);
 }
 
 TEST(Document, load_incremental_rejects_corrupt_data_without_mutation) {
@@ -1475,7 +1480,7 @@ TEST(Document, apply_changes_from_another_doc) {
     auto doc2 = make_doc(2);
     doc2.apply_changes(doc1.get_changes());
 
-    auto val = doc2.get(root, "x");
+    auto val = *doc2.get(root, "x");
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(get_int_val(val), 42);
 }
@@ -1484,7 +1489,7 @@ TEST(Document, merge_nested_objects) {
     auto doc1 = make_doc(1);
     auto nested_id = ObjId{};
     doc1.transact([&](auto& tx) {
-        nested_id = tx.put_object(root, "config", ObjType::map);
+        nested_id = *tx.put_object(root, "config", ObjType::map);
         tx.put(nested_id, "version", std::int64_t{1});
     });
 
@@ -1503,12 +1508,12 @@ TEST(Document, merge_nested_objects) {
     doc1.merge(doc2);
 
     // Both nested keys should be present
-    EXPECT_EQ(doc1.length(nested_id), 3u);  // version, debug, verbose
-    auto debug_val = doc1.get(nested_id, "debug");
+    EXPECT_EQ(*doc1.length(nested_id), 3u); // version, debug, verbose
+    auto debug_val = *doc1.get(nested_id, "debug");
     ASSERT_TRUE(debug_val.has_value());
     EXPECT_TRUE(std::get<bool>(std::get<ScalarValue>(*debug_val)));
 
-    auto verbose_val = doc1.get(nested_id, "verbose");
+    auto verbose_val = *doc1.get(nested_id, "verbose");
     ASSERT_TRUE(verbose_val.has_value());
     EXPECT_FALSE(std::get<bool>(std::get<ScalarValue>(*verbose_val)));
 }
@@ -1536,7 +1541,7 @@ TEST(Document, compact_save_shallow_load_round_trip_preserves_visible_state_and_
     auto list = ObjId{};
     document.transact([&](auto& transaction) {
         transaction.put(root, "name", "checkpoint");
-        list = transaction.put_object(root, "items", ObjType::list);
+        list = *transaction.put_object(root, "items", ObjType::list);
         transaction.insert(list, 0, std::int64_t{1});
         transaction.insert(list, 1, std::int64_t{2});
     });
@@ -1548,9 +1553,9 @@ TEST(Document, compact_save_shallow_load_round_trip_preserves_visible_state_and_
     ASSERT_TRUE(shallow.has_value());
     EXPECT_EQ(shallow->get_heads(), document.get_heads());
     EXPECT_EQ(shallow->get_changes().size(), 0u);
-    EXPECT_EQ(shallow->get<std::string>(root, "name"), "checkpoint");
-    EXPECT_EQ(shallow->length(list), 1u);
-    EXPECT_EQ(shallow->get<std::int64_t>(list, std::size_t{0}), 2);
+    EXPECT_EQ(*shallow->get<std::string>(root, "name"), "checkpoint");
+    EXPECT_EQ(*shallow->length(list), 1u);
+    EXPECT_EQ(*shallow->get<std::int64_t>(list, std::size_t{0}), 2);
     EXPECT_EQ(shallow->save_compact(), compact);
 }
 
@@ -1559,7 +1564,7 @@ TEST(Document, compact_save_full_load_round_trip_preserves_supported_values) {
     auto text = ObjId{};
     document.transact([&](auto& transaction) {
         transaction.put(root, "count", Counter{4});
-        text = transaction.put_object(root, "text", ObjType::text);
+        text = *transaction.put_object(root, "text", ObjType::text);
         ASSERT_TRUE(transaction.splice_text(text, 0, 0, "abc").has_value());
     });
     document.transact([&](auto& transaction) {
@@ -1571,10 +1576,10 @@ TEST(Document, compact_save_full_load_round_trip_preserves_supported_values) {
     auto loaded = Document::load(document.save_compact());
 
     ASSERT_TRUE(loaded.has_value());
-    EXPECT_EQ(loaded->get<Counter>(root, "count"), Counter{7});
-    EXPECT_EQ(loaded->text(text), "aZc");
-    ASSERT_EQ(loaded->marks(text).size(), 1u);
-    EXPECT_EQ(loaded->marks(text).front().name, "bold");
+    EXPECT_EQ(*loaded->get<Counter>(root, "count"), Counter{7});
+    EXPECT_EQ(*loaded->text(text), "aZc");
+    ASSERT_EQ((*loaded->marks(text)).size(), 1u);
+    EXPECT_EQ((*loaded->marks(text)).front().name, "bold");
     EXPECT_EQ(loaded->get_heads(), document.get_heads());
 }
 
@@ -1614,8 +1619,8 @@ TEST(Document, shallow_and_full_peers_merge_post_checkpoint_changes_both_directi
     EXPECT_EQ(full.get_heads(), shallow->get_heads());
     EXPECT_EQ(full.get<std::int64_t>(root, "full"), 1);
     EXPECT_EQ(full.get<std::int64_t>(root, "shallow"), 2);
-    EXPECT_EQ(shallow->get<std::int64_t>(root, "full"), 1);
-    EXPECT_EQ(shallow->get<std::int64_t>(root, "shallow"), 2);
+    EXPECT_EQ(*shallow->get<std::int64_t>(root, "full"), 1);
+    EXPECT_EQ(*shallow->get<std::int64_t>(root, "shallow"), 2);
 }
 
 TEST(Document, shallow_document_queues_change_that_depends_on_pruned_history) {
@@ -1629,11 +1634,15 @@ TEST(Document, shallow_document_queues_change_that_depends_on_pruned_history) {
 
     old_peer.transact(
         [](auto& transaction) { transaction.put(root, "old-branch", std::int64_t{3}); });
-    const auto result = shallow->apply_changes(old_peer.get_changes_since({pruned_head}));
+    const auto result = shallow->apply_changes(*old_peer.get_changes_since({pruned_head}));
 
     ASSERT_TRUE(result.has_value());
-    EXPECT_FALSE(shallow->get_at(root, "first", {pruned_head}).has_value());
-    EXPECT_FALSE(shallow->get(root, "old-branch").has_value());
+    const auto before_failed_read = shallow->save_compact();
+    const auto historical = shallow->get_at(root, "first", {pruned_head});
+    ASSERT_FALSE(historical);
+    EXPECT_EQ(historical.error().kind, ErrorKind::invalid_change);
+    EXPECT_EQ(shallow->save_compact(), before_failed_read);
+    EXPECT_FALSE((*shallow->get(root, "old-branch")).has_value());
     EXPECT_EQ(shallow->get_missing_deps({}), std::vector<ChangeHash>{pruned_head});
 }
 
@@ -1645,8 +1654,8 @@ TEST(Document, cached_historical_read_advances_from_nearby_heads) {
         heads.push_back(document.get_heads());
     }
 
-    EXPECT_EQ(document.get_at(root, "value", heads[89]), Value{ScalarValue{std::int64_t{89}}});
-    EXPECT_EQ(document.get_at(root, "value", heads[90]), Value{ScalarValue{std::int64_t{90}}});
+    EXPECT_EQ(*document.get_at(root, "value", heads[89]), Value{ScalarValue{std::int64_t{89}}});
+    EXPECT_EQ(*document.get_at(root, "value", heads[90]), Value{ScalarValue{std::int64_t{90}}});
 }
 
 TEST(Document, save_and_load_empty_document) {
@@ -1672,7 +1681,7 @@ TEST(Document, save_and_load_empty_document) {
 
     auto loaded = Document::load(bytes);
     ASSERT_TRUE(loaded.has_value());
-    EXPECT_EQ(loaded->length(root), 0u);
+    EXPECT_EQ(*loaded->length(root), 0u);
 }
 
 TEST(Document, save_and_load_int_value) {
@@ -1685,7 +1694,7 @@ TEST(Document, save_and_load_int_value) {
     auto loaded = Document::load(bytes);
     ASSERT_TRUE(loaded.has_value());
 
-    auto val = loaded->get(root, "x");
+    auto val = *loaded->get(root, "x");
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(*val)), 42);
 }
@@ -1698,7 +1707,7 @@ TEST(Document, save_and_load_string_value) {
 
     auto loaded = Document::load(doc.save());
     ASSERT_TRUE(loaded.has_value());
-    EXPECT_EQ(get_str(loaded->get(root, "name")), "Alice");
+    EXPECT_EQ(get_str(*loaded->get(root, "name")), "Alice");
 }
 
 TEST(Document, save_and_load_bool_value) {
@@ -1709,7 +1718,7 @@ TEST(Document, save_and_load_bool_value) {
 
     auto loaded = Document::load(doc.save());
     ASSERT_TRUE(loaded.has_value());
-    auto val = loaded->get(root, "flag");
+    auto val = *loaded->get(root, "flag");
     ASSERT_TRUE(val.has_value());
     EXPECT_TRUE(std::get<bool>(std::get<ScalarValue>(*val)));
 }
@@ -1722,7 +1731,7 @@ TEST(Document, save_and_load_double_value) {
 
     auto loaded = Document::load(doc.save());
     ASSERT_TRUE(loaded.has_value());
-    auto val = loaded->get(root, "pi");
+    auto val = *loaded->get(root, "pi");
     ASSERT_TRUE(val.has_value());
     EXPECT_DOUBLE_EQ(std::get<double>(std::get<ScalarValue>(*val)), 3.14159);
 }
@@ -1735,7 +1744,7 @@ TEST(Document, save_and_load_null_value) {
 
     auto loaded = Document::load(doc.save());
     ASSERT_TRUE(loaded.has_value());
-    auto val = loaded->get(root, "nothing");
+    auto val = *loaded->get(root, "nothing");
     ASSERT_TRUE(val.has_value());
     EXPECT_TRUE(std::holds_alternative<Null>(std::get<ScalarValue>(*val)));
 }
@@ -1748,7 +1757,7 @@ TEST(Document, save_and_load_uint64_value) {
 
     auto loaded = Document::load(doc.save());
     ASSERT_TRUE(loaded.has_value());
-    auto val = loaded->get(root, "big");
+    auto val = *loaded->get(root, "big");
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(std::get<std::uint64_t>(std::get<ScalarValue>(*val)),
               18446744073709551615ULL);
@@ -1765,7 +1774,7 @@ TEST(Document, save_and_load_counter_value) {
 
     auto loaded = Document::load(doc.save());
     ASSERT_TRUE(loaded.has_value());
-    auto val = loaded->get(root, "count");
+    auto val = *loaded->get(root, "count");
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(std::get<Counter>(std::get<ScalarValue>(*val)).value, 107);
 }
@@ -1778,7 +1787,7 @@ TEST(Document, save_and_load_timestamp_value) {
 
     auto loaded = Document::load(doc.save());
     ASSERT_TRUE(loaded.has_value());
-    auto val = loaded->get(root, "when");
+    auto val = *loaded->get(root, "when");
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(std::get<Timestamp>(std::get<ScalarValue>(*val)).millis_since_epoch,
               1700000000000);
@@ -1793,7 +1802,7 @@ TEST(Document, save_and_load_bytes_value) {
 
     auto loaded = Document::load(doc.save());
     ASSERT_TRUE(loaded.has_value());
-    auto val = loaded->get(root, "binary");
+    auto val = *loaded->get(root, "binary");
     ASSERT_TRUE(val.has_value());
     auto& b = std::get<Bytes>(std::get<ScalarValue>(*val));
     ASSERT_EQ(b.size(), 4u);
@@ -1812,18 +1821,18 @@ TEST(Document, save_and_load_multiple_keys) {
 
     auto loaded = Document::load(doc.save());
     ASSERT_TRUE(loaded.has_value());
-    EXPECT_EQ(loaded->length(root), 4u);
-    EXPECT_EQ(get_int_val(loaded->get(root, "a")), 1);
-    EXPECT_EQ(get_str(loaded->get(root, "b")), "hello");
-    EXPECT_TRUE(std::get<bool>(std::get<ScalarValue>(*loaded->get(root, "c"))));
-    EXPECT_DOUBLE_EQ(std::get<double>(std::get<ScalarValue>(*loaded->get(root, "d"))), 2.5);
+    EXPECT_EQ(*loaded->length(root), 4u);
+    EXPECT_EQ(get_int_val(*loaded->get(root, "a")), 1);
+    EXPECT_EQ(get_str(*loaded->get(root, "b")), "hello");
+    EXPECT_TRUE(std::get<bool>(std::get<ScalarValue>(**loaded->get(root, "c"))));
+    EXPECT_DOUBLE_EQ(std::get<double>(std::get<ScalarValue>(**loaded->get(root, "d"))), 2.5);
 }
 
 TEST(Document, save_and_load_nested_map) {
     auto doc = make_doc(1);
     auto nested_id = ObjId{};
     doc.transact([&](auto& tx) {
-        nested_id = tx.put_object(root, "config", ObjType::map);
+        nested_id = *tx.put_object(root, "config", ObjType::map);
         tx.put(nested_id, "version", std::int64_t{3});
         tx.put(nested_id, "name", std::string{"test"});
     });
@@ -1831,21 +1840,21 @@ TEST(Document, save_and_load_nested_map) {
     auto loaded = Document::load(doc.save());
     ASSERT_TRUE(loaded.has_value());
 
-    auto config_val = loaded->get(root, "config");
+    auto config_val = *loaded->get(root, "config");
     ASSERT_TRUE(config_val.has_value());
     EXPECT_EQ(std::get<ObjType>(*config_val), ObjType::map);
 
     // Access nested values
-    EXPECT_EQ(loaded->length(nested_id), 2u);
-    EXPECT_EQ(get_int_val(loaded->get(nested_id, "version")), 3);
-    EXPECT_EQ(get_str(loaded->get(nested_id, "name")), "test");
+    EXPECT_EQ(*loaded->length(nested_id), 2u);
+    EXPECT_EQ(get_int_val(*loaded->get(nested_id, "version")), 3);
+    EXPECT_EQ(get_str(*loaded->get(nested_id, "name")), "test");
 }
 
 TEST(Document, save_and_load_list) {
     auto doc = make_doc(1);
     auto list_id = ObjId{};
     doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "items", ObjType::list);
+        list_id = *tx.put_object(root, "items", ObjType::list);
         tx.insert(list_id, 0, std::int64_t{10});
         tx.insert(list_id, 1, std::int64_t{20});
         tx.insert(list_id, 2, std::int64_t{30});
@@ -1853,9 +1862,9 @@ TEST(Document, save_and_load_list) {
 
     auto loaded = Document::load(doc.save());
     ASSERT_TRUE(loaded.has_value());
-    EXPECT_EQ(loaded->length(list_id), 3u);
+    EXPECT_EQ(*loaded->length(list_id), 3u);
 
-    auto vals = loaded->values(list_id);
+    auto vals = *loaded->values(list_id);
     ASSERT_EQ(vals.size(), 3u);
     EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(vals[0])), 10);
     EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(vals[1])), 20);
@@ -1866,13 +1875,13 @@ TEST(Document, save_and_load_text) {
     auto doc = make_doc(1);
     auto text_id = ObjId{};
     doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "content", ObjType::text);
+        text_id = *tx.put_object(root, "content", ObjType::text);
         tx.splice_text(text_id, 0, 0, "Hello World");
     });
 
     auto loaded = Document::load(doc.save());
     ASSERT_TRUE(loaded.has_value());
-    EXPECT_EQ(loaded->text(text_id), "Hello World");
+    EXPECT_EQ(*loaded->text(text_id), "Hello World");
 }
 
 TEST(Document, save_and_load_multiple_transactions) {
@@ -1889,8 +1898,8 @@ TEST(Document, save_and_load_multiple_transactions) {
 
     auto loaded = Document::load(doc.save());
     ASSERT_TRUE(loaded.has_value());
-    EXPECT_EQ(get_int_val(loaded->get(root, "x")), 2);
-    EXPECT_EQ(get_int_val(loaded->get(root, "y")), 3);
+    EXPECT_EQ(get_int_val(*loaded->get(root, "x")), 2);
+    EXPECT_EQ(get_int_val(*loaded->get(root, "y")), 3);
 
     auto changes = loaded->get_changes();
     EXPECT_EQ(changes.size(), 3u);
@@ -1964,9 +1973,9 @@ TEST(Document, save_and_load_after_merge) {
 
     auto loaded = Document::load(doc1.save());
     ASSERT_TRUE(loaded.has_value());
-    EXPECT_EQ(loaded->length(root), 2u);
-    EXPECT_EQ(get_int_val(loaded->get(root, "x")), 1);
-    EXPECT_EQ(get_int_val(loaded->get(root, "y")), 2);
+    EXPECT_EQ(*loaded->length(root), 2u);
+    EXPECT_EQ(get_int_val(*loaded->get(root, "x")), 1);
+    EXPECT_EQ(get_int_val(*loaded->get(root, "y")), 2);
 }
 
 TEST(Document, save_and_load_can_continue_editing) {
@@ -1983,9 +1992,9 @@ TEST(Document, save_and_load_can_continue_editing) {
         tx.put(root, "y", std::int64_t{2});
     });
 
-    EXPECT_EQ(loaded->length(root), 2u);
-    EXPECT_EQ(get_int_val(loaded->get(root, "x")), 1);
-    EXPECT_EQ(get_int_val(loaded->get(root, "y")), 2);
+    EXPECT_EQ(*loaded->length(root), 2u);
+    EXPECT_EQ(get_int_val(*loaded->get(root, "x")), 1);
+    EXPECT_EQ(get_int_val(*loaded->get(root, "y")), 2);
 }
 
 TEST(Document, save_and_load_can_merge_after_load) {
@@ -2005,9 +2014,9 @@ TEST(Document, save_and_load_can_merge_after_load) {
     });
 
     loaded->merge(doc2);
-    EXPECT_EQ(loaded->length(root), 2u);
-    EXPECT_EQ(get_int_val(loaded->get(root, "x")), 1);
-    EXPECT_EQ(get_int_val(loaded->get(root, "y")), 2);
+    EXPECT_EQ(*loaded->length(root), 2u);
+    EXPECT_EQ(get_int_val(*loaded->get(root, "x")), 1);
+    EXPECT_EQ(get_int_val(*loaded->get(root, "y")), 2);
 }
 
 TEST(Document, save_and_load_deeply_nested) {
@@ -2015,14 +2024,14 @@ TEST(Document, save_and_load_deeply_nested) {
     auto level1 = ObjId{};
     auto level2 = ObjId{};
     doc.transact([&](auto& tx) {
-        level1 = tx.put_object(root, "l1", ObjType::map);
-        level2 = tx.put_object(level1, "l2", ObjType::map);
+        level1 = *tx.put_object(root, "l1", ObjType::map);
+        level2 = *tx.put_object(level1, "l2", ObjType::map);
         tx.put(level2, "deep", std::int64_t{42});
     });
 
     auto loaded = Document::load(doc.save());
     ASSERT_TRUE(loaded.has_value());
-    EXPECT_EQ(get_int_val(loaded->get(level2, "deep")), 42);
+    EXPECT_EQ(get_int_val(*loaded->get(level2, "deep")), 42);
 }
 
 TEST(Document, save_and_load_with_delete) {
@@ -2037,9 +2046,9 @@ TEST(Document, save_and_load_with_delete) {
 
     auto loaded = Document::load(doc.save());
     ASSERT_TRUE(loaded.has_value());
-    EXPECT_EQ(loaded->length(root), 1u);
-    EXPECT_TRUE(loaded->get(root, "keep").has_value());
-    EXPECT_FALSE(loaded->get(root, "remove").has_value());
+    EXPECT_EQ(*loaded->length(root), 1u);
+    EXPECT_TRUE((*loaded->get(root, "keep")).has_value());
+    EXPECT_FALSE((*loaded->get(root, "remove")).has_value());
 }
 
 TEST(Document, save_and_load_negative_int) {
@@ -2050,7 +2059,7 @@ TEST(Document, save_and_load_negative_int) {
 
     auto loaded = Document::load(doc.save());
     ASSERT_TRUE(loaded.has_value());
-    EXPECT_EQ(get_int_val(loaded->get(root, "neg")), -999);
+    EXPECT_EQ(get_int_val(*loaded->get(root, "neg")), -999);
 }
 
 // -- Corrupt data handling ----------------------------------------------------
@@ -2100,8 +2109,8 @@ TEST(Document, double_save_load_round_trip) {
     auto loaded2 = Document::load(loaded1->save());
     ASSERT_TRUE(loaded2.has_value());
 
-    EXPECT_EQ(get_int_val(loaded2->get(root, "x")), 42);
-    EXPECT_EQ(get_str(loaded2->get(root, "s")), "hello");
+    EXPECT_EQ(get_int_val(*loaded2->get(root, "x")), 42);
+    EXPECT_EQ(get_str(*loaded2->get(root, "s")), "hello");
 }
 
 // -- Phase 5: Sync Protocol ---------------------------------------------------
@@ -2149,7 +2158,7 @@ TEST(Document, sync_full_and_shallow_peers_exchanges_post_checkpoint_changes) {
     EXPECT_GT(messages, 0);
     EXPECT_EQ(full.get_heads(), shallow->get_heads());
     EXPECT_EQ(full.get<std::int64_t>(root, "shallow"), 2);
-    EXPECT_EQ(shallow->get<std::int64_t>(root, "full"), 1);
+    EXPECT_EQ(*shallow->get<std::int64_t>(root, "full"), 1);
 }
 
 TEST(Document, sync_two_fresh_documents) {
@@ -2166,12 +2175,12 @@ TEST(Document, sync_two_fresh_documents) {
     sync_docs(doc1, doc2);
 
     // Both should have both keys
-    EXPECT_EQ(doc1.length(root), 2u);
-    EXPECT_EQ(doc2.length(root), 2u);
-    EXPECT_EQ(get_int_val(doc1.get(root, "x")), 1);
-    EXPECT_EQ(get_int_val(doc1.get(root, "y")), 2);
-    EXPECT_EQ(get_int_val(doc2.get(root, "x")), 1);
-    EXPECT_EQ(get_int_val(doc2.get(root, "y")), 2);
+    EXPECT_EQ(*doc1.length(root), 2u);
+    EXPECT_EQ(*doc2.length(root), 2u);
+    EXPECT_EQ(get_int_val(*doc1.get(root, "x")), 1);
+    EXPECT_EQ(get_int_val(*doc1.get(root, "y")), 2);
+    EXPECT_EQ(get_int_val(*doc2.get(root, "x")), 1);
+    EXPECT_EQ(get_int_val(*doc2.get(root, "y")), 2);
 }
 
 TEST(Document, sync_one_empty_one_populated) {
@@ -2185,9 +2194,9 @@ TEST(Document, sync_one_empty_one_populated) {
 
     sync_docs(doc1, doc2);
 
-    EXPECT_EQ(doc2.length(root), 2u);
-    EXPECT_EQ(get_int_val(doc2.get(root, "a")), 10);
-    EXPECT_EQ(get_str(doc2.get(root, "b")), "hello");
+    EXPECT_EQ(*doc2.length(root), 2u);
+    EXPECT_EQ(get_int_val(*doc2.get(root, "a")), 10);
+    EXPECT_EQ(get_str(*doc2.get(root, "b")), "hello");
 }
 
 TEST(Document, sync_already_in_sync_produces_few_messages) {
@@ -2237,21 +2246,21 @@ TEST(Document, sync_after_concurrent_edits) {
     sync_docs(doc1, doc2);
 
     // Both should have all three keys
-    EXPECT_EQ(doc1.length(root), 3u);
-    EXPECT_EQ(doc2.length(root), 3u);
-    EXPECT_EQ(get_int_val(doc1.get(root, "base")), 0);
-    EXPECT_EQ(get_int_val(doc1.get(root, "from_1")), 1);
-    EXPECT_EQ(get_int_val(doc1.get(root, "from_2")), 2);
-    EXPECT_EQ(get_int_val(doc2.get(root, "base")), 0);
-    EXPECT_EQ(get_int_val(doc2.get(root, "from_1")), 1);
-    EXPECT_EQ(get_int_val(doc2.get(root, "from_2")), 2);
+    EXPECT_EQ(*doc1.length(root), 3u);
+    EXPECT_EQ(*doc2.length(root), 3u);
+    EXPECT_EQ(get_int_val(*doc1.get(root, "base")), 0);
+    EXPECT_EQ(get_int_val(*doc1.get(root, "from_1")), 1);
+    EXPECT_EQ(get_int_val(*doc1.get(root, "from_2")), 2);
+    EXPECT_EQ(get_int_val(*doc2.get(root, "base")), 0);
+    EXPECT_EQ(get_int_val(*doc2.get(root, "from_1")), 1);
+    EXPECT_EQ(get_int_val(*doc2.get(root, "from_2")), 2);
 }
 
 TEST(Document, sync_with_list_operations) {
     auto doc1 = make_doc(1);
     auto list_id = ObjId{};
     doc1.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "items", ObjType::list);
+        list_id = *tx.put_object(root, "items", ObjType::list);
         tx.insert(list_id, 0, std::string{"A"});
     });
 
@@ -2259,15 +2268,15 @@ TEST(Document, sync_with_list_operations) {
 
     sync_docs(doc1, doc2);
 
-    EXPECT_EQ(doc2.length(list_id), 1u);
-    EXPECT_EQ(get_str(doc2.get(list_id, std::size_t{0})), "A");
+    EXPECT_EQ(*doc2.length(list_id), 1u);
+    EXPECT_EQ(get_str(*doc2.get(list_id, std::size_t{0})), "A");
 }
 
 TEST(Document, sync_with_text_operations) {
     auto doc1 = make_doc(1);
     auto text_id = ObjId{};
     doc1.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "content", ObjType::text);
+        text_id = *tx.put_object(root, "content", ObjType::text);
         tx.splice_text(text_id, 0, 0, "Hello");
     });
 
@@ -2275,7 +2284,7 @@ TEST(Document, sync_with_text_operations) {
 
     sync_docs(doc1, doc2);
 
-    EXPECT_EQ(doc2.text(text_id), "Hello");
+    EXPECT_EQ(*doc2.text(text_id), "Hello");
 }
 
 TEST(Document, sync_multiple_transactions) {
@@ -2294,8 +2303,8 @@ TEST(Document, sync_multiple_transactions) {
 
     sync_docs(doc1, doc2);
 
-    EXPECT_EQ(get_int_val(doc2.get(root, "x")), 2);
-    EXPECT_EQ(get_int_val(doc2.get(root, "y")), 3);
+    EXPECT_EQ(get_int_val(*doc2.get(root, "x")), 2);
+    EXPECT_EQ(get_int_val(*doc2.get(root, "y")), 3);
     EXPECT_EQ(doc2.get_changes().size(), 3u);
 }
 
@@ -2324,10 +2333,10 @@ TEST(Document, sync_three_peers) {
 
     // All three should have all keys
     for (auto* doc : {&doc1, &doc2, &doc3}) {
-        EXPECT_EQ(doc->length(root), 3u);
-        EXPECT_EQ(get_int_val(doc->get(root, "a")), 1);
-        EXPECT_EQ(get_int_val(doc->get(root, "b")), 2);
-        EXPECT_EQ(get_int_val(doc->get(root, "c")), 3);
+        EXPECT_EQ(*doc->length(root), 3u);
+        EXPECT_EQ(get_int_val(*doc->get(root, "a")), 1);
+        EXPECT_EQ(get_int_val(*doc->get(root, "b")), 2);
+        EXPECT_EQ(get_int_val(*doc->get(root, "c")), 3);
     }
 }
 
@@ -2340,21 +2349,21 @@ TEST(Document, sync_incremental_changes) {
         tx.put(root, "v", std::int64_t{1});
     });
     sync_docs(doc1, doc2);
-    EXPECT_EQ(get_int_val(doc2.get(root, "v")), 1);
+    EXPECT_EQ(get_int_val(*doc2.get(root, "v")), 1);
 
     // Second sync: incremental update
     doc1.transact([](auto& tx) {
         tx.put(root, "v", std::int64_t{2});
     });
     sync_docs(doc1, doc2);
-    EXPECT_EQ(get_int_val(doc2.get(root, "v")), 2);
+    EXPECT_EQ(get_int_val(*doc2.get(root, "v")), 2);
 
     // Third sync: update from other direction
     doc2.transact([](auto& tx) {
         tx.put(root, "w", std::int64_t{99});
     });
     sync_docs(doc1, doc2);
-    EXPECT_EQ(get_int_val(doc1.get(root, "w")), 99);
+    EXPECT_EQ(get_int_val(*doc1.get(root, "w")), 99);
 }
 
 TEST(Document, sync_with_counter_increments) {
@@ -2374,12 +2383,12 @@ TEST(Document, sync_with_counter_increments) {
 
     sync_docs(doc1, doc2);
 
-    auto val1 = doc1.get(root, "count");
+    auto val1 = *doc1.get(root, "count");
     ASSERT_TRUE(val1.has_value());
     auto c1 = std::get<Counter>(std::get<ScalarValue>(*val1));
     EXPECT_EQ(c1.value, 8);
 
-    auto val2 = doc2.get(root, "count");
+    auto val2 = *doc2.get(root, "count");
     ASSERT_TRUE(val2.has_value());
     auto c2 = std::get<Counter>(std::get<ScalarValue>(*val2));
     EXPECT_EQ(c2.value, 8);
@@ -2389,7 +2398,7 @@ TEST(Document, sync_with_nested_objects) {
     auto doc1 = make_doc(1);
     auto nested = ObjId{};
     doc1.transact([&](auto& tx) {
-        nested = tx.put_object(root, "config", ObjType::map);
+        nested = *tx.put_object(root, "config", ObjType::map);
         tx.put(nested, "debug", true);
         tx.put(nested, "version", std::int64_t{3});
     });
@@ -2397,11 +2406,11 @@ TEST(Document, sync_with_nested_objects) {
     auto doc2 = make_doc(2);
     sync_docs(doc1, doc2);
 
-    EXPECT_EQ(doc2.length(nested), 2u);
-    auto debug = doc2.get(nested, "debug");
+    EXPECT_EQ(*doc2.length(nested), 2u);
+    auto debug = *doc2.get(nested, "debug");
     ASSERT_TRUE(debug.has_value());
     EXPECT_TRUE(std::get<bool>(std::get<ScalarValue>(*debug)));
-    EXPECT_EQ(get_int_val(doc2.get(nested, "version")), 3);
+    EXPECT_EQ(get_int_val(*doc2.get(nested, "version")), 3);
 }
 
 TEST(Document, sync_generates_first_message_from_empty) {
@@ -2460,9 +2469,9 @@ TEST(Document, sync_bidirectional_concurrent) {
     sync_docs(doc1, doc2);
 
     // Should converge
-    EXPECT_EQ(doc1.keys(root), doc2.keys(root));
-    EXPECT_EQ(doc1.length(root), 3u);
-    EXPECT_EQ(doc2.length(root), 3u);
+    EXPECT_EQ(*doc1.keys(root), *doc2.keys(root));
+    EXPECT_EQ(*doc1.length(root), 3u);
+    EXPECT_EQ(*doc2.length(root), 3u);
 }
 
 TEST(Document, sync_with_deletes) {
@@ -2474,7 +2483,7 @@ TEST(Document, sync_with_deletes) {
 
     auto doc2 = make_doc(2);
     sync_docs(doc1, doc2);
-    EXPECT_EQ(doc2.length(root), 2u);
+    EXPECT_EQ(*doc2.length(root), 2u);
 
     // Delete on doc1
     doc1.transact([](auto& tx) {
@@ -2482,9 +2491,9 @@ TEST(Document, sync_with_deletes) {
     });
     sync_docs(doc1, doc2);
 
-    EXPECT_EQ(doc2.length(root), 1u);
-    EXPECT_TRUE(doc2.get(root, "keep").has_value());
-    EXPECT_FALSE(doc2.get(root, "remove").has_value());
+    EXPECT_EQ(*doc2.length(root), 1u);
+    EXPECT_TRUE((*doc2.get(root, "keep")).has_value());
+    EXPECT_FALSE((*doc2.get(root, "remove")).has_value());
 }
 
 // =============================================================================
@@ -2493,7 +2502,7 @@ TEST(Document, sync_with_deletes) {
 
 TEST(Document, transact_with_patches_map_put) {
     auto doc = Document{};
-    auto patches = doc.transact_with_patches([](auto& tx) {
+    auto patches = *doc.transact_with_patches([](auto& tx) {
         tx.put(root, "name", std::string{"Alice"});
         tx.put(root, "age", std::int64_t{30});
     });
@@ -2524,9 +2533,7 @@ TEST(Document, transact_with_patches_map_delete) {
         tx.put(root, "key", std::int64_t{1});
     });
 
-    auto patches = doc.transact_with_patches([](auto& tx) {
-        tx.delete_key(root, "key");
-    });
+    auto patches = *doc.transact_with_patches([](auto& tx) { tx.delete_key(root, "key"); });
 
     EXPECT_EQ(patches.size(), 1u);
     auto* del = std::get_if<PatchDelete>(&patches[0].action);
@@ -2538,11 +2545,9 @@ TEST(Document, transact_with_patches_map_delete) {
 TEST(Document, transact_with_patches_list_insert) {
     auto doc = Document{};
     ObjId list_id;
-    doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "items", ObjType::list);
-    });
+    doc.transact([&](auto& tx) { list_id = *tx.put_object(root, "items", ObjType::list); });
 
-    auto patches = doc.transact_with_patches([&](auto& tx) {
+    auto patches = *doc.transact_with_patches([&](auto& tx) {
         tx.insert(list_id, 0, std::string{"a"});
         tx.insert(list_id, 1, std::string{"b"});
     });
@@ -2564,14 +2569,12 @@ TEST(Document, transact_with_patches_list_delete) {
     auto doc = Document{};
     ObjId list_id;
     doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "items", ObjType::list);
+        list_id = *tx.put_object(root, "items", ObjType::list);
         tx.insert(list_id, 0, std::string{"a"});
         tx.insert(list_id, 1, std::string{"b"});
     });
 
-    auto patches = doc.transact_with_patches([&](auto& tx) {
-        tx.delete_index(list_id, 0);
-    });
+    auto patches = *doc.transact_with_patches([&](auto& tx) { tx.delete_index(list_id, 0); });
 
     EXPECT_EQ(patches.size(), 1u);
     auto* del = std::get_if<PatchDelete>(&patches[0].action);
@@ -2583,13 +2586,10 @@ TEST(Document, transact_with_patches_list_delete) {
 TEST(Document, transact_with_patches_splice_text_insert_only) {
     auto doc = Document{};
     ObjId text_id;
-    doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "content", ObjType::text);
-    });
+    doc.transact([&](auto& tx) { text_id = *tx.put_object(root, "content", ObjType::text); });
 
-    auto patches = doc.transact_with_patches([&](auto& tx) {
-        tx.splice_text(text_id, 0, 0, "Hello");
-    });
+    auto patches =
+        *doc.transact_with_patches([&](auto& tx) { tx.splice_text(text_id, 0, 0, "Hello"); });
 
     // Should coalesce into a single PatchSpliceText
     EXPECT_EQ(patches.size(), 1u);
@@ -2604,13 +2604,12 @@ TEST(Document, transact_with_patches_splice_text_replace) {
     auto doc = Document{};
     ObjId text_id;
     doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "content", ObjType::text);
+        text_id = *tx.put_object(root, "content", ObjType::text);
         tx.splice_text(text_id, 0, 0, "Hello World");
     });
 
-    auto patches = doc.transact_with_patches([&](auto& tx) {
-        tx.splice_text(text_id, 5, 6, " C++23");
-    });
+    auto patches =
+        *doc.transact_with_patches([&](auto& tx) { tx.splice_text(text_id, 5, 6, " C++23"); });
 
     // Should coalesce: delete 6 + insert " C++23"
     EXPECT_EQ(patches.size(), 1u);
@@ -2621,7 +2620,7 @@ TEST(Document, transact_with_patches_splice_text_replace) {
     EXPECT_EQ(splice->text, " C++23");
 
     // Verify final text
-    EXPECT_EQ(doc.text(text_id), "Hello C++23");
+    EXPECT_EQ(*doc.text(text_id), "Hello C++23");
 }
 
 TEST(Document, transact_with_patches_counter_increment) {
@@ -2630,9 +2629,7 @@ TEST(Document, transact_with_patches_counter_increment) {
         tx.put(root, "views", Counter{0});
     });
 
-    auto patches = doc.transact_with_patches([](auto& tx) {
-        tx.increment(root, "views", 5);
-    });
+    auto patches = *doc.transact_with_patches([](auto& tx) { tx.increment(root, "views", 5); });
 
     EXPECT_EQ(patches.size(), 1u);
     auto* inc = std::get_if<PatchIncrement>(&patches[0].action);
@@ -2642,9 +2639,8 @@ TEST(Document, transact_with_patches_counter_increment) {
 
 TEST(Document, transact_with_patches_make_object) {
     auto doc = Document{};
-    auto patches = doc.transact_with_patches([](auto& tx) {
-        tx.put_object(root, "nested", ObjType::map);
-    });
+    auto patches =
+        *doc.transact_with_patches([](auto& tx) { tx.put_object(root, "nested", ObjType::map); });
 
     EXPECT_EQ(patches.size(), 1u);
     auto* put = std::get_if<PatchPut>(&patches[0].action);
@@ -2656,7 +2652,7 @@ TEST(Document, transact_with_patches_make_object) {
 
 TEST(Document, transact_with_patches_empty_transaction) {
     auto doc = Document{};
-    auto patches = doc.transact_with_patches([](auto& /*tx*/) {
+    auto patches = *doc.transact_with_patches([](auto& /*tx*/) {
         // no ops
     });
 
@@ -2725,15 +2721,15 @@ TEST(Document, merge_with_patches_matches_visible_map_diff_in_both_directions) {
         },
     };
     EXPECT_EQ(*right_patches, expected_right);
-    EXPECT_EQ(left.get(root, "overlap"), right.get(root, "overlap"));
-    EXPECT_EQ(left.get_all(root, "overlap").size(), 2u);
-    EXPECT_EQ(right.get_all(root, "overlap").size(), 2u);
+    EXPECT_EQ(*left.get(root, "overlap"), *right.get(root, "overlap"));
+    EXPECT_EQ((*left.get_all(root, "overlap")).size(), 2u);
+    EXPECT_EQ((*right.get_all(root, "overlap")).size(), 2u);
 }
 
 TEST(Document, apply_changes_with_patches_reports_remote_list_insert_and_delete) {
     auto source = make_doc(1);
-    const auto list_id = source.transact([](auto& tx) {
-        const auto list = tx.put_object(root, "items", ObjType::list);
+    const auto list_id = *source.transact([](auto& tx) {
+        const auto list = *tx.put_object(root, "items", ObjType::list);
         tx.insert(list, 0, std::string{"a"});
         tx.insert(list, 1, std::string{"b"});
         tx.insert(list, 2, std::string{"c"});
@@ -2767,13 +2763,13 @@ TEST(Document, apply_changes_with_patches_reports_remote_list_insert_and_delete)
         },
     };
     EXPECT_EQ(*patches, expected);
-    EXPECT_EQ(target.values(list_id), source.values(list_id));
+    EXPECT_EQ(*target.values(list_id), *source.values(list_id));
 }
 
 TEST(Document, apply_changes_with_patches_reports_remote_text_splice) {
     auto source = make_doc(1);
-    const auto text_id = source.transact([](auto& tx) {
-        const auto text = tx.put_object(root, "body", ObjType::text);
+    const auto text_id = *source.transact([](auto& tx) {
+        const auto text = *tx.put_object(root, "body", ObjType::text);
         tx.splice_text(text, 0, 0, "Hello world");
         return text;
     });
@@ -2798,7 +2794,7 @@ TEST(Document, apply_changes_with_patches_reports_remote_text_splice) {
         },
     };
     EXPECT_EQ(*patches, expected);
-    EXPECT_EQ(target.text(text_id), "Hello CRDT");
+    EXPECT_EQ(*target.text(text_id), "Hello CRDT");
 }
 
 TEST(Document, apply_changes_with_patches_reports_queued_change_when_dependency_arrives) {
@@ -2836,7 +2832,7 @@ TEST(Document, apply_changes_with_patches_reports_queued_change_when_dependency_
         },
     };
     EXPECT_EQ(*applied_patches, expected);
-    EXPECT_EQ(target.get<std::int64_t>(root, "dependent"), 2);
+    EXPECT_EQ(*target.get<std::int64_t>(root, "dependent"), 2);
 }
 
 TEST(Document, receive_sync_message_with_patches_reports_remote_changes) {
@@ -2871,7 +2867,7 @@ TEST(Document, receive_sync_message_with_patches_reports_remote_changes) {
         },
     };
     EXPECT_EQ(*patches, expected);
-    EXPECT_EQ(target.get<std::int64_t>(root, "synced"), 7);
+    EXPECT_EQ(*target.get<std::int64_t>(root, "synced"), 7);
 }
 
 TEST(Document, load_with_patches_materializes_saved_document) {
@@ -2879,7 +2875,7 @@ TEST(Document, load_with_patches_materializes_saved_document) {
     auto list_id = ObjId{};
     source.transact([&](auto& tx) {
         tx.put(root, "title", std::string{"Saved"});
-        list_id = tx.put_object(root, "items", ObjType::list);
+        list_id = *tx.put_object(root, "items", ObjType::list);
         tx.insert(list_id, 0, std::string{"a"});
         tx.insert(list_id, 1, std::string{"b"});
     });
@@ -2924,8 +2920,8 @@ TEST(Document, load_with_patches_materializes_saved_document) {
         },
     };
     EXPECT_EQ(*patches, expected);
-    EXPECT_EQ(loaded.get<std::string>(root, "title"), "Saved");
-    EXPECT_EQ(loaded.values(list_id), source.values(list_id));
+    EXPECT_EQ(*loaded.get<std::string>(root, "title"), "Saved");
+    EXPECT_EQ(*loaded.values(list_id), *source.values(list_id));
 }
 
 TEST(Document, load_with_patches_rejects_invalid_data_without_replacing_output) {
@@ -2937,7 +2933,7 @@ TEST(Document, load_with_patches_rejects_invalid_data_without_replacing_output) 
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().kind, ErrorKind::invalid_document);
-    EXPECT_EQ(document.get<std::int64_t>(root, "keep"), 1);
+    EXPECT_EQ(*document.get<std::int64_t>(root, "keep"), 1);
 }
 
 // =============================================================================
@@ -2957,12 +2953,12 @@ TEST(Document, get_at_reads_past_map_value) {
     });
 
     // Current value is 2
-    auto current = doc.get(root, "x");
+    auto current = *doc.get(root, "x");
     ASSERT_TRUE(current.has_value());
     EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(*current)), 2);
 
     // Value at v1 was 1
-    auto past = doc.get_at(root, "x", heads_v1);
+    auto past = *doc.get_at(root, "x", heads_v1);
     ASSERT_TRUE(past.has_value());
     EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(*past)), 1);
 }
@@ -2971,7 +2967,7 @@ TEST(Document, get_at_reads_past_list_value) {
     auto doc = Document{};
     ObjId list_id;
     doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "items", ObjType::list);
+        list_id = *tx.put_object(root, "items", ObjType::list);
         tx.insert(list_id, 0, std::string{"first"});
     });
 
@@ -2982,10 +2978,10 @@ TEST(Document, get_at_reads_past_list_value) {
     });
 
     // Current length is 2
-    EXPECT_EQ(doc.length(list_id), 2u);
+    EXPECT_EQ(*doc.length(list_id), 2u);
 
     // At v1, list index 0 had "first"
-    auto past = doc.get_at(list_id, std::size_t{0}, heads_v1);
+    auto past = *doc.get_at(list_id, std::size_t{0}, heads_v1);
     ASSERT_TRUE(past.has_value());
     EXPECT_EQ(std::get<std::string>(std::get<ScalarValue>(*past)), "first");
 }
@@ -3003,10 +2999,10 @@ TEST(Document, keys_at_reads_past_keys) {
     });
 
     // Current keys: a, b
-    EXPECT_EQ(doc.keys(root).size(), 2u);
+    EXPECT_EQ((*doc.keys(root)).size(), 2u);
 
     // At v1: only "a"
-    auto past_keys = doc.keys_at(root, heads_v1);
+    auto past_keys = *doc.keys_at(root, heads_v1);
     EXPECT_EQ(past_keys.size(), 1u);
     EXPECT_EQ(past_keys[0], "a");
 }
@@ -3023,7 +3019,7 @@ TEST(Document, values_at_reads_past_values) {
         tx.put(root, "x", std::int64_t{20});
     });
 
-    auto past_vals = doc.values_at(root, heads_v1);
+    auto past_vals = *doc.values_at(root, heads_v1);
     EXPECT_EQ(past_vals.size(), 1u);
     EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(past_vals[0])), 10);
 }
@@ -3032,7 +3028,7 @@ TEST(Document, length_at_reads_past_length) {
     auto doc = Document{};
     ObjId list_id;
     doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "items", ObjType::list);
+        list_id = *tx.put_object(root, "items", ObjType::list);
         tx.insert(list_id, 0, std::string{"a"});
     });
 
@@ -3043,15 +3039,15 @@ TEST(Document, length_at_reads_past_length) {
         tx.insert(list_id, 2, std::string{"c"});
     });
 
-    EXPECT_EQ(doc.length(list_id), 3u);
-    EXPECT_EQ(doc.length_at(list_id, heads_v1), 1u);
+    EXPECT_EQ(*doc.length(list_id), 3u);
+    EXPECT_EQ(*doc.length_at(list_id, heads_v1), 1u);
 }
 
 TEST(Document, text_at_reads_past_text) {
     auto doc = Document{};
     ObjId text_id;
     doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "content", ObjType::text);
+        text_id = *tx.put_object(root, "content", ObjType::text);
         tx.splice_text(text_id, 0, 0, "Hello");
     });
 
@@ -3061,8 +3057,8 @@ TEST(Document, text_at_reads_past_text) {
         tx.splice_text(text_id, 5, 0, " World");
     });
 
-    EXPECT_EQ(doc.text(text_id), "Hello World");
-    EXPECT_EQ(doc.text_at(text_id, heads_v1), "Hello");
+    EXPECT_EQ(*doc.text(text_id), "Hello World");
+    EXPECT_EQ(*doc.text_at(text_id, heads_v1), "Hello");
 }
 
 TEST(Document, get_at_missing_key_returns_nullopt) {
@@ -3073,7 +3069,7 @@ TEST(Document, get_at_missing_key_returns_nullopt) {
 
     auto heads = doc.get_heads();
 
-    auto result = doc.get_at(root, "nonexistent", heads);
+    auto result = *doc.get_at(root, "nonexistent", heads);
     EXPECT_FALSE(result.has_value());
 }
 
@@ -3089,7 +3085,7 @@ TEST(Document, get_at_deleted_key_returns_nullopt) {
 
     auto heads_after_delete = doc.get_heads();
 
-    auto result = doc.get_at(root, "x", heads_after_delete);
+    auto result = *doc.get_at(root, "x", heads_after_delete);
     EXPECT_FALSE(result.has_value());
 }
 
@@ -3110,15 +3106,15 @@ TEST(Document, historical_read_multiple_versions) {
     });
 
     // Read each version
-    auto v1 = doc.get_at(root, "x", heads_v1);
+    auto v1 = *doc.get_at(root, "x", heads_v1);
     ASSERT_TRUE(v1.has_value());
     EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(*v1)), 1);
 
-    auto v2 = doc.get_at(root, "x", heads_v2);
+    auto v2 = *doc.get_at(root, "x", heads_v2);
     ASSERT_TRUE(v2.has_value());
     EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(*v2)), 2);
 
-    auto current = doc.get(root, "x");
+    auto current = *doc.get(root, "x");
     ASSERT_TRUE(current.has_value());
     EXPECT_EQ(std::get<std::int64_t>(std::get<ScalarValue>(*current)), 3);
 }
@@ -3131,7 +3127,7 @@ TEST(Document, cursor_and_resolve_basic) {
     auto doc = Document{};
     ObjId list_id;
     doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "items", ObjType::list);
+        list_id = *tx.put_object(root, "items", ObjType::list);
         tx.insert(list_id, 0, std::string{"a"});
         tx.insert(list_id, 1, std::string{"b"});
         tx.insert(list_id, 2, std::string{"c"});
@@ -3142,7 +3138,7 @@ TEST(Document, cursor_and_resolve_basic) {
     ASSERT_TRUE(cur.has_value());
 
     // Resolve cursor — should be at index 1
-    auto idx = doc.resolve_cursor(list_id, *cur);
+    auto idx = *doc.resolve_cursor(list_id, *cur);
     ASSERT_TRUE(idx.has_value());
     EXPECT_EQ(*idx, 1u);
 }
@@ -3151,7 +3147,7 @@ TEST(Document, cursor_survives_insert_before) {
     auto doc = Document{};
     ObjId list_id;
     doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "items", ObjType::list);
+        list_id = *tx.put_object(root, "items", ObjType::list);
         tx.insert(list_id, 0, std::string{"a"});
         tx.insert(list_id, 1, std::string{"b"});
         tx.insert(list_id, 2, std::string{"c"});
@@ -3167,12 +3163,12 @@ TEST(Document, cursor_survives_insert_before) {
     });
 
     // "b" is now at index 2
-    auto idx = doc.resolve_cursor(list_id, *cur);
+    auto idx = *doc.resolve_cursor(list_id, *cur);
     ASSERT_TRUE(idx.has_value());
     EXPECT_EQ(*idx, 2u);
 
     // Verify the element at the cursor position is still "b"
-    auto val = doc.get(list_id, *idx);
+    auto val = *doc.get(list_id, *idx);
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(std::get<std::string>(std::get<ScalarValue>(*val)), "b");
 }
@@ -3181,7 +3177,7 @@ TEST(Document, cursor_survives_insert_after) {
     auto doc = Document{};
     ObjId list_id;
     doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "items", ObjType::list);
+        list_id = *tx.put_object(root, "items", ObjType::list);
         tx.insert(list_id, 0, std::string{"a"});
         tx.insert(list_id, 1, std::string{"b"});
         tx.insert(list_id, 2, std::string{"c"});
@@ -3197,7 +3193,7 @@ TEST(Document, cursor_survives_insert_after) {
     });
 
     // "b" is still at index 1
-    auto idx = doc.resolve_cursor(list_id, *cur);
+    auto idx = *doc.resolve_cursor(list_id, *cur);
     ASSERT_TRUE(idx.has_value());
     EXPECT_EQ(*idx, 1u);
 }
@@ -3206,7 +3202,7 @@ TEST(Document, cursor_on_deleted_element_returns_nullopt) {
     auto doc = Document{};
     ObjId list_id;
     doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "items", ObjType::list);
+        list_id = *tx.put_object(root, "items", ObjType::list);
         tx.insert(list_id, 0, std::string{"a"});
         tx.insert(list_id, 1, std::string{"b"});
     });
@@ -3220,7 +3216,7 @@ TEST(Document, cursor_on_deleted_element_returns_nullopt) {
     });
 
     // Cursor should resolve to nullopt (element deleted)
-    auto idx = doc.resolve_cursor(list_id, *cur);
+    auto idx = *doc.resolve_cursor(list_id, *cur);
     EXPECT_FALSE(idx.has_value());
 }
 
@@ -3228,7 +3224,7 @@ TEST(Document, cursor_out_of_bounds_returns_nullopt) {
     auto doc = Document{};
     ObjId list_id;
     doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "items", ObjType::list);
+        list_id = *tx.put_object(root, "items", ObjType::list);
         tx.insert(list_id, 0, std::string{"a"});
     });
 
@@ -3240,7 +3236,7 @@ TEST(Document, cursor_on_text) {
     auto doc = Document{};
     ObjId text_id;
     doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "content", ObjType::text);
+        text_id = *tx.put_object(root, "content", ObjType::text);
         tx.splice_text(text_id, 0, 0, "Hello");
     });
 
@@ -3254,11 +3250,11 @@ TEST(Document, cursor_on_text) {
     });
 
     // 'l' should now be at position 6
-    auto idx = doc.resolve_cursor(text_id, *cur);
+    auto idx = *doc.resolve_cursor(text_id, *cur);
     ASSERT_TRUE(idx.has_value());
     EXPECT_EQ(*idx, 6u);
 
-    EXPECT_EQ(doc.text(text_id), ">>> Hello");
+    EXPECT_EQ(*doc.text(text_id), ">>> Hello");
 }
 
 TEST(Document, cursor_survives_merge) {
@@ -3268,7 +3264,7 @@ TEST(Document, cursor_survives_merge) {
 
     ObjId list_id;
     doc1.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "items", ObjType::list);
+        list_id = *tx.put_object(root, "items", ObjType::list);
         tx.insert(list_id, 0, std::string{"a"});
         tx.insert(list_id, 1, std::string{"b"});
         tx.insert(list_id, 2, std::string{"c"});
@@ -3289,11 +3285,11 @@ TEST(Document, cursor_survives_merge) {
     doc1.merge(doc2);
 
     // After merge, "b" should have shifted to accommodate x, y
-    auto idx = doc1.resolve_cursor(list_id, *cur);
+    auto idx = *doc1.resolve_cursor(list_id, *cur);
     ASSERT_TRUE(idx.has_value());
 
     // Verify cursor still points to "b"
-    auto val = doc1.get(list_id, *idx);
+    auto val = *doc1.get(list_id, *idx);
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(std::get<std::string>(std::get<ScalarValue>(*val)), "b");
 }
@@ -3306,7 +3302,7 @@ TEST(Document, mark_basic_apply_and_query) {
     auto doc = Document{};
     ObjId text_id;
     doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "content", ObjType::text);
+        text_id = *tx.put_object(root, "content", ObjType::text);
         tx.splice_text(text_id, 0, 0, "Hello World");
     });
 
@@ -3315,7 +3311,7 @@ TEST(Document, mark_basic_apply_and_query) {
         tx.mark(text_id, 0, 5, "bold", true);
     });
 
-    auto marks = doc.marks(text_id);
+    auto marks = *doc.marks(text_id);
     ASSERT_EQ(marks.size(), 1u);
     EXPECT_EQ(marks[0].start, 0u);
     EXPECT_EQ(marks[0].end, 5u);
@@ -3327,7 +3323,7 @@ TEST(Document, mark_multiple_non_overlapping) {
     auto doc = Document{};
     ObjId text_id;
     doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "content", ObjType::text);
+        text_id = *tx.put_object(root, "content", ObjType::text);
         tx.splice_text(text_id, 0, 0, "Hello World");
     });
 
@@ -3336,7 +3332,7 @@ TEST(Document, mark_multiple_non_overlapping) {
         tx.mark(text_id, 6, 11, "italic", true);
     });
 
-    auto marks = doc.marks(text_id);
+    auto marks = *doc.marks(text_id);
     ASSERT_EQ(marks.size(), 2u);
 
     // Sort by start to make assertions deterministic
@@ -3355,7 +3351,7 @@ TEST(Document, mark_overlapping_ranges) {
     auto doc = Document{};
     ObjId text_id;
     doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "content", ObjType::text);
+        text_id = *tx.put_object(root, "content", ObjType::text);
         tx.splice_text(text_id, 0, 0, "Hello World");
     });
 
@@ -3364,7 +3360,7 @@ TEST(Document, mark_overlapping_ranges) {
         tx.mark(text_id, 3, 11, "italic", true);
     });
 
-    auto marks = doc.marks(text_id);
+    auto marks = *doc.marks(text_id);
     ASSERT_EQ(marks.size(), 2u);
 
     // Sort by name for determinism
@@ -3383,7 +3379,7 @@ TEST(Document, mark_with_string_value) {
     auto doc = Document{};
     ObjId text_id;
     doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "content", ObjType::text);
+        text_id = *tx.put_object(root, "content", ObjType::text);
         tx.splice_text(text_id, 0, 0, "click here");
     });
 
@@ -3391,7 +3387,7 @@ TEST(Document, mark_with_string_value) {
         tx.mark(text_id, 0, 10, "link", std::string{"https://example.com"});
     });
 
-    auto marks = doc.marks(text_id);
+    auto marks = *doc.marks(text_id);
     ASSERT_EQ(marks.size(), 1u);
     EXPECT_EQ(marks[0].name, "link");
     EXPECT_EQ(std::get<std::string>(marks[0].value), "https://example.com");
@@ -3401,7 +3397,7 @@ TEST(Document, mark_survives_insert_before_range) {
     auto doc = Document{};
     ObjId text_id;
     doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "content", ObjType::text);
+        text_id = *tx.put_object(root, "content", ObjType::text);
         tx.splice_text(text_id, 0, 0, "Hello");
     });
 
@@ -3415,9 +3411,9 @@ TEST(Document, mark_survives_insert_before_range) {
         tx.splice_text(text_id, 0, 0, ">>> ");
     });
 
-    EXPECT_EQ(doc.text(text_id), ">>> Hello");
+    EXPECT_EQ(*doc.text(text_id), ">>> Hello");
 
-    auto marks = doc.marks(text_id);
+    auto marks = *doc.marks(text_id);
     ASSERT_EQ(marks.size(), 1u);
     // Mark should shift to cover indices 4..9
     EXPECT_EQ(marks[0].start, 4u);
@@ -3429,7 +3425,7 @@ TEST(Document, mark_survives_insert_within_range) {
     auto doc = Document{};
     ObjId text_id;
     doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "content", ObjType::text);
+        text_id = *tx.put_object(root, "content", ObjType::text);
         tx.splice_text(text_id, 0, 0, "abcde");
     });
 
@@ -3443,9 +3439,9 @@ TEST(Document, mark_survives_insert_within_range) {
         tx.splice_text(text_id, 3, 0, "XY");
     });
 
-    EXPECT_EQ(doc.text(text_id), "abcXYde");
+    EXPECT_EQ(*doc.text(text_id), "abcXYde");
 
-    auto marks = doc.marks(text_id);
+    auto marks = *doc.marks(text_id);
     ASSERT_EQ(marks.size(), 1u);
     // Mark should expand: start element 'a' is at 0, end element 'e' is at 6
     EXPECT_EQ(marks[0].start, 0u);
@@ -3457,11 +3453,11 @@ TEST(Document, mark_no_marks_returns_empty) {
     auto doc = Document{};
     ObjId text_id;
     doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "content", ObjType::text);
+        text_id = *tx.put_object(root, "content", ObjType::text);
         tx.splice_text(text_id, 0, 0, "plain text");
     });
 
-    auto marks = doc.marks(text_id);
+    auto marks = *doc.marks(text_id);
     EXPECT_TRUE(marks.empty());
 }
 
@@ -3472,7 +3468,7 @@ TEST(Document, mark_survives_merge) {
 
     ObjId text_id;
     doc1.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "content", ObjType::text);
+        text_id = *tx.put_object(root, "content", ObjType::text);
         tx.splice_text(text_id, 0, 0, "Hello World");
     });
 
@@ -3490,7 +3486,7 @@ TEST(Document, mark_survives_merge) {
 
     doc1.merge(doc2);
 
-    auto marks = doc1.marks(text_id);
+    auto marks = *doc1.marks(text_id);
     ASSERT_EQ(marks.size(), 2u);
 
     std::ranges::sort(marks, {}, &Mark::name);
@@ -3507,7 +3503,7 @@ TEST(Document, marks_at_historical_read) {
     auto doc = Document{};
     ObjId text_id;
     doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "content", ObjType::text);
+        text_id = *tx.put_object(root, "content", ObjType::text);
         tx.splice_text(text_id, 0, 0, "Hello World");
     });
 
@@ -3523,10 +3519,10 @@ TEST(Document, marks_at_historical_read) {
     });
 
     // Current state: 2 marks
-    EXPECT_EQ(doc.marks(text_id).size(), 2u);
+    EXPECT_EQ((*doc.marks(text_id)).size(), 2u);
 
     // At v1: only 1 mark
-    auto past_marks = doc.marks_at(text_id, heads_v1);
+    auto past_marks = *doc.marks_at(text_id, heads_v1);
     ASSERT_EQ(past_marks.size(), 1u);
     EXPECT_EQ(past_marks[0].name, "bold");
     EXPECT_EQ(past_marks[0].start, 0u);
@@ -3537,7 +3533,7 @@ TEST(Document, mark_save_and_load_round_trip) {
     auto doc = make_doc(1);
     ObjId text_id;
     doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "content", ObjType::text);
+        text_id = *tx.put_object(root, "content", ObjType::text);
         tx.splice_text(text_id, 0, 0, "Hello World");
     });
 
@@ -3549,9 +3545,9 @@ TEST(Document, mark_save_and_load_round_trip) {
     auto loaded = Document::load(doc.save());
     ASSERT_TRUE(loaded.has_value());
 
-    EXPECT_EQ(loaded->text(text_id), "Hello World");
+    EXPECT_EQ(*loaded->text(text_id), "Hello World");
 
-    auto marks = loaded->marks(text_id);
+    auto marks = *loaded->marks(text_id);
     ASSERT_EQ(marks.size(), 2u);
 
     std::ranges::sort(marks, {}, &Mark::name);
@@ -3570,7 +3566,7 @@ TEST(Document, mark_sync_round_trip) {
     auto doc1 = make_doc(1);
     ObjId text_id;
     doc1.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "content", ObjType::text);
+        text_id = *tx.put_object(root, "content", ObjType::text);
         tx.splice_text(text_id, 0, 0, "Hello World");
     });
 
@@ -3581,9 +3577,9 @@ TEST(Document, mark_sync_round_trip) {
     auto doc2 = make_doc(2);
     sync_docs(doc1, doc2);
 
-    EXPECT_EQ(doc2.text(text_id), "Hello World");
+    EXPECT_EQ(*doc2.text(text_id), "Hello World");
 
-    auto marks = doc2.marks(text_id);
+    auto marks = *doc2.marks(text_id);
     ASSERT_EQ(marks.size(), 1u);
     EXPECT_EQ(marks[0].name, "bold");
     EXPECT_EQ(marks[0].start, 0u);
@@ -3594,22 +3590,21 @@ TEST(Document, mark_transact_with_patches_mark_only_transaction) {
     auto doc = Document{};
     ObjId text_id;
     doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "content", ObjType::text);
+        text_id = *tx.put_object(root, "content", ObjType::text);
         tx.splice_text(text_id, 0, 0, "Hello");
     });
 
     // Mark-only transaction: marks are metadata that don't produce
     // element-level patches (put/insert/delete). The mark is stored
     // and queryable via marks() instead.
-    auto patches = doc.transact_with_patches([&](auto& tx) {
-        tx.mark(text_id, 0, 5, "bold", true);
-    });
+    auto patches =
+        *doc.transact_with_patches([&](auto& tx) { tx.mark(text_id, 0, 5, "bold", true); });
 
     // Marks don't produce element-level patches
     EXPECT_TRUE(patches.empty());
 
     // But the mark is queryable
-    auto marks = doc.marks(text_id);
+    auto marks = *doc.marks(text_id);
     ASSERT_EQ(marks.size(), 1u);
     EXPECT_EQ(marks[0].name, "bold");
 }
@@ -3627,7 +3622,7 @@ TEST(Document, constructor_with_thread_count) {
         doc->transact([](auto& tx) {
             tx.put(root, "key", std::string{"value"});
         });
-        auto val = doc->get(root, "key");
+        auto val = *doc->get(root, "key");
         ASSERT_TRUE(val.has_value());
     }
 }
@@ -3646,8 +3641,8 @@ TEST(Document, constructor_with_shared_pool) {
 
     EXPECT_EQ(doc1.get_thread_pool(), doc2.get_thread_pool());
 
-    auto v1 = doc1.get(root, "from");
-    auto v2 = doc2.get(root, "from");
+    auto v1 = *doc1.get(root, "from");
+    auto v2 = *doc2.get(root, "from");
     ASSERT_TRUE(v1.has_value());
     ASSERT_TRUE(v2.has_value());
 }
@@ -3677,11 +3672,11 @@ TEST(Document, concurrent_reads_are_safe) {
         threads.emplace_back([&doc, &errors, t]() {
             for (int i = 0; i < 100; ++i) {
                 auto key = "key_" + std::to_string((t * 13 + i) % 100);
-                auto val = doc.get(root, key);
+                auto val = *doc.get(root, key);
                 if (!val.has_value()) {
                     errors.fetch_add(1, std::memory_order_relaxed);
                 }
-                auto keys = doc.keys(root);
+                auto keys = *doc.keys(root);
                 if (keys.size() != 100) {
                     errors.fetch_add(1, std::memory_order_relaxed);
                 }
@@ -3725,17 +3720,16 @@ TEST(Document, fork_merge_batch_put) {
     }
 
     // Verify all keys present
-    auto val = doc.get(root, "existing");
+    auto val = *doc.get(root, "existing");
     ASSERT_TRUE(val.has_value());
 
     for (int i = 0; i < num_forks * keys_per_fork; ++i) {
         auto key = "batch_" + std::to_string(i);
-        auto v = doc.get(root, key);
+        auto v = *doc.get(root, key);
         ASSERT_TRUE(v.has_value()) << "Missing key: " << key;
     }
 
-    EXPECT_EQ(doc.length(root),
-              static_cast<std::size_t>(1 + num_forks * keys_per_fork));
+    EXPECT_EQ(*doc.length(root), static_cast<std::size_t>(1 + num_forks * keys_per_fork));
 }
 
 TEST(Document, threaded_fork_merge_batch_put) {
@@ -3774,17 +3768,16 @@ TEST(Document, threaded_fork_merge_batch_put) {
     }
 
     // Verify: base key + all fork keys
-    EXPECT_TRUE(doc.get(root, "base").has_value());
+    EXPECT_TRUE((*doc.get(root, "base")).has_value());
     for (int f = 0; f < num_forks; ++f) {
         for (int i = 0; i < keys_per_fork; ++i) {
             auto key = "p" + std::to_string(f) + "_" + std::to_string(i);
-            auto v = doc.get(root, key);
+            auto v = *doc.get(root, key);
             ASSERT_TRUE(v.has_value()) << "Missing: " << key;
         }
     }
 
-    EXPECT_EQ(doc.length(root),
-              static_cast<std::size_t>(1 + num_forks * keys_per_fork));
+    EXPECT_EQ(*doc.length(root), static_cast<std::size_t>(1 + num_forks * keys_per_fork));
 }
 
 TEST(Document, save_load_with_thread_pool) {
@@ -3801,7 +3794,7 @@ TEST(Document, save_load_with_thread_pool) {
 
     for (int i = 0; i < 50; ++i) {
         auto key = "k" + std::to_string(i);
-        auto v = loaded->get(root, key);
+        auto v = *loaded->get(root, key);
         ASSERT_TRUE(v.has_value()) << "Missing: " << key;
     }
 }
@@ -3824,9 +3817,9 @@ TEST(Document, no_conflict_on_repeated_assignment) {
     doc.transact([](auto& tx) {
         tx.put(root, "key", std::int64_t{3});
     });
-    auto all = doc.get_all(root, "key");
+    auto all = *doc.get_all(root, "key");
     EXPECT_EQ(all.size(), 1u);
-    EXPECT_EQ(get_int_val(doc.get(root, "key")), 3);
+    EXPECT_EQ(get_int_val(*doc.get(root, "key")), 3);
 }
 
 TEST(Document, repeated_map_assignment_resolves_conflict) {
@@ -3843,15 +3836,15 @@ TEST(Document, repeated_map_assignment_resolves_conflict) {
     });
 
     doc1.merge(doc2);
-    EXPECT_EQ(doc1.get_all(root, "key").size(), 2u);
+    EXPECT_EQ((*doc1.get_all(root, "key")).size(), 2u);
 
     // doc1 overwrites the key — this resolves the conflict
     doc1.transact([](auto& tx) {
         tx.put(root, "key", std::int64_t{99});
     });
-    auto all = doc1.get_all(root, "key");
+    auto all = *doc1.get_all(root, "key");
     EXPECT_EQ(all.size(), 1u);
-    EXPECT_EQ(get_int_val(doc1.get(root, "key")), 99);
+    EXPECT_EQ(get_int_val(*doc1.get(root, "key")), 99);
 }
 
 TEST(Document, assignment_conflicts_of_different_types) {
@@ -3874,7 +3867,7 @@ TEST(Document, assignment_conflicts_of_different_types) {
     doc1.merge(doc3);
 
     // All three types should be in conflict
-    auto all = doc1.get_all(root, "x");
+    auto all = *doc1.get_all(root, "x");
     EXPECT_EQ(all.size(), 3u);
 }
 
@@ -3891,13 +3884,13 @@ TEST(Document, changes_within_conflicting_map_field) {
 
     auto nested_id = ObjId{};
     doc2.transact([&](auto& tx) {
-        nested_id = tx.put_object(root, "x", ObjType::map);
+        nested_id = *tx.put_object(root, "x", ObjType::map);
         tx.put(nested_id, "inner", std::int64_t{42});
     });
 
     doc1.merge(doc2);
 
-    auto all = doc1.get_all(root, "x");
+    auto all = *doc1.get_all(root, "x");
     EXPECT_EQ(all.size(), 2u);
 
     // Verify the nested map still has its content by checking one of the values
@@ -3924,32 +3917,32 @@ TEST(Document, concurrently_assigned_nested_maps_should_not_merge) {
 
     auto map1_id = ObjId{};
     doc1.transact([&](auto& tx) {
-        map1_id = tx.put_object(root, "x", ObjType::map);
+        map1_id = *tx.put_object(root, "x", ObjType::map);
         tx.put(map1_id, "key1", std::string{"from_doc1"});
     });
 
     auto map2_id = ObjId{};
     doc2.transact([&](auto& tx) {
-        map2_id = tx.put_object(root, "x", ObjType::map);
+        map2_id = *tx.put_object(root, "x", ObjType::map);
         tx.put(map2_id, "key2", std::string{"from_doc2"});
     });
 
     doc1.merge(doc2);
 
     // Both maps should be in conflict at root/x
-    auto all = doc1.get_all(root, "x");
+    auto all = *doc1.get_all(root, "x");
     EXPECT_EQ(all.size(), 2u);
 
     // The winning map should only have its own key, not the other's
     // (nested contents don't cross-merge)
-    auto winner = doc1.get(root, "x");
+    auto winner = *doc1.get(root, "x");
     ASSERT_TRUE(winner.has_value());
     // Winner map should have exactly 1 key
     // We need to resolve to get the ObjId from the winning value...
     // The winner is an ObjType::map, and its keys shouldn't include
     // keys from the losing map. We verify this indirectly:
     // doc1 has map1_id, doc2's merged map2_id — each should have only 1 key.
-    EXPECT_EQ(doc1.length(map1_id), 1u);
+    EXPECT_EQ(*doc1.length(map1_id), 1u);
 }
 
 TEST(Document, concurrent_delete_and_update_at_different_levels) {
@@ -3960,7 +3953,7 @@ TEST(Document, concurrent_delete_and_update_at_different_levels) {
     auto doc1 = make_doc(1);
     auto nested_id = ObjId{};
     doc1.transact([&](auto& tx) {
-        nested_id = tx.put_object(root, "config", ObjType::map);
+        nested_id = *tx.put_object(root, "config", ObjType::map);
         tx.put(nested_id, "color", std::string{"blue"});
     });
 
@@ -3982,7 +3975,7 @@ TEST(Document, concurrent_delete_and_update_at_different_levels) {
     // The delete removes the root-level key; the child update doesn't
     // re-create the parent. Verify consistency via bidirectional merge.
     doc2.merge(doc1);
-    EXPECT_EQ(doc1.length(root), doc2.length(root));
+    EXPECT_EQ(*doc1.length(root), *doc2.length(root));
 }
 
 TEST(Document, concurrent_updates_of_concurrently_deleted_objects) {
@@ -3991,7 +3984,7 @@ TEST(Document, concurrent_updates_of_concurrently_deleted_objects) {
     auto doc1 = make_doc(1);
     auto map_id = ObjId{};
     doc1.transact([&](auto& tx) {
-        map_id = tx.put_object(root, "obj", ObjType::map);
+        map_id = *tx.put_object(root, "obj", ObjType::map);
         tx.put(map_id, "a", std::int64_t{1});
     });
 
@@ -4012,7 +4005,7 @@ TEST(Document, concurrent_updates_of_concurrently_deleted_objects) {
     doc3.merge(doc2);
 
     // Both docs should converge to the same state
-    EXPECT_EQ(doc2.length(root), doc3.length(root));
+    EXPECT_EQ(*doc2.length(root), *doc3.length(root));
 }
 
 TEST(Document, overwriting_a_conflict_resolves_it) {
@@ -4031,7 +4024,7 @@ TEST(Document, overwriting_a_conflict_resolves_it) {
     doc1.merge(doc2);
 
     // Both actors set different values concurrently -> conflict
-    EXPECT_EQ(doc1.get_all(root, "key").size(), 2u);
+    EXPECT_EQ((*doc1.get_all(root, "key")).size(), 2u);
 
     // doc1 overwrites with a new value — this op supersedes both
     // conflicting values because doc1 has seen them both
@@ -4040,8 +4033,8 @@ TEST(Document, overwriting_a_conflict_resolves_it) {
     });
 
     // After the overwrite, doc1 should have exactly 1 value
-    EXPECT_EQ(doc1.get_all(root, "key").size(), 1u);
-    EXPECT_EQ(get_str(doc1.get(root, "key")), "resolved");
+    EXPECT_EQ((*doc1.get_all(root, "key")).size(), 1u);
+    EXPECT_EQ(get_str(*doc1.get(root, "key")), "resolved");
 }
 
 // =============================================================================
@@ -4054,7 +4047,7 @@ TEST(Document, concurrent_list_insertions_at_different_positions) {
     auto doc1 = make_doc(1);
     auto list_id = ObjId{};
     doc1.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "list", ObjType::list);
+        list_id = *tx.put_object(root, "list", ObjType::list);
         tx.insert(list_id, 0, std::string{"a"});
         tx.insert(list_id, 1, std::string{"b"});
         tx.insert(list_id, 2, std::string{"c"});
@@ -4074,16 +4067,16 @@ TEST(Document, concurrent_list_insertions_at_different_positions) {
     doc1.merge(doc2);
 
     // Both insertions should be present: X, a, b, c, Y
-    EXPECT_EQ(doc1.length(list_id), 5u);
-    EXPECT_EQ(get_str(doc1.get(list_id, 0)), "X");
-    EXPECT_EQ(get_str(doc1.get(list_id, 4)), "Y");
+    EXPECT_EQ(*doc1.length(list_id), 5u);
+    EXPECT_EQ(get_str(*doc1.get(list_id, 0)), "X");
+    EXPECT_EQ(get_str(*doc1.get(list_id, 4)), "Y");
 }
 
 TEST(Document, concurrent_list_insertions_at_same_position) {
     auto doc1 = make_doc(1);
     auto list_id = ObjId{};
     doc1.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "list", ObjType::list);
+        list_id = *tx.put_object(root, "list", ObjType::list);
         tx.insert(list_id, 0, std::string{"a"});
         tx.insert(list_id, 1, std::string{"b"});
     });
@@ -4101,17 +4094,17 @@ TEST(Document, concurrent_list_insertions_at_same_position) {
     doc1.merge(doc2);
 
     // Both insertions present, order determined by actor ID comparison
-    EXPECT_EQ(doc1.length(list_id), 4u);
+    EXPECT_EQ(*doc1.length(list_id), 4u);
     // Elements: "a", then X and Y in some deterministic order, then "b"
-    EXPECT_EQ(get_str(doc1.get(list_id, 0)), "a");
-    EXPECT_EQ(get_str(doc1.get(list_id, 3)), "b");
+    EXPECT_EQ(get_str(*doc1.get(list_id, 0)), "a");
+    EXPECT_EQ(get_str(*doc1.get(list_id, 3)), "b");
 }
 
 TEST(Document, concurrent_deletion_of_same_list_element) {
     auto doc1 = make_doc(1);
     auto list_id = ObjId{};
     doc1.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "list", ObjType::list);
+        list_id = *tx.put_object(root, "list", ObjType::list);
         tx.insert(list_id, 0, std::string{"a"});
         tx.insert(list_id, 1, std::string{"b"});
         tx.insert(list_id, 2, std::string{"c"});
@@ -4130,16 +4123,16 @@ TEST(Document, concurrent_deletion_of_same_list_element) {
     doc1.merge(doc2);
 
     // Element deleted once — list is [a, c]
-    EXPECT_EQ(doc1.length(list_id), 2u);
-    EXPECT_EQ(get_str(doc1.get(list_id, 0)), "a");
-    EXPECT_EQ(get_str(doc1.get(list_id, 1)), "c");
+    EXPECT_EQ(*doc1.length(list_id), 2u);
+    EXPECT_EQ(get_str(*doc1.get(list_id, 0)), "a");
+    EXPECT_EQ(get_str(*doc1.get(list_id, 1)), "c");
 }
 
 TEST(Document, list_insertion_after_deleted_element) {
     auto doc1 = make_doc(1);
     auto list_id = ObjId{};
     doc1.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "list", ObjType::list);
+        list_id = *tx.put_object(root, "list", ObjType::list);
         tx.insert(list_id, 0, std::string{"a"});
         tx.insert(list_id, 1, std::string{"b"});
         tx.insert(list_id, 2, std::string{"c"});
@@ -4161,7 +4154,7 @@ TEST(Document, list_insertion_after_deleted_element) {
     doc1.merge(doc2);
 
     // "X" should appear somewhere in the list (before or after "c")
-    EXPECT_EQ(doc1.length(list_id), 2u);  // "c" + "X"
+    EXPECT_EQ(*doc1.length(list_id), 2u); // "c" + "X"
 }
 
 TEST(Document, does_not_interleave_sequence_insertions_at_same_position) {
@@ -4169,9 +4162,7 @@ TEST(Document, does_not_interleave_sequence_insertions_at_same_position) {
     // Each doc's elements should remain contiguous (not interleaved).
     auto doc1 = make_doc(1);
     auto list_id = ObjId{};
-    doc1.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "list", ObjType::list);
-    });
+    doc1.transact([&](auto& tx) { list_id = *tx.put_object(root, "list", ObjType::list); });
 
     auto doc2 = doc1.fork();
 
@@ -4191,10 +4182,10 @@ TEST(Document, does_not_interleave_sequence_insertions_at_same_position) {
 
     doc1.merge(doc2);
 
-    EXPECT_EQ(doc1.length(list_id), 6u);
+    EXPECT_EQ(*doc1.length(list_id), 6u);
 
     // Verify non-interleaving: collect all values
-    auto vals = doc1.values(list_id);
+    auto vals = *doc1.values(list_id);
     std::vector<std::string> strs;
     for (const auto& v : vals) {
         strs.push_back(std::get<std::string>(std::get<ScalarValue>(v)));
@@ -4208,9 +4199,7 @@ TEST(Document, does_not_interleave_sequence_insertions_at_same_position) {
 TEST(Document, insertion_consistent_with_causality) {
     auto doc1 = make_doc(1);
     auto list_id = ObjId{};
-    doc1.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "list", ObjType::list);
-    });
+    doc1.transact([&](auto& tx) { list_id = *tx.put_object(root, "list", ObjType::list); });
 
     // Insert elements at position 0, each one pushing earlier ones right
     for (int i = 0; i < 5; ++i) {
@@ -4220,16 +4209,16 @@ TEST(Document, insertion_consistent_with_causality) {
     }
 
     // List should be [4, 3, 2, 1, 0] (reversed)
-    EXPECT_EQ(doc1.length(list_id), 5u);
-    EXPECT_EQ(get_int_val(doc1.get(list_id, 0)), 4);
-    EXPECT_EQ(get_int_val(doc1.get(list_id, 4)), 0);
+    EXPECT_EQ(*doc1.length(list_id), 5u);
+    EXPECT_EQ(get_int_val(*doc1.get(list_id, 0)), 4);
+    EXPECT_EQ(get_int_val(*doc1.get(list_id, 4)), 0);
 }
 
 TEST(Document, concurrent_assignment_and_deletion_of_list_entry) {
     auto doc1 = make_doc(1);
     auto list_id = ObjId{};
     doc1.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "list", ObjType::list);
+        list_id = *tx.put_object(root, "list", ObjType::list);
         tx.insert(list_id, 0, std::string{"original"});
     });
 
@@ -4250,10 +4239,10 @@ TEST(Document, concurrent_assignment_and_deletion_of_list_entry) {
     // In Automerge, the modification creates a new value at the position,
     // so after merge there may be a conflict or the element may be deleted.
     // The important thing is consistency.
-    auto len1 = doc1.length(list_id);
+    auto len1 = *doc1.length(list_id);
 
     doc2.merge(doc1);
-    auto len2 = doc2.length(list_id);
+    auto len2 = *doc2.length(list_id);
 
     // Both docs should agree on length after bidirectional merge
     EXPECT_EQ(len1, len2);
@@ -4263,7 +4252,7 @@ TEST(Document, list_delete_and_reinsert) {
     auto doc = make_doc(1);
     auto list_id = ObjId{};
     doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "list", ObjType::list);
+        list_id = *tx.put_object(root, "list", ObjType::list);
         tx.insert(list_id, 0, std::string{"a"});
         tx.insert(list_id, 1, std::string{"b"});
         tx.insert(list_id, 2, std::string{"c"});
@@ -4273,16 +4262,16 @@ TEST(Document, list_delete_and_reinsert) {
     doc.transact([&](auto& tx) {
         tx.delete_index(list_id, 1);
     });
-    EXPECT_EQ(doc.length(list_id), 2u);
+    EXPECT_EQ(*doc.length(list_id), 2u);
 
     // Insert new element at same position
     doc.transact([&](auto& tx) {
         tx.insert(list_id, 1, std::string{"B"});
     });
-    EXPECT_EQ(doc.length(list_id), 3u);
-    EXPECT_EQ(get_str(doc.get(list_id, 0)), "a");
-    EXPECT_EQ(get_str(doc.get(list_id, 1)), "B");
-    EXPECT_EQ(get_str(doc.get(list_id, 2)), "c");
+    EXPECT_EQ(*doc.length(list_id), 3u);
+    EXPECT_EQ(get_str(*doc.get(list_id, 0)), "a");
+    EXPECT_EQ(get_str(*doc.get(list_id, 1)), "B");
+    EXPECT_EQ(get_str(*doc.get(list_id, 2)), "c");
 }
 
 // =============================================================================
@@ -4310,7 +4299,7 @@ TEST(Document, concurrent_counter_increments_combine) {
 
     doc1.merge(doc2);
 
-    auto val = doc1.get(root, "counter");
+    auto val = *doc1.get(root, "counter");
     ASSERT_TRUE(val.has_value());
     auto c = std::get<Counter>(std::get<ScalarValue>(*val));
     // 100 + 10 + 20 = 130
@@ -4331,7 +4320,7 @@ TEST(Document, counter_survives_save_load) {
     auto loaded = Document::load(bytes);
     ASSERT_TRUE(loaded.has_value());
 
-    auto val = loaded->get(root, "c");
+    auto val = *loaded->get(root, "c");
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(std::get<Counter>(std::get<ScalarValue>(*val)).value, 3);
 }
@@ -4350,7 +4339,7 @@ TEST(Document, counter_increment_via_apply_changes) {
     auto changes = doc1.get_changes();
     doc2.apply_changes(changes);
 
-    auto val = doc2.get(root, "c");
+    auto val = *doc2.get(root, "c");
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(std::get<Counter>(std::get<ScalarValue>(*val)).value, 15);
 }
@@ -4372,7 +4361,7 @@ TEST(Document, save_and_load_zero_length_data) {
     auto loaded = Document::load(bytes);
     ASSERT_TRUE(loaded.has_value());
 
-    auto val = loaded->get(root, "empty_string");
+    auto val = *loaded->get(root, "empty_string");
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(std::get<std::string>(std::get<ScalarValue>(*val)), "");
 }
@@ -4398,16 +4387,16 @@ TEST(Document, save_and_load_after_repeated_out_of_order_changes) {
         doc2.apply_changes(changes);
     }
 
-    EXPECT_EQ(get_int_val(doc2.get(root, "a")), 1);
-    EXPECT_EQ(get_int_val(doc2.get(root, "b")), 2);
-    EXPECT_EQ(doc2.length(root), 2u);
+    EXPECT_EQ(get_int_val(*doc2.get(root, "a")), 1);
+    EXPECT_EQ(get_int_val(*doc2.get(root, "b")), 2);
+    EXPECT_EQ(*doc2.length(root), 2u);
 }
 
 TEST(Document, save_and_load_with_deleted_objects) {
     auto doc = make_doc(1);
     auto map_id = ObjId{};
     doc.transact([&](auto& tx) {
-        map_id = tx.put_object(root, "temp", ObjType::map);
+        map_id = *tx.put_object(root, "temp", ObjType::map);
         tx.put(map_id, "inner", std::string{"hello"});
     });
     doc.transact([](auto& tx) {
@@ -4418,8 +4407,8 @@ TEST(Document, save_and_load_with_deleted_objects) {
     auto loaded = Document::load(bytes);
     ASSERT_TRUE(loaded.has_value());
 
-    EXPECT_FALSE(loaded->get(root, "temp").has_value());
-    EXPECT_EQ(loaded->length(root), 0u);
+    EXPECT_FALSE((*loaded->get(root, "temp")).has_value());
+    EXPECT_EQ(*loaded->length(root), 0u);
 }
 
 TEST(Document, allows_empty_keys_in_maps) {
@@ -4428,7 +4417,7 @@ TEST(Document, allows_empty_keys_in_maps) {
         tx.put(root, "", std::int64_t{1});
     });
 
-    auto val = doc.get(root, "");
+    auto val = *doc.get(root, "");
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(get_int_val(val), 1);
 
@@ -4436,7 +4425,7 @@ TEST(Document, allows_empty_keys_in_maps) {
     auto bytes = doc.save();
     auto loaded = Document::load(bytes);
     ASSERT_TRUE(loaded.has_value());
-    EXPECT_EQ(get_int_val(loaded->get(root, "")), 1);
+    EXPECT_EQ(get_int_val(*loaded->get(root, "")), 1);
 }
 
 TEST(Document, save_load_large_values_for_compression) {
@@ -4451,7 +4440,7 @@ TEST(Document, save_load_large_values_for_compression) {
     auto loaded = Document::load(bytes);
     ASSERT_TRUE(loaded.has_value());
 
-    auto val = loaded->get(root, "big");
+    auto val = *loaded->get(root, "big");
     ASSERT_TRUE(val.has_value());
     auto s = std::get<std::string>(std::get<ScalarValue>(*val));
     EXPECT_EQ(s.size(), 10000u);
@@ -4511,10 +4500,10 @@ TEST(Document, sync_bidirectional_converges) {
     }
 
     // Both docs should have both keys
-    EXPECT_TRUE(doc1.get(root, "from_1").has_value());
-    EXPECT_TRUE(doc1.get(root, "from_2").has_value());
-    EXPECT_TRUE(doc2.get(root, "from_1").has_value());
-    EXPECT_TRUE(doc2.get(root, "from_2").has_value());
+    EXPECT_TRUE((*doc1.get(root, "from_1")).has_value());
+    EXPECT_TRUE((*doc1.get(root, "from_2")).has_value());
+    EXPECT_TRUE((*doc2.get(root, "from_1")).has_value());
+    EXPECT_TRUE((*doc2.get(root, "from_2")).has_value());
 
     // Heads should contain the same hashes (order may differ)
     auto h1 = doc1.get_heads();
@@ -4595,10 +4584,10 @@ TEST(Document, merge_is_associative) {
     auto right = Document{doc_a};
     right.merge(bc);
 
-    EXPECT_EQ(left.length(root), right.length(root));
-    EXPECT_EQ(get_int_val(left.get(root, "a")), get_int_val(right.get(root, "a")));
-    EXPECT_EQ(get_int_val(left.get(root, "b")), get_int_val(right.get(root, "b")));
-    EXPECT_EQ(get_int_val(left.get(root, "c")), get_int_val(right.get(root, "c")));
+    EXPECT_EQ(*left.length(root), *right.length(root));
+    EXPECT_EQ(get_int_val(*left.get(root, "a")), get_int_val(*right.get(root, "a")));
+    EXPECT_EQ(get_int_val(*left.get(root, "b")), get_int_val(*right.get(root, "b")));
+    EXPECT_EQ(get_int_val(*left.get(root, "c")), get_int_val(*right.get(root, "c")));
 }
 
 // =============================================================================
@@ -4609,7 +4598,7 @@ TEST(Document, text_empty_splice_is_noop) {
     auto doc = make_doc(1);
     auto text_id = ObjId{};
     doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "text", ObjType::text);
+        text_id = *tx.put_object(root, "text", ObjType::text);
         tx.splice_text(text_id, 0, 0, "hello");
     });
 
@@ -4618,14 +4607,14 @@ TEST(Document, text_empty_splice_is_noop) {
         tx.splice_text(text_id, 2, 0, "");
     });
 
-    EXPECT_EQ(doc.text(text_id), "hello");
+    EXPECT_EQ(*doc.text(text_id), "hello");
 }
 
 TEST(Document, text_concurrent_splices_at_different_positions) {
     auto doc1 = make_doc(1);
     auto text_id = ObjId{};
     doc1.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "text", ObjType::text);
+        text_id = *tx.put_object(root, "text", ObjType::text);
         tx.splice_text(text_id, 0, 0, "hello world");
     });
 
@@ -4642,7 +4631,7 @@ TEST(Document, text_concurrent_splices_at_different_positions) {
 
     doc1.merge(doc2);
 
-    auto result = doc1.text(text_id);
+    auto result = *doc1.text(text_id);
     EXPECT_TRUE(result.find(">>>") != std::string::npos);
     EXPECT_TRUE(result.find("hello world") != std::string::npos);
     EXPECT_TRUE(result.find("<<<") != std::string::npos);
@@ -4652,7 +4641,7 @@ TEST(Document, text_delete_entire_contents) {
     auto doc = make_doc(1);
     auto text_id = ObjId{};
     doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "text", ObjType::text);
+        text_id = *tx.put_object(root, "text", ObjType::text);
         tx.splice_text(text_id, 0, 0, "hello");
     });
 
@@ -4660,8 +4649,8 @@ TEST(Document, text_delete_entire_contents) {
         tx.splice_text(text_id, 0, 5, "");
     });
 
-    EXPECT_EQ(doc.text(text_id), "");
-    EXPECT_EQ(doc.length(text_id), 0u);
+    EXPECT_EQ(*doc.text(text_id), "");
+    EXPECT_EQ(*doc.length(text_id), 0u);
 }
 
 // =============================================================================
@@ -4674,7 +4663,7 @@ TEST(Document, mark_overwrite_creates_new_mark_entry) {
     auto doc = make_doc(1);
     auto text_id = ObjId{};
     doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "text", ObjType::text);
+        text_id = *tx.put_object(root, "text", ObjType::text);
         tx.splice_text(text_id, 0, 0, "abcdefg");
     });
 
@@ -4683,7 +4672,7 @@ TEST(Document, mark_overwrite_creates_new_mark_entry) {
         tx.mark(text_id, 0, 3, "bold", true);
     });
 
-    auto marks_before = doc.marks(text_id);
+    auto marks_before = *doc.marks(text_id);
     EXPECT_EQ(marks_before.size(), 1u);
     EXPECT_EQ(marks_before[0].name, "bold");
 
@@ -4692,7 +4681,7 @@ TEST(Document, mark_overwrite_creates_new_mark_entry) {
         tx.mark(text_id, 0, 3, "bold", std::string{"strong"});
     });
 
-    auto marks_after = doc.marks(text_id);
+    auto marks_after = *doc.marks(text_id);
     // Both mark entries should be present
     EXPECT_GE(marks_after.size(), 1u);
 
@@ -4708,7 +4697,7 @@ TEST(Document, marks_survive_concurrent_text_edits) {
     auto doc1 = make_doc(1);
     auto text_id = ObjId{};
     doc1.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "text", ObjType::text);
+        text_id = *tx.put_object(root, "text", ObjType::text);
         tx.splice_text(text_id, 0, 0, "hello world");
     });
     doc1.transact([&](auto& tx) {
@@ -4725,7 +4714,7 @@ TEST(Document, marks_survive_concurrent_text_edits) {
     doc1.merge(doc2);
 
     // The bold mark should still exist
-    auto marks = doc1.marks(text_id);
+    auto marks = *doc1.marks(text_id);
     EXPECT_GE(marks.size(), 1u);
     bool found_bold = false;
     for (const auto& m : marks) {
@@ -4742,7 +4731,7 @@ TEST(Document, cursor_tracks_through_concurrent_inserts) {
     auto doc1 = make_doc(1);
     auto list_id = ObjId{};
     doc1.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "list", ObjType::list);
+        list_id = *tx.put_object(root, "list", ObjType::list);
         tx.insert(list_id, 0, std::string{"a"});
         tx.insert(list_id, 1, std::string{"b"});
         tx.insert(list_id, 2, std::string{"c"});
@@ -4763,9 +4752,9 @@ TEST(Document, cursor_tracks_through_concurrent_inserts) {
     doc1.merge(doc2);
 
     // Cursor should still resolve to "b", now at a higher index
-    auto pos = doc1.resolve_cursor(list_id, *cursor);
+    auto pos = *doc1.resolve_cursor(list_id, *cursor);
     ASSERT_TRUE(pos.has_value());
-    EXPECT_EQ(get_str(doc1.get(list_id, *pos)), "b");
+    EXPECT_EQ(get_str(*doc1.get(list_id, *pos)), "b");
 }
 
 // =============================================================================
@@ -4787,12 +4776,12 @@ TEST(Document, time_travel_after_merge) {
     doc1.merge(doc2);
 
     // Read at v1 (before merge)
-    auto val_at_v1 = doc1.get_at(root, "key", heads_v1);
+    auto val_at_v1 = *doc1.get_at(root, "key", heads_v1);
     ASSERT_TRUE(val_at_v1.has_value());
     EXPECT_EQ(std::get<std::string>(std::get<ScalarValue>(*val_at_v1)), "original");
 
     // Current value should be from doc2's merge
-    auto current = doc1.get(root, "key");
+    auto current = *doc1.get(root, "key");
     ASSERT_TRUE(current.has_value());
 }
 
@@ -4800,7 +4789,7 @@ TEST(Document, time_travel_text_at_multiple_heads) {
     auto doc = make_doc(1);
     auto text_id = ObjId{};
     doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "text", ObjType::text);
+        text_id = *tx.put_object(root, "text", ObjType::text);
         tx.splice_text(text_id, 0, 0, "hello");
     });
     auto heads1 = doc.get_heads();
@@ -4814,9 +4803,9 @@ TEST(Document, time_travel_text_at_multiple_heads) {
         tx.splice_text(text_id, 11, 0, "!");
     });
 
-    EXPECT_EQ(doc.text_at(text_id, heads1), "hello");
-    EXPECT_EQ(doc.text_at(text_id, heads2), "hello world");
-    EXPECT_EQ(doc.text(text_id), "hello world!");
+    EXPECT_EQ(*doc.text_at(text_id, heads1), "hello");
+    EXPECT_EQ(*doc.text_at(text_id, heads2), "hello world");
+    EXPECT_EQ(*doc.text(text_id), "hello world!");
 }
 
 // =============================================================================
@@ -4825,8 +4814,8 @@ TEST(Document, time_travel_text_at_multiple_heads) {
 
 TEST(Document, patches_for_nested_object_creation) {
     auto doc = Document{};
-    auto patches = doc.transact_with_patches([](auto& tx) {
-        auto map_id = tx.put_object(root, "config", ObjType::map);
+    auto patches = *doc.transact_with_patches([](auto& tx) {
+        auto map_id = *tx.put_object(root, "config", ObjType::map);
         tx.put(map_id, "theme", std::string{"dark"});
         tx.put(map_id, "size", std::int64_t{14});
     });
@@ -4839,12 +4828,12 @@ TEST(Document, patches_for_list_operations) {
     auto doc = Document{};
     auto list_id = ObjId{};
     doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "items", ObjType::list);
+        list_id = *tx.put_object(root, "items", ObjType::list);
         tx.insert(list_id, 0, std::string{"a"});
         tx.insert(list_id, 1, std::string{"b"});
     });
 
-    auto patches = doc.transact_with_patches([&](auto& tx) {
+    auto patches = *doc.transact_with_patches([&](auto& tx) {
         tx.insert(list_id, 1, std::string{"X"});
         tx.delete_index(list_id, 0);
     });
@@ -4863,13 +4852,13 @@ TEST(Document, deeply_nested_map_put_and_get) {
     auto l2 = ObjId{};
     auto l3 = ObjId{};
     doc.transact([&](auto& tx) {
-        l1 = tx.put_object(root, "level1", ObjType::map);
-        l2 = tx.put_object(l1, "level2", ObjType::map);
-        l3 = tx.put_object(l2, "level3", ObjType::map);
+        l1 = *tx.put_object(root, "level1", ObjType::map);
+        l2 = *tx.put_object(l1, "level2", ObjType::map);
+        l3 = *tx.put_object(l2, "level3", ObjType::map);
         tx.put(l3, "deep_value", std::string{"found_it"});
     });
 
-    auto val = doc.get(l3, "deep_value");
+    auto val = *doc.get(l3, "deep_value");
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(get_str(val), "found_it");
 
@@ -4878,7 +4867,7 @@ TEST(Document, deeply_nested_map_put_and_get) {
     auto loaded = Document::load(bytes);
     ASSERT_TRUE(loaded.has_value());
 
-    auto lval = loaded->get(l3, "deep_value");
+    auto lval = *loaded->get(l3, "deep_value");
     ASSERT_TRUE(lval.has_value());
     EXPECT_EQ(get_str(lval), "found_it");
 }
@@ -4888,8 +4877,8 @@ TEST(Document, merge_nested_list_within_map) {
     auto map_id = ObjId{};
     auto list_id = ObjId{};
     doc1.transact([&](auto& tx) {
-        map_id = tx.put_object(root, "container", ObjType::map);
-        list_id = tx.put_object(map_id, "items", ObjType::list);
+        map_id = *tx.put_object(root, "container", ObjType::map);
+        list_id = *tx.put_object(map_id, "items", ObjType::list);
         tx.insert(list_id, 0, std::string{"a"});
     });
 
@@ -4905,7 +4894,7 @@ TEST(Document, merge_nested_list_within_map) {
     doc1.merge(doc2);
 
     // Both insertions should be present
-    EXPECT_EQ(doc1.length(list_id), 3u);
+    EXPECT_EQ(*doc1.length(list_id), 3u);
 }
 
 // =============================================================================
@@ -4930,8 +4919,8 @@ TEST(Document, apply_changes_twice_is_idempotent) {
     ASSERT_TRUE(doc2.apply_changes(changes).has_value());
     ASSERT_TRUE(doc2.apply_changes(changes).has_value());
 
-    EXPECT_EQ(doc2.length(root), 1u);
-    EXPECT_EQ(get_int_val(doc2.get(root, "key")), 42);
+    EXPECT_EQ(*doc2.length(root), 1u);
+    EXPECT_EQ(get_int_val(*doc2.get(root, "key")), 42);
     EXPECT_EQ(doc2.get_changes().size(), changes.size());
     EXPECT_EQ(doc2.get_heads(), doc1.get_heads());
 }
@@ -4970,9 +4959,9 @@ TEST(Document, apply_changes_resolves_three_queued_changes_in_dependency_order) 
 
     EXPECT_EQ(target.get_changes(), changes);
     EXPECT_EQ(target.get_heads(), source.get_heads());
-    EXPECT_EQ(get_int_val(target.get(root, "first")), 1);
-    EXPECT_EQ(get_int_val(target.get(root, "second")), 2);
-    EXPECT_EQ(get_int_val(target.get(root, "third")), 3);
+    EXPECT_EQ(get_int_val(*target.get(root, "first")), 1);
+    EXPECT_EQ(get_int_val(*target.get(root, "second")), 2);
+    EXPECT_EQ(get_int_val(*target.get(root, "third")), 3);
 }
 
 TEST(Document, merge_uses_checked_change_application) {
@@ -5033,7 +5022,7 @@ TEST(Document, apply_changes_rejects_conflicting_actor_sequence_without_mutation
     EXPECT_EQ(result.error().message, "change actor sequence contradicts document history");
     EXPECT_EQ(target.get_heads(), heads_before);
     EXPECT_EQ(target.get_changes(), changes_before);
-    EXPECT_FALSE(target.get(root, "second").has_value());
+    EXPECT_FALSE((*target.get(root, "second")).has_value());
 }
 
 TEST(Document, apply_changes_rejects_conflicting_supplied_sequences_without_mutation) {
@@ -5053,7 +5042,7 @@ TEST(Document, apply_changes_rejects_conflicting_supplied_sequences_without_muta
     EXPECT_EQ(result.error().message, "change actor sequence contradicts another supplied change");
     EXPECT_TRUE(target.get_heads().empty());
     EXPECT_TRUE(target.get_changes().empty());
-    EXPECT_FALSE(target.get(root, "first").has_value());
+    EXPECT_FALSE((*target.get(root, "first")).has_value());
 }
 
 TEST(Document, apply_changes_rejects_malformed_operations_without_mutation) {
@@ -5072,7 +5061,7 @@ TEST(Document, apply_changes_rejects_malformed_operations_without_mutation) {
               "change operations do not match its actor or operation range");
     EXPECT_TRUE(target.get_heads().empty());
     EXPECT_TRUE(target.get_changes().empty());
-    EXPECT_FALSE(target.get(root, "key").has_value());
+    EXPECT_FALSE((*target.get(root, "key")).has_value());
 }
 
 TEST(Document, apply_changes_one_at_a_time_scales_with_batch_application) {
@@ -5129,14 +5118,14 @@ TEST(Document, three_way_merge_with_all_operations) {
     // doc1: creates a nested map
     auto map_id = ObjId{};
     doc1.transact([&](auto& tx) {
-        map_id = tx.put_object(root, "config", ObjType::map);
+        map_id = *tx.put_object(root, "config", ObjType::map);
         tx.put(map_id, "color", std::string{"blue"});
     });
 
     // doc2: creates a list
     auto list_id = ObjId{};
     doc2.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "items", ObjType::list);
+        list_id = *tx.put_object(root, "items", ObjType::list);
         tx.insert(list_id, 0, std::int64_t{1});
         tx.insert(list_id, 1, std::int64_t{2});
     });
@@ -5153,12 +5142,12 @@ TEST(Document, three_way_merge_with_all_operations) {
     doc1.merge(doc3);
 
     // All operations should be present
-    EXPECT_TRUE(doc1.get(root, "shared").has_value());
-    EXPECT_TRUE(doc1.get(root, "config").has_value());
-    EXPECT_TRUE(doc1.get(root, "items").has_value());
-    EXPECT_TRUE(doc1.get(root, "count").has_value());
+    EXPECT_TRUE((*doc1.get(root, "shared")).has_value());
+    EXPECT_TRUE((*doc1.get(root, "config")).has_value());
+    EXPECT_TRUE((*doc1.get(root, "items")).has_value());
+    EXPECT_TRUE((*doc1.get(root, "count")).has_value());
 
-    auto c = std::get<Counter>(std::get<ScalarValue>(*doc1.get(root, "count")));
+    auto c = std::get<Counter>(std::get<ScalarValue>(**doc1.get(root, "count")));
     EXPECT_EQ(c.value, 10);
 }
 
@@ -5182,12 +5171,12 @@ TEST(Document, repeated_list_assignment_resolves_conflict) {
     doc1.merge(doc2);
 
     // Conflict exists
-    EXPECT_EQ(doc1.get_all(root, "val").size(), 2u);
+    EXPECT_EQ((*doc1.get_all(root, "val")).size(), 2u);
 
     // Reassign — should resolve the conflict
     doc1.transact([](auto& tx) { tx.put(root, "val", std::string{"final"}); });
-    EXPECT_EQ(doc1.get_all(root, "val").size(), 1u);
-    EXPECT_EQ(get_str(doc1.get(root, "val")), "final");
+    EXPECT_EQ((*doc1.get_all(root, "val")).size(), 1u);
+    EXPECT_EQ(get_str(*doc1.get(root, "val")), "final");
 }
 
 TEST(Document, concurrent_updates_of_same_list_element) {
@@ -5207,14 +5196,14 @@ TEST(Document, concurrent_updates_of_same_list_element) {
     doc1.merge(doc2);
     doc2.merge(doc1);
 
-    auto vals1 = doc1.get_all(root, "elem");
-    auto vals2 = doc2.get_all(root, "elem");
+    auto vals1 = *doc1.get_all(root, "elem");
+    auto vals2 = *doc2.get_all(root, "elem");
 
     // Both should see the same 2-way conflict
     EXPECT_EQ(vals1.size(), 2u);
     EXPECT_EQ(vals2.size(), 2u);
     // Both should agree on the winning value
-    EXPECT_EQ(doc1.get(root, "elem"), doc2.get(root, "elem"));
+    EXPECT_EQ(*doc1.get(root, "elem"), *doc2.get(root, "elem"));
 }
 
 TEST(Document, changes_within_conflicting_list_element) {
@@ -5230,21 +5219,21 @@ TEST(Document, changes_within_conflicting_list_element) {
     // doc1: replace with a nested map
     auto map1_id = ObjId{};
     doc1.transact([&](auto& tx) {
-        map1_id = tx.put_object(root, "item", ObjType::map);
+        map1_id = *tx.put_object(root, "item", ObjType::map);
         tx.put(map1_id, "from", std::string{"doc1"});
     });
 
     // doc2: replace with a different nested map
     auto map2_id = ObjId{};
     doc2.transact([&](auto& tx) {
-        map2_id = tx.put_object(root, "item", ObjType::map);
+        map2_id = *tx.put_object(root, "item", ObjType::map);
         tx.put(map2_id, "from", std::string{"doc2"});
     });
 
     doc1.merge(doc2);
 
     // Both nested maps should exist as conflicting values
-    auto vals = doc1.get_all(root, "item");
+    auto vals = *doc1.get_all(root, "item");
     EXPECT_GE(vals.size(), 2u);
 }
 
@@ -5254,7 +5243,7 @@ TEST(Document, multiple_insertions_greater_actor_id_first) {
     auto doc1 = make_doc(1);  // actor 0x01... (lesser)
     auto list_id = ObjId{};
     doc1.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "list", ObjType::list);
+        list_id = *tx.put_object(root, "list", ObjType::list);
         tx.insert(list_id, 0, std::string{"a"});
     });
 
@@ -5273,10 +5262,10 @@ TEST(Document, multiple_insertions_greater_actor_id_first) {
     doc1.merge(doc2);
 
     // Both insertions should be present
-    EXPECT_EQ(doc1.length(list_id), 3u);
+    EXPECT_EQ(*doc1.length(list_id), 3u);
 
     // The two inserted elements should be adjacent (no interleaving)
-    auto vals = doc1.values(list_id);
+    auto vals = *doc1.values(list_id);
     EXPECT_EQ(vals.size(), 3u);
 }
 
@@ -5285,7 +5274,7 @@ TEST(Document, multiple_insertions_lesser_actor_id_first) {
     auto doc1 = make_doc(2);  // actor 0x02...
     auto list_id = ObjId{};
     doc1.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "list", ObjType::list);
+        list_id = *tx.put_object(root, "list", ObjType::list);
         tx.insert(list_id, 0, std::string{"a"});
     });
 
@@ -5304,7 +5293,7 @@ TEST(Document, multiple_insertions_lesser_actor_id_first) {
     doc1.merge(doc2);
 
     // Both present, 3 elements total
-    EXPECT_EQ(doc1.length(list_id), 3u);
+    EXPECT_EQ(*doc1.length(list_id), 3u);
 }
 
 TEST(Document, large_list_indexing_correctness) {
@@ -5314,16 +5303,16 @@ TEST(Document, large_list_indexing_correctness) {
     constexpr int count = 130;  // exceeds typical B-tree node size
 
     doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "list", ObjType::list);
+        list_id = *tx.put_object(root, "list", ObjType::list);
         for (int i = 0; i < count; ++i)
             tx.insert(list_id, static_cast<std::size_t>(i), std::int64_t{i});
     });
 
-    EXPECT_EQ(doc.length(list_id), static_cast<std::size_t>(count));
+    EXPECT_EQ(*doc.length(list_id), static_cast<std::size_t>(count));
 
     // Verify every element is accessible and correct
     for (int i = 0; i < count; ++i) {
-        auto val = doc.get(list_id, static_cast<std::size_t>(i));
+        auto val = *doc.get(list_id, static_cast<std::size_t>(i));
         ASSERT_TRUE(val.has_value()) << "Missing element at index " << i;
         EXPECT_EQ(get_int_val(val), std::int64_t{i}) << "Wrong value at index " << i;
     }
@@ -5332,7 +5321,7 @@ TEST(Document, large_list_indexing_correctness) {
     auto bytes = doc.save();
     auto loaded = Document::load(bytes);
     ASSERT_TRUE(loaded.has_value());
-    EXPECT_EQ(loaded->length(list_id), static_cast<std::size_t>(count));
+    EXPECT_EQ(*loaded->length(list_id), static_cast<std::size_t>(count));
 }
 
 // =============================================================================
@@ -5354,7 +5343,7 @@ TEST(Document, independent_counters_do_not_combine) {
     doc1.merge(doc2);
 
     // Conflict: two independent counters, not a combined counter
-    auto vals = doc1.get_all(root, "c");
+    auto vals = *doc1.get_all(root, "c");
     EXPECT_EQ(vals.size(), 2u);
 }
 
@@ -5365,9 +5354,9 @@ TEST(Document, list_counter_increment_and_delete) {
     auto list_id = ObjId{};
     auto map_id = ObjId{};
     doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "list", ObjType::list);
+        list_id = *tx.put_object(root, "list", ObjType::list);
         tx.insert(list_id, 0, std::int64_t{99});         // non-counter element
-        map_id = tx.insert_object(list_id, 1, ObjType::map);
+        map_id = *tx.insert_object(list_id, 1, ObjType::map);
         tx.put(map_id, "c", Counter{10});
     });
 
@@ -5376,7 +5365,7 @@ TEST(Document, list_counter_increment_and_delete) {
         tx.increment(map_id, "c", 5);
     });
 
-    auto val = doc.get(map_id, "c");
+    auto val = *doc.get(map_id, "c");
     ASSERT_TRUE(val.has_value());
     auto cv = std::get<Counter>(std::get<ScalarValue>(*val));
     EXPECT_EQ(cv.value, 15);
@@ -5386,9 +5375,9 @@ TEST(Document, list_counter_increment_and_delete) {
         tx.delete_index(list_id, 0);
     });
 
-    EXPECT_EQ(doc.length(list_id), 1u);
+    EXPECT_EQ(*doc.length(list_id), 1u);
     // Counter map should now be at index 0
-    auto val2 = doc.get(map_id, "c");
+    auto val2 = *doc.get(map_id, "c");
     ASSERT_TRUE(val2.has_value());
     auto cv2 = std::get<Counter>(std::get<ScalarValue>(*val2));
     EXPECT_EQ(cv2.value, 15);
@@ -5399,7 +5388,7 @@ TEST(Document, counter_in_nested_map_survives_save_load) {
     auto doc = make_doc(1);
     auto nested = ObjId{};
     doc.transact([&](auto& tx) {
-        nested = tx.put_object(root, "config", ObjType::map);
+        nested = *tx.put_object(root, "config", ObjType::map);
         tx.put(nested, "count", Counter{100});
     });
     doc.transact([&](auto& tx) {
@@ -5410,7 +5399,7 @@ TEST(Document, counter_in_nested_map_survives_save_load) {
     auto loaded = Document::load(bytes);
     ASSERT_TRUE(loaded.has_value());
 
-    auto val = loaded->get(nested, "count");
+    auto val = *loaded->get(nested, "count");
     ASSERT_TRUE(val.has_value());
     auto cv = std::get<Counter>(std::get<ScalarValue>(*val));
     EXPECT_EQ(cv.value, 142);
@@ -5426,7 +5415,7 @@ TEST(Document, save_restore_complex_with_conflicts) {
     auto doc1 = make_doc(1);
     auto nested_id = ObjId{};
     doc1.transact([&](auto& tx) {
-        nested_id = tx.put_object(root, "obj", ObjType::map);
+        nested_id = *tx.put_object(root, "obj", ObjType::map);
         tx.put(nested_id, "x", std::int64_t{1});
     });
 
@@ -5438,7 +5427,7 @@ TEST(Document, save_restore_complex_with_conflicts) {
 
     doc1.merge(doc2);
 
-    auto vals_before = doc1.get_all(root, "obj");
+    auto vals_before = *doc1.get_all(root, "obj");
     EXPECT_GE(vals_before.size(), 1u);
 
     // Save and reload
@@ -5446,7 +5435,7 @@ TEST(Document, save_restore_complex_with_conflicts) {
     auto loaded = Document::load(bytes);
     ASSERT_TRUE(loaded.has_value());
 
-    auto vals_after = loaded->get_all(root, "obj");
+    auto vals_after = *loaded->get_all(root, "obj");
     EXPECT_EQ(vals_before.size(), vals_after.size());
 }
 
@@ -5463,13 +5452,13 @@ TEST(Document, save_load_actors_referenced_only_via_delete) {
     doc1.merge(doc2);
 
     // "x" should be deleted
-    EXPECT_FALSE(doc1.get(root, "x").has_value());
+    EXPECT_FALSE((*doc1.get(root, "x")).has_value());
 
     // Save/load should work despite actor from delete-only change
     auto bytes = doc1.save();
     auto loaded = Document::load(bytes);
     ASSERT_TRUE(loaded.has_value());
-    EXPECT_FALSE(loaded->get(root, "x").has_value());
+    EXPECT_FALSE((*loaded->get(root, "x")).has_value());
 }
 
 TEST(Document, save_load_delete_only_change) {
@@ -5486,8 +5475,8 @@ TEST(Document, save_load_delete_only_change) {
     auto bytes = doc.save();
     auto loaded = Document::load(bytes);
     ASSERT_TRUE(loaded.has_value());
-    EXPECT_FALSE(loaded->get(root, "a").has_value());
-    EXPECT_EQ(get_int_val(loaded->get(root, "b")), 2);
+    EXPECT_FALSE((*loaded->get(root, "a")).has_value());
+    EXPECT_EQ(get_int_val(*loaded->get(root, "b")), 2);
 }
 
 TEST(Document, save_load_created_object_with_no_subsequent_ops) {
@@ -5495,7 +5484,7 @@ TEST(Document, save_load_created_object_with_no_subsequent_ops) {
     auto doc = make_doc(1);
     auto map_id = ObjId{};
     doc.transact([&](auto& tx) {
-        map_id = tx.put_object(root, "empty_map", ObjType::map);
+        map_id = *tx.put_object(root, "empty_map", ObjType::map);
         // No operations on map_id — it's created but empty
     });
 
@@ -5503,11 +5492,11 @@ TEST(Document, save_load_created_object_with_no_subsequent_ops) {
     auto loaded = Document::load(bytes);
     ASSERT_TRUE(loaded.has_value());
 
-    auto val = loaded->get(root, "empty_map");
+    auto val = *loaded->get(root, "empty_map");
     ASSERT_TRUE(val.has_value());
     EXPECT_TRUE(std::holds_alternative<ObjType>(*val));
     EXPECT_EQ(std::get<ObjType>(*val), ObjType::map);
-    EXPECT_EQ(loaded->length(map_id), 0u);
+    EXPECT_EQ(*loaded->length(map_id), 0u);
 }
 
 TEST(Document, save_load_empty_transactions_interspersed) {
@@ -5526,8 +5515,8 @@ TEST(Document, save_load_empty_transactions_interspersed) {
     auto bytes = doc.save();
     auto loaded = Document::load(bytes);
     ASSERT_TRUE(loaded.has_value());
-    EXPECT_EQ(get_int_val(loaded->get(root, "a")), 1);
-    EXPECT_EQ(get_int_val(loaded->get(root, "b")), 2);
+    EXPECT_EQ(get_int_val(*loaded->get(root, "a")), 1);
+    EXPECT_EQ(get_int_val(*loaded->get(root, "b")), 2);
 }
 
 TEST(Document, forked_actor_ids_tracked_in_save_load) {
@@ -5546,8 +5535,8 @@ TEST(Document, forked_actor_ids_tracked_in_save_load) {
     auto bytes = doc2.save();
     auto loaded = Document::load(bytes);
     ASSERT_TRUE(loaded.has_value());
-    EXPECT_EQ(get_int_val(loaded->get(root, "a")), 1);
-    EXPECT_EQ(get_int_val(loaded->get(root, "b")), 2);
+    EXPECT_EQ(get_int_val(*loaded->get(root, "a")), 1);
+    EXPECT_EQ(get_int_val(*loaded->get(root, "b")), 2);
 }
 
 // =============================================================================
@@ -5561,19 +5550,19 @@ TEST(Document, big_list_creation_and_access) {
     constexpr int count = 500;
 
     doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "big", ObjType::list);
+        list_id = *tx.put_object(root, "big", ObjType::list);
         for (int i = 0; i < count; ++i)
             tx.insert(list_id, static_cast<std::size_t>(i), std::int64_t{i});
     });
 
-    EXPECT_EQ(doc.length(list_id), static_cast<std::size_t>(count));
-    EXPECT_EQ(get_int_val(doc.get(list_id, std::size_t{0})), 0);
-    EXPECT_EQ(get_int_val(doc.get(list_id, std::size_t{count - 1})), count - 1);
+    EXPECT_EQ(*doc.length(list_id), static_cast<std::size_t>(count));
+    EXPECT_EQ(get_int_val(*doc.get(list_id, std::size_t{0})), 0);
+    EXPECT_EQ(get_int_val(*doc.get(list_id, std::size_t{count - 1})), count - 1);
 
     // Patches should account for all insertions
     auto doc2 = make_doc(2);
-    auto patches = doc2.transact_with_patches([&](auto& tx) {
-        auto lid = tx.put_object(root, "big", ObjType::list);
+    auto patches = *doc2.transact_with_patches([&](auto& tx) {
+        auto lid = *tx.put_object(root, "big", ObjType::list);
         for (int i = 0; i < count; ++i)
             tx.insert(lid, static_cast<std::size_t>(i), std::int64_t{i});
     });
@@ -5594,7 +5583,7 @@ TEST(Document, insert_after_many_deletes) {
             });
         }
     }
-    EXPECT_EQ(get_int_val(doc.get(root, "key")), 99);
+    EXPECT_EQ(get_int_val(*doc.get(root, "key")), 99);
 }
 
 TEST(Document, large_list_patches_have_correct_paths) {
@@ -5603,8 +5592,8 @@ TEST(Document, large_list_patches_have_correct_paths) {
     auto list_id = ObjId{};
     constexpr int count = 600;
 
-    auto patches = doc.transact_with_patches([&](auto& tx) {
-        list_id = tx.put_object(root, "items", ObjType::list);
+    auto patches = *doc.transact_with_patches([&](auto& tx) {
+        list_id = *tx.put_object(root, "items", ObjType::list);
         for (int i = 0; i < count; ++i)
             tx.insert(list_id, static_cast<std::size_t>(i), std::int64_t{i});
     });
@@ -5612,7 +5601,7 @@ TEST(Document, large_list_patches_have_correct_paths) {
     // Should have patches for the put_object + all insertions
     EXPECT_FALSE(patches.empty());
     // The list should be fully populated
-    EXPECT_EQ(doc.length(list_id), static_cast<std::size_t>(count));
+    EXPECT_EQ(*doc.length(list_id), static_cast<std::size_t>(count));
 }
 
 // =============================================================================
@@ -5624,7 +5613,7 @@ TEST(Document, text_conflicts_survive_save_load) {
     auto doc1 = make_doc(1);
     auto text_id = ObjId{};
     doc1.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "text", ObjType::text);
+        text_id = *tx.put_object(root, "text", ObjType::text);
         tx.splice_text(text_id, 0, 0, "hello");
     });
 
@@ -5635,14 +5624,14 @@ TEST(Document, text_conflicts_survive_save_load) {
     doc2.transact([&](auto& tx) { tx.splice_text(text_id, 5, 0, " earth"); });
 
     doc1.merge(doc2);
-    auto text_before = doc1.text(text_id);
+    auto text_before = *doc1.text(text_id);
 
     // Save and reload
     auto bytes = doc1.save();
     auto loaded = Document::load(bytes);
     ASSERT_TRUE(loaded.has_value());
 
-    auto text_after = loaded->text(text_id);
+    auto text_after = *loaded->text(text_id);
     EXPECT_EQ(text_before, text_after);
 }
 
@@ -5651,7 +5640,7 @@ TEST(Document, text_insertion_near_mark_boundaries) {
     auto doc = make_doc(1);
     auto text_id = ObjId{};
     doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "t", ObjType::text);
+        text_id = *tx.put_object(root, "t", ObjType::text);
         tx.splice_text(text_id, 0, 0, "abcdef");
     });
 
@@ -5660,7 +5649,7 @@ TEST(Document, text_insertion_near_mark_boundaries) {
         tx.mark(text_id, 1, 3, "bold", ScalarValue{true});
     });
 
-    auto marks_before = doc.marks(text_id);
+    auto marks_before = *doc.marks(text_id);
     ASSERT_FALSE(marks_before.empty());
 
     // Insert text right at the mark boundary
@@ -5673,11 +5662,11 @@ TEST(Document, text_insertion_near_mark_boundaries) {
         tx.splice_text(text_id, 5, 0, "Y");  // insert after the marked range
     });
 
-    auto marks_after = doc.marks(text_id);
+    auto marks_after = *doc.marks(text_id);
     EXPECT_FALSE(marks_after.empty());
 
     // After inserting X at pos 1: "aXbcdef". Then Y at pos 5: "aXbcdYef"
-    EXPECT_EQ(doc.text(text_id), "aXbcdYef");
+    EXPECT_EQ(*doc.text(text_id), "aXbcdYef");
 }
 
 // =============================================================================
@@ -5707,10 +5696,10 @@ TEST(Document, sync_handles_false_positive_head) {
 
     // Both should have all keys
     for (int i = 0; i < 20; ++i) {
-        EXPECT_TRUE(doc1.get(root, "d1_" + std::to_string(i)).has_value());
-        EXPECT_TRUE(doc1.get(root, "d2_" + std::to_string(i)).has_value());
-        EXPECT_TRUE(doc2.get(root, "d1_" + std::to_string(i)).has_value());
-        EXPECT_TRUE(doc2.get(root, "d2_" + std::to_string(i)).has_value());
+        EXPECT_TRUE((*doc1.get(root, "d1_" + std::to_string(i))).has_value());
+        EXPECT_TRUE((*doc1.get(root, "d2_" + std::to_string(i))).has_value());
+        EXPECT_TRUE((*doc2.get(root, "d1_" + std::to_string(i))).has_value());
+        EXPECT_TRUE((*doc2.get(root, "d2_" + std::to_string(i))).has_value());
     }
 }
 
@@ -5751,9 +5740,9 @@ TEST(Document, sync_handles_complex_branching) {
 
     // All keys present in all docs
     for (const auto& key : {"a", "b", "c", "d", "e"}) {
-        EXPECT_TRUE(doc1.get(root, key).has_value());
-        EXPECT_TRUE(doc2.get(root, key).has_value());
-        EXPECT_TRUE(doc3.get(root, key).has_value());
+        EXPECT_TRUE((*doc1.get(root, key)).has_value());
+        EXPECT_TRUE((*doc2.get(root, key)).has_value());
+        EXPECT_TRUE((*doc3.get(root, key)).has_value());
     }
 }
 
@@ -5790,10 +5779,10 @@ TEST(Document, sync_in_flight_does_not_lose_concurrent_changes) {
     }
 
     // Both docs should have both values
-    EXPECT_TRUE(doc1.get(root, "initial").has_value());
-    EXPECT_TRUE(doc1.get(root, "concurrent").has_value());
-    EXPECT_TRUE(doc2.get(root, "initial").has_value());
-    EXPECT_TRUE(doc2.get(root, "concurrent").has_value());
+    EXPECT_TRUE((*doc1.get(root, "initial")).has_value());
+    EXPECT_TRUE((*doc1.get(root, "concurrent")).has_value());
+    EXPECT_TRUE((*doc2.get(root, "initial")).has_value());
+    EXPECT_TRUE((*doc2.get(root, "concurrent")).has_value());
 }
 
 // =============================================================================
@@ -5805,8 +5794,8 @@ TEST(Document, insert_object_into_list_survives_save_load) {
     auto list_id = ObjId{};
     auto nested_map = ObjId{};
     doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "items", ObjType::list);
-        nested_map = tx.insert_object(list_id, 0, ObjType::map);
+        list_id = *tx.put_object(root, "items", ObjType::list);
+        nested_map = *tx.insert_object(list_id, 0, ObjType::map);
         tx.put(nested_map, "name", std::string{"Alice"});
     });
 
@@ -5814,12 +5803,12 @@ TEST(Document, insert_object_into_list_survives_save_load) {
     auto loaded = Document::load(bytes);
     ASSERT_TRUE(loaded.has_value());
 
-    EXPECT_EQ(loaded->length(list_id), 1u);
-    auto val = loaded->get(nested_map, "name");
+    EXPECT_EQ(*loaded->length(list_id), 1u);
+    auto val = *loaded->get(nested_map, "name");
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(std::get<std::string>(std::get<ScalarValue>(*val)), "Alice");
 
-    auto list_val = loaded->get(list_id, std::size_t{0});
+    auto list_val = *loaded->get(list_id, std::size_t{0});
     ASSERT_TRUE(list_val.has_value());
     ASSERT_TRUE(std::holds_alternative<ObjType>(*list_val));
     EXPECT_EQ(std::get<ObjType>(*list_val), ObjType::map);
@@ -5836,14 +5825,14 @@ TEST(Document, scalar_vs_objtype_conflict_survives_save_load) {
     doc2.transact([](auto& tx) { tx.put_object(root, "x", ObjType::map); });
     doc1.merge(doc2);
 
-    auto vals_before = doc1.get_all(root, "x");
+    auto vals_before = *doc1.get_all(root, "x");
     EXPECT_EQ(vals_before.size(), 2u);
 
     auto bytes = doc1.save();
     auto loaded = Document::load(bytes);
     ASSERT_TRUE(loaded.has_value());
 
-    auto vals_after = loaded->get_all(root, "x");
+    auto vals_after = *loaded->get_all(root, "x");
     EXPECT_EQ(vals_after.size(), vals_before.size());
 }
 
@@ -5852,9 +5841,9 @@ TEST(Document, list_counter_in_nested_map_survives_save_load) {
     auto list_id = ObjId{};
     auto map_id = ObjId{};
     doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "list", ObjType::list);
+        list_id = *tx.put_object(root, "list", ObjType::list);
         tx.insert(list_id, 0, std::int64_t{99});
-        map_id = tx.insert_object(list_id, 1, ObjType::map);
+        map_id = *tx.insert_object(list_id, 1, ObjType::map);
         tx.put(map_id, "c", Counter{10});
     });
     doc.transact([&](auto& tx) {
@@ -5865,8 +5854,8 @@ TEST(Document, list_counter_in_nested_map_survives_save_load) {
     auto loaded = Document::load(bytes);
     ASSERT_TRUE(loaded.has_value());
 
-    EXPECT_EQ(loaded->length(list_id), 2u);
-    auto val = loaded->get(map_id, "c");
+    EXPECT_EQ(*loaded->length(list_id), 2u);
+    auto val = *loaded->get(map_id, "c");
     ASSERT_TRUE(val.has_value());
     auto cv = std::get<Counter>(std::get<ScalarValue>(*val));
     EXPECT_EQ(cv.value, 15);
@@ -5881,7 +5870,7 @@ TEST(Document, get_template_string_from_map) {
     doc.transact([](auto& tx) {
         tx.put(root, "name", std::string{"Alice"});
     });
-    auto val = doc.get<std::string>(root, "name");
+    auto val = *doc.get<std::string>(root, "name");
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(*val, "Alice");
 }
@@ -5891,7 +5880,7 @@ TEST(Document, get_template_int64_from_map) {
     doc.transact([](auto& tx) {
         tx.put(root, "age", std::int64_t{30});
     });
-    auto val = doc.get<std::int64_t>(root, "age");
+    auto val = *doc.get<std::int64_t>(root, "age");
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(*val, 30);
 }
@@ -5901,7 +5890,7 @@ TEST(Document, get_template_double_from_map) {
     doc.transact([](auto& tx) {
         tx.put(root, "pi", 3.14);
     });
-    auto val = doc.get<double>(root, "pi");
+    auto val = *doc.get<double>(root, "pi");
     ASSERT_TRUE(val.has_value());
     EXPECT_DOUBLE_EQ(*val, 3.14);
 }
@@ -5911,7 +5900,7 @@ TEST(Document, get_template_bool_from_map) {
     doc.transact([](auto& tx) {
         tx.put(root, "active", true);
     });
-    auto val = doc.get<bool>(root, "active");
+    auto val = *doc.get<bool>(root, "active");
     ASSERT_TRUE(val.has_value());
     EXPECT_TRUE(*val);
 }
@@ -5921,7 +5910,7 @@ TEST(Document, get_template_uint64_from_map) {
     doc.transact([](auto& tx) {
         tx.put(root, "big", std::uint64_t{9999999999ULL});
     });
-    auto val = doc.get<std::uint64_t>(root, "big");
+    auto val = *doc.get<std::uint64_t>(root, "big");
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(*val, 9999999999ULL);
 }
@@ -5931,7 +5920,7 @@ TEST(Document, get_template_counter_from_map) {
     doc.transact([](auto& tx) {
         tx.put(root, "hits", Counter{42});
     });
-    auto val = doc.get<Counter>(root, "hits");
+    auto val = *doc.get<Counter>(root, "hits");
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(val->value, 42);
 }
@@ -5941,14 +5930,14 @@ TEST(Document, get_template_timestamp_from_map) {
     doc.transact([](auto& tx) {
         tx.put(root, "created", Timestamp{1700000000000});
     });
-    auto val = doc.get<Timestamp>(root, "created");
+    auto val = *doc.get<Timestamp>(root, "created");
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(val->millis_since_epoch, 1700000000000);
 }
 
 TEST(Document, get_template_nullopt_on_missing_key) {
     auto doc = make_doc(1);
-    auto val = doc.get<std::string>(root, "nonexistent");
+    auto val = *doc.get<std::string>(root, "nonexistent");
     EXPECT_FALSE(val.has_value());
 }
 
@@ -5958,7 +5947,7 @@ TEST(Document, get_template_nullopt_on_type_mismatch) {
         tx.put(root, "num", std::int64_t{42});
     });
     // Ask for string, but it's an int
-    auto val = doc.get<std::string>(root, "num");
+    auto val = *doc.get<std::string>(root, "num");
     EXPECT_FALSE(val.has_value());
 }
 
@@ -5966,15 +5955,15 @@ TEST(Document, get_template_from_list_index) {
     auto doc = make_doc(1);
     auto list_id = ObjId{};
     doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "items", ObjType::list);
+        list_id = *tx.put_object(root, "items", ObjType::list);
         tx.insert(list_id, 0, std::string{"first"});
         tx.insert(list_id, 1, std::int64_t{42});
     });
-    auto s = doc.get<std::string>(list_id, std::size_t{0});
+    auto s = *doc.get<std::string>(list_id, std::size_t{0});
     ASSERT_TRUE(s.has_value());
     EXPECT_EQ(*s, "first");
 
-    auto i = doc.get<std::int64_t>(list_id, std::size_t{1});
+    auto i = *doc.get<std::int64_t>(list_id, std::size_t{1});
     ASSERT_TRUE(i.has_value());
     EXPECT_EQ(*i, 42);
 }
@@ -6014,7 +6003,7 @@ TEST(Document, put_double_overload) {
     doc.transact([](auto& tx) {
         tx.put(root, "val", 2.718);
     });
-    EXPECT_DOUBLE_EQ(*doc.get<double>(root, "val"), 2.718);
+    EXPECT_DOUBLE_EQ(**doc.get<double>(root, "val"), 2.718);
 }
 
 TEST(Document, put_null_overload) {
@@ -6022,7 +6011,7 @@ TEST(Document, put_null_overload) {
     doc.transact([](auto& tx) {
         tx.put(root, "empty", Null{});
     });
-    auto val = doc.get(root, "empty");
+    auto val = *doc.get(root, "empty");
     ASSERT_TRUE(val.has_value());
     auto sv = std::get<ScalarValue>(*val);
     EXPECT_TRUE(std::holds_alternative<Null>(sv));
@@ -6032,7 +6021,7 @@ TEST(Document, insert_string_overload) {
     auto doc = make_doc(1);
     auto list_id = ObjId{};
     doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "items", ObjType::list);
+        list_id = *tx.put_object(root, "items", ObjType::list);
         tx.insert(list_id, 0, std::string{"hello"});
         tx.insert(list_id, 1, "world");  // const char*
     });
@@ -6044,7 +6033,7 @@ TEST(Document, insert_int_overload) {
     auto doc = make_doc(1);
     auto list_id = ObjId{};
     doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "items", ObjType::list);
+        list_id = *tx.put_object(root, "items", ObjType::list);
         tx.insert(list_id, 0, 99);  // int -> int64_t
     });
     EXPECT_EQ(*doc.get<std::int64_t>(list_id, std::size_t{0}), 99);
@@ -6054,7 +6043,7 @@ TEST(Document, set_string_overload) {
     auto doc = make_doc(1);
     auto list_id = ObjId{};
     doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "items", ObjType::list);
+        list_id = *tx.put_object(root, "items", ObjType::list);
         tx.insert(list_id, 0, std::string{"old"});
     });
     doc.transact([&](auto& tx) {
@@ -6069,9 +6058,8 @@ TEST(Document, set_string_overload) {
 
 TEST(Document, transact_returns_obj_id) {
     auto doc = make_doc(1);
-    auto list_id = doc.transact([](Transaction& tx) {
-        return tx.put_object(root, "items", ObjType::list);
-    });
+    auto list_id =
+        *doc.transact([](Transaction& tx) { return *tx.put_object(root, "items", ObjType::list); });
     EXPECT_NE(list_id, root);
     auto type = doc.object_type(list_id);
     ASSERT_TRUE(type.has_value());
@@ -6080,7 +6068,7 @@ TEST(Document, transact_returns_obj_id) {
 
 TEST(Document, transact_returns_int) {
     auto doc = make_doc(1);
-    auto result = doc.transact([](Transaction& tx) -> int {
+    auto result = *doc.transact([](Transaction& tx) -> int {
         tx.put(root, "x", std::int64_t{42});
         return 123;
     });
@@ -6090,7 +6078,7 @@ TEST(Document, transact_returns_int) {
 
 TEST(Document, transact_returns_string) {
     auto doc = make_doc(1);
-    auto result = doc.transact([](Transaction& tx) -> std::string {
+    auto result = *doc.transact([](Transaction& tx) -> std::string {
         tx.put(root, "greeting", std::string{"hello"});
         return "done";
     });
@@ -6109,9 +6097,8 @@ TEST(Document, transact_void_template_overload) {
 
 TEST(Document, transact_with_patches_returns_pair) {
     auto doc = make_doc(1);
-    auto [list_id, patches] = doc.transact_with_patches([](Transaction& tx) {
-        return tx.put_object(root, "items", ObjType::list);
-    });
+    auto [list_id, patches] = *doc.transact_with_patches(
+        [](Transaction& tx) { return *tx.put_object(root, "items", ObjType::list); });
     EXPECT_NE(list_id, root);
     EXPECT_FALSE(patches.empty());
 }
@@ -6124,14 +6111,14 @@ TEST(Document, insert_all_initializer_list) {
     auto doc = make_doc(1);
     auto list_id = ObjId{};
     doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "nums", ObjType::list);
+        list_id = *tx.put_object(root, "nums", ObjType::list);
         tx.insert_all(list_id, 0, {
             ScalarValue{std::int64_t{1}},
             ScalarValue{std::int64_t{2}},
             ScalarValue{std::int64_t{3}},
         });
     });
-    EXPECT_EQ(doc.length(list_id), 3u);
+    EXPECT_EQ(*doc.length(list_id), 3u);
     EXPECT_EQ(*doc.get<std::int64_t>(list_id, std::size_t{0}), 1);
     EXPECT_EQ(*doc.get<std::int64_t>(list_id, std::size_t{1}), 2);
     EXPECT_EQ(*doc.get<std::int64_t>(list_id, std::size_t{2}), 3);
@@ -6173,10 +6160,10 @@ TEST(Document, insert_range_from_vector) {
         ScalarValue{std::int64_t{30}},
     };
     doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "nums", ObjType::list);
+        list_id = *tx.put_object(root, "nums", ObjType::list);
         tx.insert_range(list_id, 0, values);
     });
-    EXPECT_EQ(doc.length(list_id), 3u);
+    EXPECT_EQ(*doc.length(list_id), 3u);
     EXPECT_EQ(*doc.get<std::int64_t>(list_id, std::size_t{0}), 10);
     EXPECT_EQ(*doc.get<std::int64_t>(list_id, std::size_t{2}), 30);
 }
@@ -6190,14 +6177,14 @@ TEST(Document, operator_bracket_root_access) {
     doc.transact([](auto& tx) {
         tx.put(root, "greeting", std::string{"hi"});
     });
-    auto val = doc["greeting"];
+    auto val = *doc["greeting"];
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(*get_scalar<std::string>(*val), "hi");
 }
 
 TEST(Document, operator_bracket_missing_key_returns_nullopt) {
     auto doc = make_doc(1);
-    auto val = doc["missing"];
+    auto val = *doc["missing"];
     EXPECT_FALSE(val.has_value());
 }
 
@@ -6206,7 +6193,7 @@ TEST(Document, get_path_single_level) {
     doc.transact([](auto& tx) {
         tx.put(root, "x", std::int64_t{42});
     });
-    auto val = doc.get_path("x");
+    auto val = *doc.get_path("x");
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(*get_scalar<std::int64_t>(*val), 42);
 }
@@ -6214,11 +6201,11 @@ TEST(Document, get_path_single_level) {
 TEST(Document, get_path_nested_map) {
     auto doc = make_doc(1);
     doc.transact([](auto& tx) {
-        auto config = tx.put_object(root, "config", ObjType::map);
-        auto db = tx.put_object(config, "database", ObjType::map);
+        auto config = *tx.put_object(root, "config", ObjType::map);
+        auto db = *tx.put_object(config, "database", ObjType::map);
         tx.put(db, "port", std::int64_t{5432});
     });
-    auto val = doc.get_path("config", "database", "port");
+    auto val = *doc.get_path("config", "database", "port");
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(*get_scalar<std::int64_t>(*val), 5432);
 }
@@ -6226,28 +6213,44 @@ TEST(Document, get_path_nested_map) {
 TEST(Document, get_path_into_list) {
     auto doc = make_doc(1);
     doc.transact([](auto& tx) {
-        auto list = tx.put_object(root, "items", ObjType::list);
-        auto item = tx.insert_object(list, 0, ObjType::map);
+        auto list = *tx.put_object(root, "items", ObjType::list);
+        auto item = *tx.insert_object(list, 0, ObjType::map);
         tx.put(item, "title", std::string{"todo"});
     });
-    auto val = doc.get_path("items", std::size_t{0}, "title");
+    auto val = *doc.get_path("items", std::size_t{0}, "title");
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(*get_scalar<std::string>(*val), "todo");
 }
 
-TEST(Document, get_path_missing_intermediate_returns_nullopt) {
+TEST(Document, get_path_scalar_intermediate_returns_error) {
     auto doc = make_doc(1);
     doc.transact([](auto& tx) {
         tx.put(root, "x", std::int64_t{1});
     });
-    // "x" is a scalar, not an object - can't traverse further
-    auto val = doc.get_path("x", "y");
-    EXPECT_FALSE(val.has_value());
+    const auto before = doc.save();
+
+    const auto result = doc.get_path("x", "y");
+
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().kind, ErrorKind::invalid_value_type);
+    EXPECT_EQ(doc.save(), before);
+}
+
+TEST(Document, get_path_null_key_returns_error) {
+    auto doc = make_doc(1);
+    const auto before = doc.save();
+    const char* key = nullptr;
+
+    const auto result = doc.get_path("x", key);
+
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().kind, ErrorKind::invalid_key);
+    EXPECT_EQ(doc.save(), before);
 }
 
 TEST(Document, get_path_missing_key_returns_nullopt) {
     auto doc = make_doc(1);
-    auto val = doc.get_path("nonexistent", "deep");
+    auto val = *doc.get_path("nonexistent", "deep");
     EXPECT_FALSE(val.has_value());
 }
 
@@ -6320,21 +6323,18 @@ TEST(Document, overload_helper_multi_type) {
 
 TEST(Document, put_list_initializer_creates_populated_list) {
     auto doc = Document{};
-    auto items = doc.transact([](auto& tx) {
-        return tx.put(root, "items", List{"Milk", "Eggs", "Bread"});
-    });
-    EXPECT_EQ(doc.length(items), 3u);
-    EXPECT_EQ(doc.get<std::string>(items, std::size_t{0}), "Milk");
-    EXPECT_EQ(doc.get<std::string>(items, std::size_t{1}), "Eggs");
-    EXPECT_EQ(doc.get<std::string>(items, std::size_t{2}), "Bread");
+    auto items = *doc.transact(
+        [](auto& tx) { return *tx.put(root, "items", List{"Milk", "Eggs", "Bread"}); });
+    EXPECT_EQ(*doc.length(items), 3u);
+    EXPECT_EQ(*doc.get<std::string>(items, std::size_t{0}), "Milk");
+    EXPECT_EQ(*doc.get<std::string>(items, std::size_t{1}), "Eggs");
+    EXPECT_EQ(*doc.get<std::string>(items, std::size_t{2}), "Bread");
 }
 
 TEST(Document, put_list_empty_creates_empty_list) {
     auto doc = Document{};
-    auto items = doc.transact([](auto& tx) {
-        return tx.put(root, "items", List{});
-    });
-    EXPECT_EQ(doc.length(items), 0u);
+    auto items = *doc.transact([](auto& tx) { return *tx.put(root, "items", List{}); });
+    EXPECT_EQ(*doc.length(items), 0u);
     auto type = doc.object_type(items);
     ASSERT_TRUE(type.has_value());
     EXPECT_EQ(*type, ObjType::list);
@@ -6342,19 +6342,17 @@ TEST(Document, put_list_empty_creates_empty_list) {
 
 TEST(Document, put_map_initializer_creates_populated_map) {
     auto doc = Document{};
-    auto config = doc.transact([](auto& tx) {
-        return tx.put(root, "config", Map{{"port", 8080}, {"host", "localhost"}});
+    auto config = *doc.transact([](auto& tx) {
+        return *tx.put(root, "config", Map{{"port", 8080}, {"host", "localhost"}});
     });
-    EXPECT_EQ(doc.get<std::int64_t>(config, "port"), 8080);
-    EXPECT_EQ(doc.get<std::string>(config, "host"), "localhost");
+    EXPECT_EQ(*doc.get<std::int64_t>(config, "port"), 8080);
+    EXPECT_EQ(*doc.get<std::string>(config, "host"), "localhost");
 }
 
 TEST(Document, put_map_empty_creates_empty_map) {
     auto doc = Document{};
-    auto m = doc.transact([](auto& tx) {
-        return tx.put(root, "data", Map{});
-    });
-    EXPECT_EQ(doc.length(m), 0u);
+    auto m = *doc.transact([](auto& tx) { return *tx.put(root, "data", Map{}); });
+    EXPECT_EQ(*doc.length(m), 0u);
     auto type = doc.object_type(m);
     ASSERT_TRUE(type.has_value());
     EXPECT_EQ(*type, ObjType::map);
@@ -6362,40 +6360,39 @@ TEST(Document, put_map_empty_creates_empty_map) {
 
 TEST(Document, insert_list_initializer_into_list) {
     auto doc = Document{};
-    auto outer = doc.transact([](auto& tx) {
-        auto outer = tx.put(root, "outer", ObjType::list);
+    auto outer = *doc.transact([](auto& tx) {
+        auto outer = *tx.put(root, "outer", ObjType::list);
         tx.insert(outer, 0, List{"a", "b", "c"});
         return outer;
     });
     // outer[0] is a nested list
-    auto nested_val = doc.get(outer, std::size_t{0});
+    auto nested_val = *doc.get(outer, std::size_t{0});
     ASSERT_TRUE(nested_val.has_value());
     EXPECT_TRUE(is_object(*nested_val));
 }
 
 TEST(Document, insert_map_initializer_into_list) {
     auto doc = Document{};
-    auto outer = doc.transact([](auto& tx) {
-        auto outer = tx.put(root, "records", ObjType::list);
+    auto outer = *doc.transact([](auto& tx) {
+        auto outer = *tx.put(root, "records", ObjType::list);
         tx.insert(outer, 0, Map{{"name", "Alice"}, {"age", 30}});
         return outer;
     });
-    EXPECT_EQ(doc.length(outer), 1u);
-    if (auto name = doc.get_path("records", std::size_t{0}, "name")) {
+    EXPECT_EQ(*doc.length(outer), 1u);
+    if (auto name = *doc.get_path("records", std::size_t{0}, "name")) {
         EXPECT_EQ(get_scalar<std::string>(*name), "Alice");
     }
 }
 
 TEST(Document, list_initializer_mixed_types) {
     auto doc = Document{};
-    auto items = doc.transact([](auto& tx) {
-        return tx.put(root, "mixed", List{1, "hello", 3.14, true});
-    });
-    EXPECT_EQ(doc.length(items), 4u);
-    EXPECT_EQ(doc.get<std::int64_t>(items, std::size_t{0}), 1);
-    EXPECT_EQ(doc.get<std::string>(items, std::size_t{1}), "hello");
-    EXPECT_EQ(doc.get<double>(items, std::size_t{2}), 3.14);
-    EXPECT_EQ(doc.get<bool>(items, std::size_t{3}), true);
+    auto items = *doc.transact(
+        [](auto& tx) { return *tx.put(root, "mixed", List{1, "hello", 3.14, true}); });
+    EXPECT_EQ(*doc.length(items), 4u);
+    EXPECT_EQ(*doc.get<std::int64_t>(items, std::size_t{0}), 1);
+    EXPECT_EQ(*doc.get<std::string>(items, std::size_t{1}), "hello");
+    EXPECT_EQ(*doc.get<double>(items, std::size_t{2}), 3.14);
+    EXPECT_EQ(*doc.get<bool>(items, std::size_t{3}), true);
 }
 
 TEST(Document, list_initializer_survives_save_load) {
@@ -6406,10 +6403,10 @@ TEST(Document, list_initializer_survives_save_load) {
     auto bytes = doc.save();
     auto loaded = Document::load(bytes);
     ASSERT_TRUE(loaded.has_value());
-    if (auto tag = loaded->get_path("tags", std::size_t{0})) {
+    if (auto tag = *loaded->get_path("tags", std::size_t{0})) {
         EXPECT_EQ(get_scalar<std::string>(*tag), "crdt");
     }
-    if (auto tag = loaded->get_path("tags", std::size_t{2})) {
+    if (auto tag = *loaded->get_path("tags", std::size_t{2})) {
         EXPECT_EQ(get_scalar<std::string>(*tag), "collaborative");
     }
 }
@@ -6418,43 +6415,42 @@ TEST(Document, list_initializer_survives_save_load) {
 
 TEST(Document, put_bare_initializer_list_creates_list) {
     auto doc = Document{};
-    auto items = doc.transact([](auto& tx) {
-        return tx.put(root, "items", {"Milk", "Eggs", "Bread"});
-    });
-    EXPECT_EQ(doc.length(items), 3u);
-    EXPECT_EQ(doc.get<std::string>(items, std::size_t{0}), "Milk");
-    EXPECT_EQ(doc.get<std::string>(items, std::size_t{2}), "Bread");
+    auto items =
+        *doc.transact([](auto& tx) { return *tx.put(root, "items", {"Milk", "Eggs", "Bread"}); });
+    EXPECT_EQ(*doc.length(items), 3u);
+    EXPECT_EQ(*doc.get<std::string>(items, std::size_t{0}), "Milk");
+    EXPECT_EQ(*doc.get<std::string>(items, std::size_t{2}), "Bread");
 }
 
 TEST(Document, put_bare_initializer_list_creates_map) {
     auto doc = Document{};
-    auto config = doc.transact([](auto& tx) {
-        return tx.put(root, "config", {{"port", std::int64_t{8080}}, {"host", "localhost"}});
+    auto config = *doc.transact([](auto& tx) {
+        return *tx.put(root, "config", {{"port", std::int64_t{8080}}, {"host", "localhost"}});
     });
-    EXPECT_EQ(doc.get<std::int64_t>(config, "port"), 8080);
-    EXPECT_EQ(doc.get<std::string>(config, "host"), "localhost");
+    EXPECT_EQ(*doc.get<std::int64_t>(config, "port"), 8080);
+    EXPECT_EQ(*doc.get<std::string>(config, "host"), "localhost");
 }
 
 TEST(Document, insert_bare_initializer_list_into_list) {
     auto doc = Document{};
-    auto outer = doc.transact([](auto& tx) {
-        auto outer = tx.put(root, "outer", ObjType::list);
+    auto outer = *doc.transact([](auto& tx) {
+        auto outer = *tx.put(root, "outer", ObjType::list);
         tx.insert(outer, 0, {"a", "b", "c"});
         return outer;
     });
-    auto nested = doc.get(outer, std::size_t{0});
+    auto nested = *doc.get(outer, std::size_t{0});
     ASSERT_TRUE(nested.has_value());
     EXPECT_TRUE(is_object(*nested));
 }
 
 TEST(Document, insert_bare_initializer_map_into_list) {
     auto doc = Document{};
-    auto outer = doc.transact([](auto& tx) {
-        auto outer = tx.put(root, "records", ObjType::list);
+    auto outer = *doc.transact([](auto& tx) {
+        auto outer = *tx.put(root, "records", ObjType::list);
         tx.insert(outer, 0, {{"name", "Alice"}, {"age", std::int64_t{30}}});
         return outer;
     });
-    if (auto name = doc.get_path("records", std::size_t{0}, "name")) {
+    if (auto name = *doc.get_path("records", std::size_t{0}, "name")) {
         EXPECT_EQ(get_scalar<std::string>(*name), "Alice");
     }
 }
@@ -6464,12 +6460,10 @@ TEST(Document, insert_bare_initializer_map_into_list) {
 TEST(Document, put_vector_creates_list) {
     auto doc = Document{};
     auto tags = std::vector<std::string>{"crdt", "cpp", "collaborative"};
-    auto list = doc.transact([&](auto& tx) {
-        return tx.put(root, "tags", tags);
-    });
-    EXPECT_EQ(doc.length(list), 3u);
-    EXPECT_EQ(doc.get<std::string>(list, std::size_t{0}), "crdt");
-    EXPECT_EQ(doc.get<std::string>(list, std::size_t{2}), "collaborative");
+    auto list = *doc.transact([&](auto& tx) { return *tx.put(root, "tags", tags); });
+    EXPECT_EQ(*doc.length(list), 3u);
+    EXPECT_EQ(*doc.get<std::string>(list, std::size_t{0}), "crdt");
+    EXPECT_EQ(*doc.get<std::string>(list, std::size_t{2}), "collaborative");
 }
 
 TEST(Document, put_std_map_creates_map) {
@@ -6478,22 +6472,18 @@ TEST(Document, put_std_map_creates_map) {
         {"w", ScalarValue{std::int64_t{800}}},
         {"h", ScalarValue{std::int64_t{600}}},
     };
-    auto obj = doc.transact([&](auto& tx) {
-        return tx.put(root, "dims", dims);
-    });
-    EXPECT_EQ(doc.get<std::int64_t>(obj, "w"), 800);
-    EXPECT_EQ(doc.get<std::int64_t>(obj, "h"), 600);
+    auto obj = *doc.transact([&](auto& tx) { return *tx.put(root, "dims", dims); });
+    EXPECT_EQ(*doc.get<std::int64_t>(obj, "w"), 800);
+    EXPECT_EQ(*doc.get<std::int64_t>(obj, "h"), 600);
 }
 
 TEST(Document, put_set_creates_list) {
     auto doc = Document{};
     auto unique = std::set<std::string>{"alpha", "beta", "gamma"};
-    auto list = doc.transact([&](auto& tx) {
-        return tx.put(root, "sorted", unique);
-    });
-    EXPECT_EQ(doc.length(list), 3u);
+    auto list = *doc.transact([&](auto& tx) { return *tx.put(root, "sorted", unique); });
+    EXPECT_EQ(*doc.length(list), 3u);
     // std::set is sorted, so alpha < beta < gamma
-    EXPECT_EQ(doc.get<std::string>(list, std::size_t{0}), "alpha");
+    EXPECT_EQ(*doc.get<std::string>(list, std::size_t{0}), "alpha");
 }
 
 TEST(Document, insert_vector_into_list) {
@@ -6502,13 +6492,13 @@ TEST(Document, insert_vector_into_list) {
         ScalarValue{std::int64_t{10}},
         ScalarValue{std::int64_t{20}},
     };
-    auto outer = doc.transact([&](auto& tx) {
-        auto outer = tx.put(root, "outer", ObjType::list);
+    auto outer = *doc.transact([&](auto& tx) {
+        auto outer = *tx.put(root, "outer", ObjType::list);
         tx.insert(outer, 0, nums);
         return outer;
     });
     // outer[0] is a nested list
-    auto nested = doc.get(outer, std::size_t{0});
+    auto nested = *doc.get(outer, std::size_t{0});
     ASSERT_TRUE(nested.has_value());
     EXPECT_TRUE(is_object(*nested));
 }
@@ -6519,12 +6509,12 @@ TEST(Document, insert_std_map_into_list) {
         {"name", ScalarValue{std::string{"Alice"}}},
         {"score", ScalarValue{std::int64_t{100}}},
     };
-    auto outer = doc.transact([&](auto& tx) {
-        auto outer = tx.put(root, "records", ObjType::list);
+    auto outer = *doc.transact([&](auto& tx) {
+        auto outer = *tx.put(root, "records", ObjType::list);
         tx.insert(outer, 0, record);
         return outer;
     });
-    if (auto name = doc.get_path("records", std::size_t{0}, "name")) {
+    if (auto name = *doc.get_path("records", std::size_t{0}, "name")) {
         EXPECT_EQ(get_scalar<std::string>(*name), "Alice");
     }
 }
@@ -6539,18 +6529,18 @@ TEST(Document, operator_bracket_returns_various_types) {
         tx.put(root, "score", 99.5);
         tx.put(root, "active", true);
     });
-    EXPECT_EQ(get_scalar<std::string>(doc["name"]), "Alice");
-    EXPECT_EQ(get_scalar<std::int64_t>(doc["age"]), 30);
-    EXPECT_EQ(get_scalar<double>(doc["score"]), 99.5);
-    EXPECT_EQ(get_scalar<bool>(doc["active"]), true);
+    EXPECT_EQ(get_scalar<std::string>(*doc["name"]), "Alice");
+    EXPECT_EQ(get_scalar<std::int64_t>(*doc["age"]), 30);
+    EXPECT_EQ(get_scalar<double>(*doc["score"]), 99.5);
+    EXPECT_EQ(get_scalar<bool>(*doc["active"]), true);
 }
 
 TEST(Document, operator_bracket_reflects_mutation) {
     auto doc = Document{};
     doc.transact([](auto& tx) { tx.put(root, "x", 1); });
-    EXPECT_EQ(get_scalar<std::int64_t>(doc["x"]), 1);
+    EXPECT_EQ(get_scalar<std::int64_t>(*doc["x"]), 1);
     doc.transact([](auto& tx) { tx.put(root, "x", 2); });
-    EXPECT_EQ(get_scalar<std::int64_t>(doc["x"]), 2);
+    EXPECT_EQ(get_scalar<std::int64_t>(*doc["x"]), 2);
 }
 
 TEST(Document, operator_bracket_after_merge) {
@@ -6559,8 +6549,8 @@ TEST(Document, operator_bracket_after_merge) {
     auto doc2 = doc.fork();
     doc2.transact([](auto& tx) { tx.put(root, "y", 2); });
     doc.merge(doc2);
-    EXPECT_EQ(get_scalar<std::int64_t>(doc["x"]), 1);
-    EXPECT_EQ(get_scalar<std::int64_t>(doc["y"]), 2);
+    EXPECT_EQ(get_scalar<std::int64_t>(*doc["x"]), 1);
+    EXPECT_EQ(get_scalar<std::int64_t>(*doc["y"]), 2);
 }
 
 TEST(Document, get_path_list_index_out_of_bounds) {
@@ -6568,13 +6558,15 @@ TEST(Document, get_path_list_index_out_of_bounds) {
     doc.transact([](auto& tx) {
         tx.put(root, "items", {"a", "b"});
     });
-    EXPECT_FALSE(doc.get_path("items", std::size_t{99}).has_value());
+    const auto result = doc.get_path("items", std::size_t{99});
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().kind, ErrorKind::index_out_of_bounds);
 }
 
 TEST(Document, get_path_on_empty_doc) {
     auto doc = Document{};
-    EXPECT_FALSE(doc.get_path("anything").has_value());
-    EXPECT_FALSE(doc.get_path("a", "b", "c").has_value());
+    EXPECT_FALSE((*doc.get_path("anything")).has_value());
+    EXPECT_FALSE((*doc.get_path("a", "b", "c")).has_value());
 }
 
 TEST(Document, get_path_after_merge) {
@@ -6587,19 +6579,19 @@ TEST(Document, get_path_after_merge) {
         tx.put(root, "meta", {{"owner", "Bob"}});
     });
     doc.merge(doc2);
-    EXPECT_EQ(get_scalar<std::int64_t>(doc.get_path("config", "port")), 8080);
-    EXPECT_EQ(get_scalar<std::string>(doc.get_path("meta", "owner")), "Bob");
+    EXPECT_EQ(get_scalar<std::int64_t>(*doc.get_path("config", "port")), 8080);
+    EXPECT_EQ(get_scalar<std::string>(*doc.get_path("meta", "owner")), "Bob");
 }
 
 TEST(Document, get_path_deep_nesting) {
     auto doc = Document{};
     doc.transact([](auto& tx) {
-        auto a = tx.put(root, "a", ObjType::map);
-        auto b = tx.put(a, "b", ObjType::map);
-        auto c = tx.put(b, "c", ObjType::map);
+        auto a = *tx.put(root, "a", ObjType::map);
+        auto b = *tx.put(a, "b", ObjType::map);
+        auto c = *tx.put(b, "c", ObjType::map);
         tx.put(c, "val", 42);
     });
-    EXPECT_EQ(get_scalar<std::int64_t>(doc.get_path("a", "b", "c", "val")), 42);
+    EXPECT_EQ(get_scalar<std::int64_t>(*doc.get_path("a", "b", "c", "val")), 42);
 }
 
 TEST(Document, map_initializer_survives_save_load) {
@@ -6610,20 +6602,19 @@ TEST(Document, map_initializer_survives_save_load) {
     auto bytes = doc.save();
     auto loaded = Document::load(bytes);
     ASSERT_TRUE(loaded.has_value());
-    EXPECT_EQ(get_scalar<std::string>(loaded->get_path("config", "host")), "localhost");
-    EXPECT_EQ(get_scalar<std::int64_t>(loaded->get_path("config", "port")), 8080);
+    EXPECT_EQ(get_scalar<std::string>(*loaded->get_path("config", "host")), "localhost");
+    EXPECT_EQ(get_scalar<std::int64_t>(*loaded->get_path("config", "port")), 8080);
 }
 
 TEST(Document, bare_initializer_list_mixed_types) {
     auto doc = Document{};
-    auto list_id = doc.transact([](auto& tx) {
-        return tx.put(root, "mixed", {1, "two", 3.0, true});
-    });
-    EXPECT_EQ(doc.length(list_id), 4);
-    EXPECT_EQ(get_scalar<std::int64_t>(doc.get(list_id, std::size_t{0})), 1);
-    EXPECT_EQ(get_scalar<std::string>(doc.get(list_id, std::size_t{1})), "two");
-    EXPECT_EQ(get_scalar<double>(doc.get(list_id, std::size_t{2})), 3.0);
-    EXPECT_EQ(get_scalar<bool>(doc.get(list_id, std::size_t{3})), true);
+    auto list_id =
+        *doc.transact([](auto& tx) { return *tx.put(root, "mixed", {1, "two", 3.0, true}); });
+    EXPECT_EQ(*doc.length(list_id), 4);
+    EXPECT_EQ(get_scalar<std::int64_t>(*doc.get(list_id, std::size_t{0})), 1);
+    EXPECT_EQ(get_scalar<std::string>(*doc.get(list_id, std::size_t{1})), "two");
+    EXPECT_EQ(get_scalar<double>(*doc.get(list_id, std::size_t{2})), 3.0);
+    EXPECT_EQ(get_scalar<bool>(*doc.get(list_id, std::size_t{3})), true);
 }
 
 TEST(Document, bare_initializer_survives_save_load) {
@@ -6635,40 +6626,40 @@ TEST(Document, bare_initializer_survives_save_load) {
     auto bytes = doc.save();
     auto loaded = Document::load(bytes);
     ASSERT_TRUE(loaded.has_value());
-    EXPECT_EQ(get_scalar<std::string>(loaded->get_path("tags", std::size_t{0})), "alpha");
-    EXPECT_EQ(get_scalar<std::int64_t>(loaded->get_path("dims", "w")), 800);
+    EXPECT_EQ(get_scalar<std::string>(*loaded->get_path("tags", std::size_t{0})), "alpha");
+    EXPECT_EQ(get_scalar<std::int64_t>(*loaded->get_path("dims", "w")), 800);
 }
 
 TEST(Document, put_set_creates_sorted_list) {
     auto doc = Document{};
-    auto list_id = doc.transact([](auto& tx) {
+    auto list_id = *doc.transact([](auto& tx) {
         auto vals = std::set<std::string>{"cherry", "apple", "banana"};
-        return tx.put(root, "sorted", vals);
+        return *tx.put(root, "sorted", vals);
     });
-    EXPECT_EQ(doc.length(list_id), 3);
+    EXPECT_EQ(*doc.length(list_id), 3);
     // std::set is sorted, so order is apple, banana, cherry
-    EXPECT_EQ(get_scalar<std::string>(doc.get(list_id, std::size_t{0})), "apple");
-    EXPECT_EQ(get_scalar<std::string>(doc.get(list_id, std::size_t{1})), "banana");
-    EXPECT_EQ(get_scalar<std::string>(doc.get(list_id, std::size_t{2})), "cherry");
+    EXPECT_EQ(get_scalar<std::string>(*doc.get(list_id, std::size_t{0})), "apple");
+    EXPECT_EQ(get_scalar<std::string>(*doc.get(list_id, std::size_t{1})), "banana");
+    EXPECT_EQ(get_scalar<std::string>(*doc.get(list_id, std::size_t{2})), "cherry");
 }
 
 TEST(Document, put_empty_vector_creates_empty_list) {
     auto doc = Document{};
-    auto list_id = doc.transact([](auto& tx) {
+    auto list_id = *doc.transact([](auto& tx) {
         auto empty = std::vector<std::string>{};
-        return tx.put(root, "empty", empty);
+        return *tx.put(root, "empty", empty);
     });
-    EXPECT_EQ(doc.length(list_id), 0);
+    EXPECT_EQ(*doc.length(list_id), 0);
 }
 
 TEST(Document, put_empty_std_map_creates_empty_map) {
     auto doc = Document{};
-    auto map_id = doc.transact([](auto& tx) {
+    auto map_id = *doc.transact([](auto& tx) {
         auto empty = std::map<std::string, ScalarValue>{};
-        return tx.put(root, "empty", empty);
+        return *tx.put(root, "empty", empty);
     });
-    EXPECT_EQ(doc.length(map_id), 0);
-    EXPECT_EQ(doc.keys(map_id).size(), 0);
+    EXPECT_EQ(*doc.length(map_id), 0);
+    EXPECT_EQ((*doc.keys(map_id)).size(), 0);
 }
 
 TEST(Document, stl_container_survives_save_load) {
@@ -6685,8 +6676,8 @@ TEST(Document, stl_container_survives_save_load) {
     auto bytes = doc.save();
     auto loaded = Document::load(bytes);
     ASSERT_TRUE(loaded.has_value());
-    EXPECT_EQ(get_scalar<std::string>(loaded->get_path("tags", std::size_t{0})), "x");
-    EXPECT_EQ(get_scalar<std::int64_t>(loaded->get_path("dims", "w")), 1920);
+    EXPECT_EQ(get_scalar<std::string>(*loaded->get_path("tags", std::size_t{0})), "x");
+    EXPECT_EQ(get_scalar<std::int64_t>(*loaded->get_path("dims", "w")), 1920);
 }
 
 TEST(Document, initializer_list_after_fork_merge) {
@@ -6702,6 +6693,6 @@ TEST(Document, initializer_list_after_fork_merge) {
         tx.put(root, "y", Map{{"from", "doc2"}});
     });
     doc.merge(doc2);
-    EXPECT_EQ(get_scalar<std::string>(doc.get_path("x", std::size_t{0})), "from_doc1");
-    EXPECT_EQ(get_scalar<std::string>(doc.get_path("y", "from")), "doc2");
+    EXPECT_EQ(get_scalar<std::string>(*doc.get_path("x", std::size_t{0})), "from_doc1");
+    EXPECT_EQ(get_scalar<std::string>(*doc.get_path("y", "from")), "doc2");
 }

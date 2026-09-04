@@ -41,7 +41,7 @@ int main() {
             threads.emplace_back([&doc, &found, t]() {
                 for (int i = t * 125; i < (t + 1) * 125; ++i) {
                     // Typed get<T>() — returns optional directly
-                    if (doc.get<std::int64_t>(am::root, "key_" + std::to_string(i)))
+                    if (*doc.get<std::int64_t>(am::root, "key_" + std::to_string(i)))
                         found.fetch_add(1, std::memory_order_relaxed);
                 }
             });
@@ -65,14 +65,14 @@ int main() {
             });
         }
         for (auto& t : threads) t.join();
-        std::printf("  8 threads x 10 writes: %zu total keys\n\n", doc.length(am::root));
+        std::printf("  8 threads x 10 writes: %zu total keys\n\n", *doc.length(am::root));
     }
 
     // -- Readers + writer simultaneously --------------------------------------
     std::printf("=== Readers + writer ===\n");
     {
-        auto text_id = doc.transact([](am::Transaction& tx) {
-            auto id = tx.put(am::root, "content", am::ObjType::text);
+        auto text_id = *doc.transact([](am::Transaction& tx) {
+            auto id = *tx.put(am::root, "content", am::ObjType::text);
             tx.splice_text(id, 0, 0, "Hello");
             return id;
         });
@@ -85,7 +85,7 @@ int main() {
         // Writer
         threads.emplace_back([&]() {
             for (int i = 0; i < 100; ++i) {
-                auto len = doc.length(text_id);
+                auto len = *doc.length(text_id);
                 doc.transact([&text_id, len](auto& tx) {
                     tx.splice_text(text_id, len, 0, ".");
                 });
@@ -97,7 +97,7 @@ int main() {
         for (int t = 0; t < 4; ++t) {
             threads.emplace_back([&]() {
                 while (!stop.load(std::memory_order_acquire)) {
-                    (void)doc.text(text_id);
+                    (void)*doc.text(text_id);
                     reads_done.fetch_add(1, std::memory_order_relaxed);
                 }
             });
@@ -105,7 +105,8 @@ int main() {
 
         for (auto& t : threads) t.join();
         std::printf("  Writer done. %d concurrent reads. Text length: %zu\n\n",
-                    reads_done.load(), doc.length(text_id));
+                    reads_done.load(),
+                    *doc.length(text_id));
     }
 
     // -- Lock-free reads ------------------------------------------------------
@@ -118,7 +119,7 @@ int main() {
         for (int t = 0; t < 8; ++t) {
             threads.emplace_back([&doc, &found, t]() {
                 for (int i = t * 125; i < (t + 1) * 125; ++i) {
-                    if (doc.get<std::int64_t>(am::root, "key_" + std::to_string(i)))
+                    if (*doc.get<std::int64_t>(am::root, "key_" + std::to_string(i)))
                         found.fetch_add(1, std::memory_order_relaxed);
                 }
             });

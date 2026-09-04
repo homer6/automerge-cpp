@@ -81,7 +81,7 @@ public:
 
     /// Decode persistent state from storage.
     /// @return The decoded SyncState, or nullopt if the data is invalid.
-    static auto decode(std::span<const std::byte> data) -> std::optional<SyncState>;
+    static auto decode(std::span<const std::byte> data) -> std::expected<SyncState, Error>;
 
 private:
     friend class Document;

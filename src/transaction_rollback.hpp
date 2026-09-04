@@ -18,10 +18,6 @@ struct TransactionRollback {
         return active_;
     }
 
-    void assert_active() const {
-        assert(active_);
-    }
-
     void record_map_key(DocState& state, const ObjId& obj, const std::string& key) {
         auto* object = state.get_object(obj);
         assert(object);

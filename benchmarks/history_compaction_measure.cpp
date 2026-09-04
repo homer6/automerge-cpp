@@ -148,7 +148,7 @@ auto measure_load(std::string_view mode, const std::filesystem::path& path) -> i
     auto document = mode == "full" ? am::Document::load(bytes) : am::Document::load_shallow(bytes);
     const auto elapsed = Clock::now() - started;
     const auto heap_after = heap_bytes();
-    if (!document || document->get<std::int64_t>(am::root, "value") == std::nullopt) {
+    if (!document || *document->get<std::int64_t>(am::root, "value") == std::nullopt) {
         return 2;
     }
     const auto milliseconds = std::chrono::duration<double, std::milli>{elapsed}.count();
@@ -170,7 +170,7 @@ auto measure_get_at(std::size_t change_count) -> int {
     for (auto iteration = std::size_t{0}; iteration < iterations; ++iteration) {
         auto sample = document;
         const auto started = Clock::now();
-        const auto value = sample.get_at(am::root, "value", heads[first_index]);
+        const auto value = *sample.get_at(am::root, "value", heads[first_index]);
         uncached_nanoseconds += Clock::now() - started;
         if (value == std::nullopt) {
             return 2;
@@ -178,13 +178,13 @@ auto measure_get_at(std::size_t change_count) -> int {
     }
 
     auto warmed = document;
-    if (warmed.get_at(am::root, "value", heads[first_index]) == std::nullopt) {
+    if (*warmed.get_at(am::root, "value", heads[first_index]) == std::nullopt) {
         return 2;
     }
     for (auto iteration = std::size_t{0}; iteration < iterations; ++iteration) {
         auto sample = warmed;
         const auto started = Clock::now();
-        const auto value = sample.get_at(am::root, "value", heads[second_index]);
+        const auto value = *sample.get_at(am::root, "value", heads[second_index]);
         cached_nanoseconds += Clock::now() - started;
         if (value == std::nullopt) {
             return 2;

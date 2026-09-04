@@ -65,7 +65,7 @@ inline auto split_utf8_scalars(std::string_view text)
     while (offset < text.size()) {
         const auto width = utf8_scalar_width(text, offset);
         if (!width) {
-            return std::unexpected{Error{ErrorKind::invalid_operation, "text must be valid UTF-8"}};
+            return std::unexpected{Error{ErrorKind::invalid_utf8, "text must be valid UTF-8"}};
         }
         scalars.push_back(text.substr(offset, *width));
         offset += *width;

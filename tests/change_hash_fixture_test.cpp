@@ -58,55 +58,56 @@ void expect_fixture_state(std::string_view name, const Document& document) {
     using automerge_cpp::root;
 
     if (name == "scalar_values") {
-        EXPECT_TRUE(document.get<automerge_cpp::Null>(root, "null").has_value());
-        EXPECT_EQ(document.get<bool>(root, "bool"), true);
-        EXPECT_EQ(document.get<std::int64_t>(root, "int"), -42);
-        EXPECT_EQ(document.get<std::uint64_t>(root, "uint"), 42u);
-        EXPECT_EQ(document.get<double>(root, "f64"), 3.5);
-        EXPECT_EQ(document.get<std::string>(root, "str"), "value");
+        EXPECT_TRUE((*document.get<automerge_cpp::Null>(root, "null")).has_value());
+        EXPECT_EQ(*document.get<bool>(root, "bool"), true);
+        EXPECT_EQ(*document.get<std::int64_t>(root, "int"), -42);
+        EXPECT_EQ(*document.get<std::uint64_t>(root, "uint"), 42u);
+        EXPECT_EQ(*document.get<double>(root, "f64"), 3.5);
+        EXPECT_EQ(*document.get<std::string>(root, "str"), "value");
         const auto expected_bytes = automerge_cpp::Bytes{
             std::byte{0x00},
             std::byte{0x01},
             std::byte{0xfe},
             std::byte{0xff},
         };
-        EXPECT_EQ(document.get<automerge_cpp::Bytes>(root, "bytes"), expected_bytes);
-        EXPECT_EQ(document.get<automerge_cpp::Counter>(root, "counter"), automerge_cpp::Counter{7});
-        EXPECT_EQ(document.get<automerge_cpp::Timestamp>(root, "timestamp"),
+        EXPECT_EQ(*document.get<automerge_cpp::Bytes>(root, "bytes"), expected_bytes);
+        EXPECT_EQ(*document.get<automerge_cpp::Counter>(root, "counter"),
+                  automerge_cpp::Counter{7});
+        EXPECT_EQ(*document.get<automerge_cpp::Timestamp>(root, "timestamp"),
                   automerge_cpp::Timestamp{1'700'000'000'123});
         return;
     }
     if (name == "nested_objects") {
-        const auto profile = document.get_obj_id(root, "profile");
+        const auto profile = *document.get_obj_id(root, "profile");
         ASSERT_TRUE(profile.has_value());
-        EXPECT_EQ(document.get<std::string>(*profile, "name"), "Ada");
-        const auto tags = document.get_obj_id(*profile, "tags");
+        EXPECT_EQ(*document.get<std::string>(*profile, "name"), "Ada");
+        const auto tags = *document.get_obj_id(*profile, "tags");
         ASSERT_TRUE(tags.has_value());
-        EXPECT_EQ(document.get<std::string>(*tags, 0), "math");
-        const auto entry = document.get_obj_id(*tags, 1);
+        EXPECT_EQ(*document.get<std::string>(*tags, 0), "math");
+        const auto entry = *document.get_obj_id(*tags, 1);
         ASSERT_TRUE(entry.has_value());
-        EXPECT_EQ(document.get<std::string>(*entry, "language"), "C++");
+        EXPECT_EQ(*document.get<std::string>(*entry, "language"), "C++");
         return;
     }
     if (name == "list_edits") {
-        const auto items = document.get_obj_id(root, "items");
+        const auto items = *document.get_obj_id(root, "items");
         ASSERT_TRUE(items.has_value());
-        EXPECT_EQ(document.get<std::string>(*items, 0), "B");
-        EXPECT_EQ(document.get<std::string>(*items, 1), "between");
-        EXPECT_EQ(document.get<std::string>(*items, 2), "c");
+        EXPECT_EQ(*document.get<std::string>(*items, 0), "B");
+        EXPECT_EQ(*document.get<std::string>(*items, 1), "between");
+        EXPECT_EQ(*document.get<std::string>(*items, 2), "c");
         return;
     }
     if (name == "unicode_text") {
-        const auto body = document.get_obj_id(root, "body");
+        const auto body = *document.get_obj_id(root, "body");
         ASSERT_TRUE(body.has_value());
-        EXPECT_EQ(document.text(*body), "A🚀ß漢字");
-        EXPECT_EQ(document.length(*body), 5u);
+        EXPECT_EQ(*document.text(*body), "A🚀ß漢字");
+        EXPECT_EQ(*document.length(*body), 5u);
         return;
     }
     if (name == "marks") {
-        const auto body = document.get_obj_id(root, "body");
+        const auto body = *document.get_obj_id(root, "body");
         ASSERT_TRUE(body.has_value());
-        const auto marks = document.marks(*body);
+        const auto marks = *document.marks(*body);
         ASSERT_EQ(marks.size(), 1u);
         EXPECT_EQ(marks[0].name, "bold");
         EXPECT_EQ(marks[0].start, 0u);
@@ -115,20 +116,20 @@ void expect_fixture_state(std::string_view name, const Document& document) {
         return;
     }
     if (name == "counter_increments") {
-        EXPECT_EQ(document.get<automerge_cpp::Counter>(root, "count"), automerge_cpp::Counter{12});
+        EXPECT_EQ(*document.get<automerge_cpp::Counter>(root, "count"), automerge_cpp::Counter{12});
         return;
     }
     if (name == "deletes_tombstones") {
-        EXPECT_FALSE(document.get(root, "gone").has_value());
-        const auto items = document.get_obj_id(root, "items");
+        EXPECT_FALSE((*document.get(root, "gone")).has_value());
+        const auto items = *document.get_obj_id(root, "items");
         ASSERT_TRUE(items.has_value());
-        EXPECT_EQ(document.get<std::string>(*items, 0), "first");
-        EXPECT_EQ(document.get<std::string>(*items, 1), "replacement");
-        EXPECT_EQ(document.get<std::string>(*items, 2), "last");
+        EXPECT_EQ(*document.get<std::string>(*items, 0), "first");
+        EXPECT_EQ(*document.get<std::string>(*items, 1), "replacement");
+        EXPECT_EQ(*document.get<std::string>(*items, 2), "last");
         return;
     }
     if (name == "concurrent_conflicts") {
-        EXPECT_EQ(document.get_all(root, "value").size(), 2u);
+        EXPECT_EQ((*document.get_all(root, "value")).size(), 2u);
         return;
     }
     if (name == "commit_metadata") {
@@ -140,20 +141,20 @@ void expect_fixture_state(std::string_view name, const Document& document) {
     }
     if (name == "long_history") {
         EXPECT_EQ(document.get_changes().size(), 1'000u);
-        EXPECT_EQ(document.length(root), 1'000u);
-        EXPECT_EQ(document.get<std::int64_t>(root, "key-0999"), 999);
+        EXPECT_EQ(*document.length(root), 1'000u);
+        EXPECT_EQ(*document.get<std::int64_t>(root, "key-0999"), 999);
         return;
     }
     if (name == "interleaved_histories") {
         EXPECT_EQ(document.get_changes().size(), 21u);
-        EXPECT_EQ(document.length(root), 21u);
-        EXPECT_EQ(document.get<std::int64_t>(root, "round-10-first"), 10);
-        EXPECT_EQ(document.get<std::int64_t>(root, "round-10-second"), -10);
+        EXPECT_EQ(*document.length(root), 21u);
+        EXPECT_EQ(*document.get<std::int64_t>(root, "round-10-first"), 10);
+        EXPECT_EQ(*document.get<std::int64_t>(root, "round-10-second"), -10);
         return;
     }
     if (name == "empty_document") {
         EXPECT_TRUE(document.get_changes().empty());
-        EXPECT_EQ(document.length(root), 0u);
+        EXPECT_EQ(*document.length(root), 0u);
     }
 }
 
@@ -385,18 +386,18 @@ TEST(IncrementalLoadFixture, applies_automerge_rs_document_and_change_chunks) {
     const auto base = document.load_incremental(read_bytes(fixture_path("incremental_base.am")));
     ASSERT_TRUE(base.has_value()) << base.error().message;
     EXPECT_EQ(*base, 1u);
-    EXPECT_EQ(document.get<std::string>(automerge_cpp::root, "stage"), std::string(400, 'b'));
+    EXPECT_EQ(*document.get<std::string>(automerge_cpp::root, "stage"), std::string(400, 'b'));
 
     const auto first = document.load_incremental(read_bytes(fixture_path("incremental_first.am")));
     ASSERT_TRUE(first.has_value()) << first.error().message;
     EXPECT_EQ(*first, 1u);
-    EXPECT_EQ(document.get<std::int64_t>(automerge_cpp::root, "first"), 1);
+    EXPECT_EQ(*document.get<std::int64_t>(automerge_cpp::root, "first"), 1);
 
     const auto second =
         document.load_incremental(read_bytes(fixture_path("incremental_second.am")));
     ASSERT_TRUE(second.has_value()) << second.error().message;
     EXPECT_EQ(*second, 1u);
-    EXPECT_EQ(document.get<std::int64_t>(automerge_cpp::root, "second"), 2);
+    EXPECT_EQ(*document.get<std::int64_t>(automerge_cpp::root, "second"), 2);
 }
 
 } // namespace

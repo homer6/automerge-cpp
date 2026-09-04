@@ -10,6 +10,7 @@ FetchContent_MakeAvailable(googletest)
 add_executable(automerge_cpp_tests
     test_main.cpp
     error_test.cpp
+    expected_errors_test.cpp
     types_test.cpp
     value_test.cpp
     op_test.cpp

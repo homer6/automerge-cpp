@@ -5,6 +5,8 @@
 #include <charconv>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
+#include <functional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -20,6 +22,39 @@ namespace automerge_cpp {
 // =============================================================================
 
 namespace {
+
+struct JsonBoundaryError {
+    Error error;
+};
+
+template <typename T> auto checked(std::expected<T, Error> result) -> T {
+    if (!result) {
+        throw JsonBoundaryError{result.error()};
+    }
+    return std::move(*result);
+}
+
+void checked(std::expected<void, Error> result) {
+    if (!result) {
+        throw JsonBoundaryError{result.error()};
+    }
+}
+
+template <typename Fn>
+auto capture_json_errors(Fn&& fn) -> std::expected<std::invoke_result_t<Fn>, Error> {
+    try {
+        if constexpr (std::is_void_v<std::invoke_result_t<Fn>>) {
+            std::invoke(std::forward<Fn>(fn));
+            return {};
+        } else {
+            return std::invoke(std::forward<Fn>(fn));
+        }
+    } catch (const JsonBoundaryError& error) {
+        return std::unexpected{error.error};
+    } catch (const std::exception& error) {
+        return std::unexpected{Error{ErrorKind::invalid_operation, error.what()}};
+    }
+}
 
 auto bytes_to_hex(const std::byte* data, std::size_t len) -> std::string {
     static constexpr char hex_chars[] = "0123456789abcdef";
@@ -307,6 +342,78 @@ namespace json {
 
 namespace {
 
+struct DocumentReader {
+    const Document& document;
+
+    auto object_type(const ObjId& obj) const -> std::optional<ObjType> {
+        return checked(document.object_type(obj));
+    }
+
+    auto text(const ObjId& obj) const -> std::string {
+        return checked(document.text(obj));
+    }
+
+    auto keys(const ObjId& obj) const -> std::vector<std::string> {
+        return checked(document.keys(obj));
+    }
+
+    auto get(const ObjId& obj, std::string_view key) const -> std::optional<Value> {
+        return checked(document.get(obj, key));
+    }
+
+    auto get(const ObjId& obj, std::size_t index) const -> std::optional<Value> {
+        return checked(document.get(obj, index));
+    }
+
+    auto get_obj_id(const ObjId& obj, std::string_view key) const -> std::optional<ObjId> {
+        return checked(document.get_obj_id(obj, key));
+    }
+
+    auto get_obj_id(const ObjId& obj, std::size_t index) const -> std::optional<ObjId> {
+        return checked(document.get_obj_id(obj, index));
+    }
+
+    auto length(const ObjId& obj) const -> std::size_t {
+        return checked(document.length(obj));
+    }
+};
+
+struct TransactionReader {
+    const Transaction& transaction;
+
+    auto object_type(const ObjId& obj) const -> std::optional<ObjType> {
+        return checked(transaction.object_type(obj));
+    }
+
+    auto text(const ObjId& obj) const -> std::string {
+        return checked(transaction.text(obj));
+    }
+
+    auto keys(const ObjId& obj) const -> std::vector<std::string> {
+        return checked(transaction.keys(obj));
+    }
+
+    auto get(const ObjId& obj, std::string_view key) const -> std::optional<Value> {
+        return checked(transaction.get(obj, key));
+    }
+
+    auto get(const ObjId& obj, std::size_t index) const -> std::optional<Value> {
+        return checked(transaction.get(obj, index));
+    }
+
+    auto get_obj_id(const ObjId& obj, std::string_view key) const -> std::optional<ObjId> {
+        return checked(transaction.get_obj_id(obj, key));
+    }
+
+    auto get_obj_id(const ObjId& obj, std::size_t index) const -> std::optional<ObjId> {
+        return checked(transaction.get_obj_id(obj, index));
+    }
+
+    auto length(const ObjId& obj) const -> std::size_t {
+        return checked(transaction.length(obj));
+    }
+};
+
 // Templated export helpers — work with both Document and Transaction
 template<typename Reader>
 auto export_object_impl(const Reader& reader, const ObjId& obj) -> nlohmann::json;
@@ -386,7 +493,9 @@ auto export_value_at(const Document& doc, const Value& val,
                 [&](const std::string& key) { return doc.get_obj_id(parent, key); },
                 [&](std::size_t index) { return doc.get_obj_id(parent, index); },
             }, prop);
-            if (child) return export_object_at(doc, *child, heads);
+            auto child_id = checked(std::move(child));
+            if (child_id)
+                return export_object_at(doc, *child_id, heads);
             return nlohmann::json{};
         },
         [](const ScalarValue& sv) -> nlohmann::json {
@@ -407,28 +516,27 @@ auto export_value_at(const Document& doc, const Value& val,
 
 auto export_object_at(const Document& doc, const ObjId& obj,
                       const std::vector<ChangeHash>& heads) -> nlohmann::json {
-    auto type = doc.object_type(obj);
-    if (!type) return nlohmann::json{};
+    auto type = checked(doc.object_type(obj));
 
-    if (*type == ObjType::text) {
-        return nlohmann::json(doc.text_at(obj, heads));
+    if (type == ObjType::text) {
+        return nlohmann::json(checked(doc.text_at(obj, heads)));
     }
 
-    if (*type == ObjType::map || *type == ObjType::table) {
+    if (type == ObjType::map || type == ObjType::table) {
         auto result = nlohmann::json::object();
-        for (const auto& key : doc.keys_at(obj, heads)) {
-            if (auto val = doc.get_at(obj, key, heads)) {
-                result[key] = export_value_at(doc, *val, obj, Prop{key}, heads);
+        for (const auto& key : checked(doc.keys_at(obj, heads))) {
+            if (auto value = checked(doc.get_at(obj, key, heads))) {
+                result[key] = export_value_at(doc, *value, obj, Prop{key}, heads);
             }
         }
         return result;
     }
 
     auto result = nlohmann::json::array();
-    auto len = doc.length_at(obj, heads);
+    auto len = checked(doc.length_at(obj, heads));
     for (std::size_t i = 0; i < len; ++i) {
-        if (auto val = doc.get_at(obj, i, heads)) {
-            result.push_back(export_value_at(doc, *val, obj, Prop{i}, heads));
+        if (auto value = checked(doc.get_at(obj, i, heads))) {
+            result.push_back(export_value_at(doc, *value, obj, Prop{i}, heads));
         }
     }
     return result;
@@ -436,14 +544,13 @@ auto export_object_at(const Document& doc, const ObjId& obj,
 
 }  // anonymous namespace
 
-auto export_json(const Document& doc, const ObjId& obj) -> nlohmann::json {
-    return export_object_impl(doc, obj);
+auto export_json(const Document& doc, const ObjId& obj) -> std::expected<nlohmann::json, Error> {
+    return capture_json_errors([&]() { return export_object_impl(DocumentReader{doc}, obj); });
 }
 
-auto export_json_at(const Document& doc,
-                    const std::vector<ChangeHash>& heads,
-                    const ObjId& obj) -> nlohmann::json {
-    return export_object_at(doc, obj, heads);
+auto export_json_at(const Document& doc, const std::vector<ChangeHash>& heads, const ObjId& obj)
+    -> std::expected<nlohmann::json, Error> {
+    return capture_json_errors([&]() { return export_object_at(doc, obj, heads); });
 }
 
 // =============================================================================
@@ -451,6 +558,35 @@ auto export_json_at(const Document& doc,
 // =============================================================================
 
 namespace {
+
+auto transaction_object_type(const Transaction& transaction, const ObjId& obj)
+    -> std::optional<ObjType> {
+    return checked(transaction.object_type(obj));
+}
+
+auto transaction_get_obj_id(const Transaction& transaction, const ObjId& obj, std::string_view key)
+    -> std::optional<ObjId> {
+    return checked(transaction.get_obj_id(obj, key));
+}
+
+auto transaction_get_obj_id(const Transaction& transaction, const ObjId& obj, std::size_t index)
+    -> std::optional<ObjId> {
+    return checked(transaction.get_obj_id(obj, index));
+}
+
+auto transaction_get(const Transaction& transaction, const ObjId& obj, std::string_view key)
+    -> std::optional<Value> {
+    return checked(transaction.get(obj, key));
+}
+
+auto transaction_get(const Transaction& transaction, const ObjId& obj, std::size_t index)
+    -> std::optional<Value> {
+    return checked(transaction.get(obj, index));
+}
+
+auto transaction_length(const Transaction& transaction, const ObjId& obj) -> std::size_t {
+    return checked(transaction.length(obj));
+}
 
 void import_json_value_at_key(Transaction& tx, const ObjId& obj,
                               std::string_view key, const nlohmann::json& val);
@@ -460,86 +596,96 @@ void import_json_value_at_index(Transaction& tx, const ObjId& obj,
 void import_json_value_at_key(Transaction& tx, const ObjId& obj,
                               std::string_view key, const nlohmann::json& val) {
     if (val.is_object()) {
-        auto child = tx.put_object(obj, key, ObjType::map);
+        auto child = checked(tx.put_object(obj, key, ObjType::map));
         for (auto& [k, v] : val.items()) {
             import_json_value_at_key(tx, child, k, v);
         }
     } else if (val.is_array()) {
-        auto child = tx.put_object(obj, key, ObjType::list);
+        auto child = checked(tx.put_object(obj, key, ObjType::list));
         for (std::size_t i = 0; i < val.size(); ++i) {
             import_json_value_at_index(tx, child, i, val[i]);
         }
     } else if (val.is_string()) {
-        tx.put(obj, key, val.get<std::string>());
+        checked(tx.put(obj, key, val.get<std::string>()));
     } else if (val.is_number_unsigned()) {
         auto u = val.get<std::uint64_t>();
         if (u <= static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
-            tx.put(obj, key, static_cast<std::int64_t>(u));
+            checked(tx.put(obj, key, static_cast<std::int64_t>(u)));
         } else {
-            tx.put(obj, key, u);
+            checked(tx.put(obj, key, u));
         }
     } else if (val.is_number_integer()) {
-        tx.put(obj, key, val.get<std::int64_t>());
+        checked(tx.put(obj, key, val.get<std::int64_t>()));
     } else if (val.is_number_float()) {
-        tx.put(obj, key, val.get<double>());
+        checked(tx.put(obj, key, val.get<double>()));
     } else if (val.is_boolean()) {
-        tx.put(obj, key, val.get<bool>());
+        checked(tx.put(obj, key, val.get<bool>()));
     } else if (val.is_null()) {
-        tx.put(obj, key, Null{});
+        checked(tx.put(obj, key, Null{}));
     }
 }
 
 void import_json_value_at_index(Transaction& tx, const ObjId& obj,
                                 std::size_t index, const nlohmann::json& val) {
     if (val.is_object()) {
-        auto child = tx.insert_object(obj, index, ObjType::map);
+        auto child = checked(tx.insert_object(obj, index, ObjType::map));
         for (auto& [k, v] : val.items()) {
             import_json_value_at_key(tx, child, k, v);
         }
     } else if (val.is_array()) {
-        auto child = tx.insert_object(obj, index, ObjType::list);
+        auto child = checked(tx.insert_object(obj, index, ObjType::list));
         for (std::size_t i = 0; i < val.size(); ++i) {
             import_json_value_at_index(tx, child, i, val[i]);
         }
     } else if (val.is_string()) {
-        tx.insert(obj, index, val.get<std::string>());
+        checked(tx.insert(obj, index, val.get<std::string>()));
     } else if (val.is_number_unsigned()) {
         auto u = val.get<std::uint64_t>();
         if (u <= static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
-            tx.insert(obj, index, static_cast<std::int64_t>(u));
+            checked(tx.insert(obj, index, static_cast<std::int64_t>(u)));
         } else {
-            tx.insert(obj, index, u);
+            checked(tx.insert(obj, index, u));
         }
     } else if (val.is_number_integer()) {
-        tx.insert(obj, index, val.get<std::int64_t>());
+        checked(tx.insert(obj, index, val.get<std::int64_t>()));
     } else if (val.is_number_float()) {
-        tx.insert(obj, index, val.get<double>());
+        checked(tx.insert(obj, index, val.get<double>()));
     } else if (val.is_boolean()) {
-        tx.insert(obj, index, val.get<bool>());
+        checked(tx.insert(obj, index, val.get<bool>()));
     } else if (val.is_null()) {
-        tx.insert(obj, index, ScalarValue{Null{}});
+        checked(tx.insert(obj, index, ScalarValue{Null{}}));
     }
 }
 
 }  // anonymous namespace
 
-void import_json(Document& doc, const nlohmann::json& j, const ObjId& target) {
-    doc.transact([&](Transaction& tx) {
-        import_json(tx, j, target);
-    });
+auto import_json(Document& doc, const nlohmann::json& j, const ObjId& target)
+    -> std::expected<void, Error> {
+    return doc.transact([&](Transaction& tx) { return import_json(tx, j, target); });
 }
 
-void import_json(Transaction& tx, const nlohmann::json& j, const ObjId& target) {
-    if (j.is_object()) {
-        for (auto& [key, val] : j.items()) {
-            import_json_value_at_key(tx, target, key, val);
+auto import_json(Transaction& tx, const nlohmann::json& j, const ObjId& target)
+    -> std::expected<void, Error> {
+    return capture_json_errors([&]() {
+        const auto type = checked(tx.object_type(target));
+        if (j.is_object()) {
+            if (type != ObjType::map && type != ObjType::table) {
+                throw JsonBoundaryError{
+                    Error{ErrorKind::invalid_object_type, "JSON objects require a map target"}};
+            }
+            for (auto& [key, val] : j.items()) {
+                import_json_value_at_key(tx, target, key, val);
+            }
+        } else if (j.is_array()) {
+            if (type != ObjType::list) {
+                throw JsonBoundaryError{
+                    Error{ErrorKind::invalid_object_type, "JSON arrays require a list target"}};
+            }
+            for (std::size_t i = 0; i < j.size(); ++i) {
+                import_json_value_at_index(tx, target, i, j[i]);
+            }
         }
-    } else if (j.is_array()) {
-        for (std::size_t i = 0; i < j.size(); ++i) {
-            import_json_value_at_index(tx, target, i, j[i]);
-        }
-    }
-    // If j is a scalar, there's nothing to import into a target object
+    });
 }
 
 // =============================================================================
@@ -564,12 +710,18 @@ auto parse_pointer(std::string_view pointer) -> std::vector<std::string> {
         auto segment = std::string{pointer.substr(pos, next - pos)};
         // Unescape: ~1 -> /, ~0 -> ~  (order matters: ~1 first)
         for (auto i = std::size_t{0}; i < segment.size(); ++i) {
-            if (segment[i] == '~' && i + 1 < segment.size()) {
-                if (segment[i + 1] == '1') {
-                    segment.replace(i, 2, "/");
-                } else if (segment[i + 1] == '0') {
-                    segment.replace(i, 2, "~");
-                }
+            if (segment[i] != '~') {
+                continue;
+            }
+            if (i + 1 >= segment.size()) {
+                throw std::runtime_error{"invalid JSON Pointer escape"};
+            }
+            if (segment[i + 1] == '1') {
+                segment.replace(i, 2, "/");
+            } else if (segment[i + 1] == '0') {
+                segment.replace(i, 2, "~");
+            } else {
+                throw std::runtime_error{"invalid JSON Pointer escape"};
             }
         }
         segments.push_back(std::move(segment));
@@ -592,126 +744,141 @@ auto try_parse_index(std::string_view segment) -> std::optional<std::size_t> {
 
 }  // anonymous namespace
 
-auto get_pointer(const Document& doc, std::string_view pointer) -> std::optional<Value> {
-    auto segments = parse_pointer(pointer);
-    if (segments.empty()) {
-        // Empty pointer = root. Return the root object type.
-        return Value{ObjType::map};
-    }
-
-    auto current = root;
-    for (std::size_t i = 0; i < segments.size(); ++i) {
-        auto type = doc.object_type(current);
-        if (!type) return std::nullopt;
-
-        auto is_last = (i == segments.size() - 1);
-
-        if (*type == ObjType::list || *type == ObjType::text) {
-            auto idx = try_parse_index(segments[i]);
-            if (!idx) return std::nullopt;
-            if (is_last) {
-                return doc.get(current, *idx);
-            }
-            auto child = doc.get_obj_id(current, *idx);
-            if (!child) return std::nullopt;
-            current = *child;
-        } else {
-            // map or table
-            if (is_last) {
-                return doc.get(current, segments[i]);
-            }
-            auto child = doc.get_obj_id(current, segments[i]);
-            if (!child) return std::nullopt;
-            current = *child;
+auto get_pointer(const Document& doc, std::string_view pointer)
+    -> std::expected<std::optional<Value>, Error> {
+    return capture_json_errors([&]() -> std::optional<Value> {
+        const auto reader = DocumentReader{doc};
+        auto segments = parse_pointer(pointer);
+        if (segments.empty()) {
+            return Value{ObjType::map};
         }
-    }
-    return std::nullopt;
-}
 
-void put_pointer(Document& doc, std::string_view pointer, ScalarValue val) {
-    auto segments = parse_pointer(pointer);
-    if (segments.empty()) {
-        throw std::runtime_error{"cannot put at root pointer"};
-    }
-
-    doc.transact([&](Transaction& tx) {
         auto current = root;
-        // Walk to the parent, creating intermediate maps as needed
-        for (std::size_t i = 0; i + 1 < segments.size(); ++i) {
-            auto type = tx.object_type(current);
-            if (!type) {
-                throw std::runtime_error{"path segment does not exist"};
-            }
+        for (std::size_t i = 0; i < segments.size(); ++i) {
+            auto type = reader.object_type(current);
+            if (!type)
+                return std::nullopt;
+
+            auto is_last = (i == segments.size() - 1);
+
             if (*type == ObjType::list || *type == ObjType::text) {
                 auto idx = try_parse_index(segments[i]);
-                if (!idx) throw std::runtime_error{"invalid list index in pointer"};
-                auto child = tx.get_obj_id(current, *idx);
-                if (!child) throw std::runtime_error{"path segment does not exist"};
+                if (!idx)
+                    throw std::runtime_error{"invalid list index in pointer"};
+                if (is_last) {
+                    return reader.get(current, *idx);
+                }
+                auto child = reader.get_obj_id(current, *idx);
+                if (!child)
+                    return std::nullopt;
                 current = *child;
             } else {
-                auto child = tx.get_obj_id(current, segments[i]);
-                if (!child) {
-                    // Create intermediate map
-                    current = tx.put_object(current, segments[i], ObjType::map);
-                } else {
-                    current = *child;
+                if (is_last) {
+                    return reader.get(current, segments[i]);
                 }
+                auto child = reader.get_obj_id(current, segments[i]);
+                if (!child)
+                    return std::nullopt;
+                current = *child;
             }
         }
-        // Set the final segment
-        auto& last = segments.back();
-        auto type = tx.object_type(current);
-        if (type && (*type == ObjType::list || *type == ObjType::text)) {
-            if (last == "-") {
-                tx.insert(current, tx.length(current), val);
-            } else {
-                auto idx = try_parse_index(last);
-                if (!idx) throw std::runtime_error{"invalid list index in pointer"};
-                if (*idx < tx.length(current)) {
-                    tx.set(current, *idx, val);
-                } else {
-                    tx.insert(current, *idx, val);
-                }
-            }
-        } else {
-            tx.put(current, last, val);
-        }
+        return std::nullopt;
     });
 }
 
-void delete_pointer(Document& doc, std::string_view pointer) {
-    auto segments = parse_pointer(pointer);
-    if (segments.empty()) {
-        throw std::runtime_error{"cannot delete root pointer"};
-    }
+auto put_pointer(Document& doc, std::string_view pointer, ScalarValue val)
+    -> std::expected<void, Error> {
+    return capture_json_errors([&]() {
+        auto segments = parse_pointer(pointer);
+        if (segments.empty()) {
+            throw std::runtime_error{"cannot put at root pointer"};
+        }
 
-    doc.transact([&](Transaction& tx) {
-        auto current = root;
-        for (std::size_t i = 0; i + 1 < segments.size(); ++i) {
-            auto type = tx.object_type(current);
-            if (!type) return;
-            if (*type == ObjType::list || *type == ObjType::text) {
-                auto idx = try_parse_index(segments[i]);
-                if (!idx) return;
-                auto child = tx.get_obj_id(current, *idx);
-                if (!child) return;
-                current = *child;
+        checked(doc.transact([&](Transaction& tx) {
+            auto current = root;
+            for (std::size_t i = 0; i + 1 < segments.size(); ++i) {
+                auto type = transaction_object_type(tx, current);
+                if (!type) {
+                    throw std::runtime_error{"path segment does not exist"};
+                }
+                if (*type == ObjType::list || *type == ObjType::text) {
+                    auto idx = try_parse_index(segments[i]);
+                    if (!idx)
+                        throw std::runtime_error{"invalid list index in pointer"};
+                    auto child = transaction_get_obj_id(tx, current, *idx);
+                    if (!child)
+                        throw std::runtime_error{"path segment does not exist"};
+                    current = *child;
+                } else {
+                    auto child = transaction_get_obj_id(tx, current, segments[i]);
+                    if (!child) {
+                        current = checked(tx.put_object(current, segments[i], ObjType::map));
+                    } else {
+                        current = *child;
+                    }
+                }
+            }
+            auto& last = segments.back();
+            auto type = transaction_object_type(tx, current);
+            if (type && (*type == ObjType::list || *type == ObjType::text)) {
+                if (last == "-") {
+                    checked(tx.insert(current, transaction_length(tx, current), val));
+                } else {
+                    auto idx = try_parse_index(last);
+                    if (!idx)
+                        throw std::runtime_error{"invalid list index in pointer"};
+                    if (*idx < transaction_length(tx, current)) {
+                        checked(tx.set(current, *idx, val));
+                    } else {
+                        checked(tx.insert(current, *idx, val));
+                    }
+                }
             } else {
-                auto child = tx.get_obj_id(current, segments[i]);
-                if (!child) return;
-                current = *child;
+                checked(tx.put(current, last, val));
             }
+        }));
+    });
+}
+
+auto delete_pointer(Document& doc, std::string_view pointer) -> std::expected<void, Error> {
+    return capture_json_errors([&]() {
+        auto segments = parse_pointer(pointer);
+        if (segments.empty()) {
+            throw std::runtime_error{"cannot delete root pointer"};
         }
-        auto& last = segments.back();
-        auto type = tx.object_type(current);
-        if (type && (*type == ObjType::list || *type == ObjType::text)) {
-            auto idx = try_parse_index(last);
-            if (idx && *idx < tx.length(current)) {
-                tx.delete_index(current, *idx);
+
+        checked(doc.transact([&](Transaction& tx) {
+            auto current = root;
+            for (std::size_t i = 0; i + 1 < segments.size(); ++i) {
+                auto type = transaction_object_type(tx, current);
+                if (!type)
+                    return;
+                if (*type == ObjType::list || *type == ObjType::text) {
+                    auto idx = try_parse_index(segments[i]);
+                    if (!idx)
+                        throw std::runtime_error{"invalid list index in pointer"};
+                    auto child = transaction_get_obj_id(tx, current, *idx);
+                    if (!child)
+                        return;
+                    current = *child;
+                } else {
+                    auto child = transaction_get_obj_id(tx, current, segments[i]);
+                    if (!child)
+                        return;
+                    current = *child;
+                }
             }
-        } else {
-            tx.delete_key(current, last);
-        }
+            auto& last = segments.back();
+            auto type = transaction_object_type(tx, current);
+            if (type && (*type == ObjType::list || *type == ObjType::text)) {
+                auto idx = try_parse_index(last);
+                if (!idx)
+                    throw std::runtime_error{"invalid list index in pointer"};
+                checked(tx.delete_index(current, *idx));
+            } else {
+                checked(tx.delete_key(current, last));
+            }
+        }));
     });
 }
 
@@ -728,19 +895,21 @@ auto get_value_at_pointer(const Transaction& tx, const std::vector<std::string>&
     if (segments.empty()) return Value{ObjType::map};
     auto current = root;
     for (std::size_t i = 0; i < segments.size(); ++i) {
-        auto type = tx.object_type(current);
+        auto type = transaction_object_type(tx, current);
         if (!type) return std::nullopt;
         auto is_last = (i == segments.size() - 1);
         if (*type == ObjType::list || *type == ObjType::text) {
             auto idx = try_parse_index(segments[i]);
             if (!idx) return std::nullopt;
-            if (is_last) return tx.get(current, *idx);
-            auto child = tx.get_obj_id(current, *idx);
+            if (is_last)
+                return transaction_get(tx, current, *idx);
+            auto child = transaction_get_obj_id(tx, current, *idx);
             if (!child) return std::nullopt;
             current = *child;
         } else {
-            if (is_last) return tx.get(current, segments[i]);
-            auto child = tx.get_obj_id(current, segments[i]);
+            if (is_last)
+                return transaction_get(tx, current, segments[i]);
+            auto child = transaction_get_obj_id(tx, current, segments[i]);
             if (!child) return std::nullopt;
             current = *child;
         }
@@ -756,26 +925,26 @@ void add_value_at_pointer(Transaction& tx,
     }
     auto current = root;
     for (std::size_t i = 0; i + 1 < segments.size(); ++i) {
-        auto type = tx.object_type(current);
+        auto type = transaction_object_type(tx, current);
         if (!type) throw std::runtime_error{"path does not exist"};
         if (*type == ObjType::list || *type == ObjType::text) {
             auto idx = try_parse_index(segments[i]);
             if (!idx) throw std::runtime_error{"invalid index"};
-            auto child = tx.get_obj_id(current, *idx);
+            auto child = transaction_get_obj_id(tx, current, *idx);
             if (!child) throw std::runtime_error{"path does not exist"};
             current = *child;
         } else {
-            auto child = tx.get_obj_id(current, segments[i]);
+            auto child = transaction_get_obj_id(tx, current, segments[i]);
             if (!child) throw std::runtime_error{"path does not exist"};
             current = *child;
         }
     }
     auto& last = segments.back();
-    auto type = tx.object_type(current);
+    auto type = transaction_object_type(tx, current);
     if (type && (*type == ObjType::list || *type == ObjType::text)) {
         std::size_t idx = 0;
         if (last == "-") {
-            idx = tx.length(current);
+            idx = transaction_length(tx, current);
         } else {
             auto parsed = try_parse_index(last);
             if (!parsed) throw std::runtime_error{"invalid index"};
@@ -783,19 +952,19 @@ void add_value_at_pointer(Transaction& tx,
         }
         // For lists, "add" means insert
         if (value.is_object()) {
-            auto child = tx.insert_object(current, idx, ObjType::map);
+            auto child = checked(tx.insert_object(current, idx, ObjType::map));
             for (auto& [k, v] : value.items()) {
                 import_json_value_at_key(tx, child, k, v);
             }
         } else if (value.is_array()) {
-            auto child = tx.insert_object(current, idx, ObjType::list);
+            auto child = checked(tx.insert_object(current, idx, ObjType::list));
             for (std::size_t i = 0; i < value.size(); ++i) {
                 import_json_value_at_index(tx, child, i, value[i]);
             }
         } else {
             auto sv = ScalarValue{};
             automerge_cpp::from_json(value, sv);
-            tx.insert(current, idx, sv);
+            checked(tx.insert(current, idx, sv));
         }
     } else {
         // Map: "add" means put (create or replace)
@@ -808,127 +977,157 @@ void remove_at_pointer(Transaction& tx,
     if (segments.empty()) throw std::runtime_error{"cannot remove root"};
     auto current = root;
     for (std::size_t i = 0; i + 1 < segments.size(); ++i) {
-        auto type = tx.object_type(current);
+        auto type = transaction_object_type(tx, current);
         if (!type) throw std::runtime_error{"path does not exist"};
         if (*type == ObjType::list || *type == ObjType::text) {
             auto idx = try_parse_index(segments[i]);
             if (!idx) throw std::runtime_error{"invalid index"};
-            auto child = tx.get_obj_id(current, *idx);
+            auto child = transaction_get_obj_id(tx, current, *idx);
             if (!child) throw std::runtime_error{"path does not exist"};
             current = *child;
         } else {
-            auto child = tx.get_obj_id(current, segments[i]);
+            auto child = transaction_get_obj_id(tx, current, segments[i]);
             if (!child) throw std::runtime_error{"path does not exist"};
             current = *child;
         }
     }
     auto& last = segments.back();
-    auto type = tx.object_type(current);
+    auto type = transaction_object_type(tx, current);
     if (type && (*type == ObjType::list || *type == ObjType::text)) {
         auto idx = try_parse_index(last);
         if (!idx) throw std::runtime_error{"invalid index"};
-        tx.delete_index(current, *idx);
+        checked(tx.delete_index(current, *idx));
     } else {
-        tx.delete_key(current, last);
+        checked(tx.delete_key(current, last));
     }
 }
 
 }  // anonymous namespace
 
-void apply_json_patch(Document& doc, const nlohmann::json& patch) {
-    if (!patch.is_array()) {
-        throw std::runtime_error{"JSON Patch must be an array"};
-    }
-
-    doc.transact([&](Transaction& tx) {
-        // Helper: resolve an ObjId at a pointer path using tx for reads
-        auto resolve_obj_at = [&](const std::vector<std::string>& segs) -> std::optional<ObjId> {
-            if (segs.empty()) return root;
-            auto current = root;
-            for (std::size_t i = 0; i + 1 < segs.size(); ++i) {
-                auto type = tx.object_type(current);
-                if (*type == ObjType::list || *type == ObjType::text) {
-                    auto idx = try_parse_index(segs[i]);
-                    current = *tx.get_obj_id(current, *idx);
-                } else {
-                    current = *tx.get_obj_id(current, segs[i]);
-                }
-            }
-            auto& last = segs.back();
-            auto type = tx.object_type(current);
-            if (type && (*type == ObjType::list || *type == ObjType::text)) {
-                auto idx = try_parse_index(last);
-                return tx.get_obj_id(current, *idx);
-            }
-            return tx.get_obj_id(current, last);
-        };
-
-        // Helper: convert a Value to JSON for move/copy/test
-        auto value_to_json = [&](const Value& val, const std::vector<std::string>& segs) -> nlohmann::json {
-            return std::visit(overload{
-                [&](ObjType) -> nlohmann::json {
-                    auto child = resolve_obj_at(segs);
-                    if (child) return export_object_impl(tx, *child);
-                    return nlohmann::json{};
-                },
-                [&](const ScalarValue& sv) -> nlohmann::json {
-                    return std::visit(overload{
-                        [](Null) -> nlohmann::json { return nullptr; },
-                        [](bool b) -> nlohmann::json { return b; },
-                        [](std::int64_t i) -> nlohmann::json { return i; },
-                        [](std::uint64_t u) -> nlohmann::json { return u; },
-                        [](double d) -> nlohmann::json { return d; },
-                        [](const Counter& c) -> nlohmann::json { return c.value; },
-                        [](const Timestamp& t) -> nlohmann::json { return t.millis_since_epoch; },
-                        [](const std::string& s) -> nlohmann::json { return s; },
-                        [](const Bytes& b) -> nlohmann::json { return base64_encode(b); },
-                    }, sv);
-                },
-            }, val);
-        };
-
-        for (const auto& op : patch) {
-            auto op_str = op.at("op").get<std::string>();
-            auto path_segments = parse_pointer(op.at("path").get<std::string>());
-
-            if (op_str == "add") {
-                add_value_at_pointer(tx, path_segments, op.at("value"));
-            } else if (op_str == "remove") {
-                remove_at_pointer(tx, path_segments);
-            } else if (op_str == "replace") {
-                remove_at_pointer(tx, path_segments);
-                add_value_at_pointer(tx, path_segments, op.at("value"));
-            } else if (op_str == "move") {
-                auto from_segments = parse_pointer(op.at("from").get<std::string>());
-                auto val = get_value_at_pointer(tx, from_segments);
-                if (!val) throw std::runtime_error{"move: from path does not exist"};
-                auto val_json = value_to_json(*val, from_segments);
-                remove_at_pointer(tx, from_segments);
-                add_value_at_pointer(tx, path_segments, val_json);
-            } else if (op_str == "copy") {
-                auto from_segments = parse_pointer(op.at("from").get<std::string>());
-                auto val = get_value_at_pointer(tx, from_segments);
-                if (!val) throw std::runtime_error{"copy: from path does not exist"};
-                auto val_json = value_to_json(*val, from_segments);
-                add_value_at_pointer(tx, path_segments, val_json);
-            } else if (op_str == "test") {
-                auto val = get_value_at_pointer(tx, path_segments);
-                if (!val) throw std::runtime_error{"test: path does not exist"};
-                auto current_json = value_to_json(*val, path_segments);
-                if (current_json != op.at("value")) {
-                    throw std::runtime_error{"test: value mismatch"};
-                }
-            } else {
-                throw std::runtime_error{"unknown JSON Patch operation: " + op_str};
-            }
+auto apply_json_patch(Document& doc, const nlohmann::json& patch) -> std::expected<void, Error> {
+    return capture_json_errors([&]() {
+        if (!patch.is_array()) {
+            throw std::runtime_error{"JSON Patch must be an array"};
         }
+
+        checked(doc.transact([&](Transaction& tx) {
+            // Helper: resolve an ObjId at a pointer path using tx for reads
+            auto resolve_obj_at =
+                [&](const std::vector<std::string>& segs) -> std::optional<ObjId> {
+                if (segs.empty())
+                    return root;
+                auto current = root;
+                for (std::size_t i = 0; i + 1 < segs.size(); ++i) {
+                    auto type = transaction_object_type(tx, current);
+                    if (*type == ObjType::list || *type == ObjType::text) {
+                        auto idx = try_parse_index(segs[i]);
+                        if (!idx)
+                            return std::nullopt;
+                        auto child = transaction_get_obj_id(tx, current, *idx);
+                        if (!child)
+                            return std::nullopt;
+                        current = *child;
+                    } else {
+                        auto child = transaction_get_obj_id(tx, current, segs[i]);
+                        if (!child)
+                            return std::nullopt;
+                        current = *child;
+                    }
+                }
+                auto& last = segs.back();
+                auto type = transaction_object_type(tx, current);
+                if (type && (*type == ObjType::list || *type == ObjType::text)) {
+                    auto idx = try_parse_index(last);
+                    if (!idx)
+                        return std::nullopt;
+                    return transaction_get_obj_id(tx, current, *idx);
+                }
+                return transaction_get_obj_id(tx, current, last);
+            };
+
+            // Helper: convert a Value to JSON for move/copy/test
+            auto value_to_json = [&](const Value& val,
+                                     const std::vector<std::string>& segs) -> nlohmann::json {
+                return std::visit(
+                    overload{
+                        [&](ObjType) -> nlohmann::json {
+                            auto child = resolve_obj_at(segs);
+                            if (child)
+                                return export_object_impl(TransactionReader{tx}, *child);
+                            return nlohmann::json{};
+                        },
+                        [&](const ScalarValue& sv) -> nlohmann::json {
+                            return std::visit(
+                                overload{
+                                    [](Null) -> nlohmann::json { return nullptr; },
+                                    [](bool b) -> nlohmann::json { return b; },
+                                    [](std::int64_t i) -> nlohmann::json { return i; },
+                                    [](std::uint64_t u) -> nlohmann::json { return u; },
+                                    [](double d) -> nlohmann::json { return d; },
+                                    [](const Counter& c) -> nlohmann::json { return c.value; },
+                                    [](const Timestamp& t) -> nlohmann::json {
+                                        return t.millis_since_epoch;
+                                    },
+                                    [](const std::string& s) -> nlohmann::json { return s; },
+                                    [](const Bytes& b) -> nlohmann::json {
+                                        return base64_encode(b);
+                                    },
+                                },
+                                sv);
+                        },
+                    },
+                    val);
+            };
+
+            for (const auto& op : patch) {
+                auto op_str = op.at("op").get<std::string>();
+                auto path_segments = parse_pointer(op.at("path").get<std::string>());
+
+                if (op_str == "add") {
+                    add_value_at_pointer(tx, path_segments, op.at("value"));
+                } else if (op_str == "remove") {
+                    remove_at_pointer(tx, path_segments);
+                } else if (op_str == "replace") {
+                    remove_at_pointer(tx, path_segments);
+                    add_value_at_pointer(tx, path_segments, op.at("value"));
+                } else if (op_str == "move") {
+                    auto from_segments = parse_pointer(op.at("from").get<std::string>());
+                    auto val = get_value_at_pointer(tx, from_segments);
+                    if (!val)
+                        throw std::runtime_error{"move: from path does not exist"};
+                    auto val_json = value_to_json(*val, from_segments);
+                    remove_at_pointer(tx, from_segments);
+                    add_value_at_pointer(tx, path_segments, val_json);
+                } else if (op_str == "copy") {
+                    auto from_segments = parse_pointer(op.at("from").get<std::string>());
+                    auto val = get_value_at_pointer(tx, from_segments);
+                    if (!val)
+                        throw std::runtime_error{"copy: from path does not exist"};
+                    auto val_json = value_to_json(*val, from_segments);
+                    add_value_at_pointer(tx, path_segments, val_json);
+                } else if (op_str == "test") {
+                    auto val = get_value_at_pointer(tx, path_segments);
+                    if (!val)
+                        throw std::runtime_error{"test: path does not exist"};
+                    auto current_json = value_to_json(*val, path_segments);
+                    if (current_json != op.at("value")) {
+                        throw std::runtime_error{"test: value mismatch"};
+                    }
+                } else {
+                    throw std::runtime_error{"unknown JSON Patch operation: " + op_str};
+                }
+            }
+        }));
     });
 }
 
-auto diff_json_patch(const Document& before, const Document& after) -> nlohmann::json {
-    auto j1 = export_json(before);
-    auto j2 = export_json(after);
-    return nlohmann::json::diff(j1, j2);
+auto diff_json_patch(const Document& before, const Document& after)
+    -> std::expected<nlohmann::json, Error> {
+    return capture_json_errors([&]() {
+        auto before_json = checked(export_json(before));
+        auto after_json = checked(export_json(after));
+        return nlohmann::json::diff(before_json, after_json);
+    });
 }
 
 // =============================================================================
@@ -943,19 +1142,19 @@ void apply_merge_patch_recursive(Transaction& tx,
 
     for (auto& [key, value] : patch.items()) {
         if (value.is_null()) {
-            tx.delete_key(target, key);
+            checked(tx.delete_key(target, key));
         } else if (value.is_object()) {
             // Check if the target already has an object at this key
-            auto existing = tx.get_obj_id(target, key);
+            auto existing = transaction_get_obj_id(tx, target, key);
             if (existing) {
-                auto type = tx.object_type(*existing);
+                auto type = transaction_object_type(tx, *existing);
                 if (type && (*type == ObjType::map || *type == ObjType::table)) {
                     apply_merge_patch_recursive(tx, *existing, value);
                     continue;
                 }
             }
             // Create new map and import
-            auto child = tx.put_object(target, key, ObjType::map);
+            auto child = checked(tx.put_object(target, key, ObjType::map));
             for (auto& [k, v] : value.items()) {
                 import_json_value_at_key(tx, child, k, v);
             }
@@ -968,44 +1167,48 @@ void apply_merge_patch_recursive(Transaction& tx,
 
 }  // anonymous namespace
 
-void apply_merge_patch(Document& doc, const nlohmann::json& patch, const ObjId& target) {
-    doc.transact([&](Transaction& tx) {
-        apply_merge_patch_recursive(tx, target, patch);
+auto apply_merge_patch(Document& doc, const nlohmann::json& patch, const ObjId& target)
+    -> std::expected<void, Error> {
+    return capture_json_errors([&]() {
+        checked(doc.transact([&](Transaction& tx) {
+            checked(tx.object_type(target));
+            apply_merge_patch_recursive(tx, target, patch);
+        }));
     });
 }
 
-auto generate_merge_patch(const Document& before, const Document& after) -> nlohmann::json {
-    auto j1 = export_json(before);
-    auto j2 = export_json(after);
-    // Build a merge patch by comparing the two JSON trees.
-    auto build_patch = [](const nlohmann::json& source, const nlohmann::json& target,
-                          auto&& self) -> nlohmann::json {
-        if (target.is_object()) {
-            auto patch = nlohmann::json::object();
-            if (source.is_object()) {
-                // Keys removed in target
-                for (auto it = source.begin(); it != source.end(); ++it) {
-                    if (!target.contains(it.key())) {
-                        patch[it.key()] = nullptr;
+auto generate_merge_patch(const Document& before, const Document& after)
+    -> std::expected<nlohmann::json, Error> {
+    return capture_json_errors([&]() {
+        auto before_json = checked(export_json(before));
+        auto after_json = checked(export_json(after));
+        auto build_patch = [](const nlohmann::json& source,
+                              const nlohmann::json& target,
+                              auto&& self) -> nlohmann::json {
+            if (target.is_object()) {
+                auto patch = nlohmann::json::object();
+                if (source.is_object()) {
+                    for (auto it = source.begin(); it != source.end(); ++it) {
+                        if (!target.contains(it.key())) {
+                            patch[it.key()] = nullptr;
+                        }
                     }
-                }
-                // Keys added or changed in target
-                for (auto it = target.begin(); it != target.end(); ++it) {
-                    if (!source.contains(it.key())) {
-                        patch[it.key()] = it.value();
-                    } else if (source[it.key()] != it.value()) {
-                        patch[it.key()] = self(source[it.key()], it.value(), self);
+                    for (auto it = target.begin(); it != target.end(); ++it) {
+                        if (!source.contains(it.key())) {
+                            patch[it.key()] = it.value();
+                        } else if (source[it.key()] != it.value()) {
+                            patch[it.key()] = self(source[it.key()], it.value(), self);
+                        }
                     }
+                } else {
+                    return target;
                 }
-            } else {
-                // Source was not object, target is — return entire target
-                return target;
+                return patch;
             }
-            return patch;
-        }
-        return target;
-    };
-    return build_patch(j1, j2, build_patch);
+            return target;
+        };
+        return build_patch(before_json, after_json, build_patch);
+    });
 }
 
 // =============================================================================
@@ -1029,64 +1232,83 @@ auto escape_pointer_segment(const std::string& segment) -> std::string {
 void flatten_recursive(const Document& doc, const ObjId& obj,
                        const std::string& prefix,
                        std::map<std::string, nlohmann::json>& result) {
-    auto type = doc.object_type(obj);
+    const auto reader = DocumentReader{doc};
+    auto type = reader.object_type(obj);
     if (!type) return;
 
     if (*type == ObjType::text) {
-        result[prefix.empty() ? "/" : prefix] = doc.text(obj);
+        result[prefix.empty() ? "/" : prefix] = reader.text(obj);
         return;
     }
 
     if (*type == ObjType::map || *type == ObjType::table) {
-        for (const auto& key : doc.keys(obj)) {
+        for (const auto& key : reader.keys(obj)) {
             auto path = prefix + "/" + escape_pointer_segment(key);
-            if (auto val = doc.get(obj, key)) {
-                std::visit(overload{
-                    [&](ObjType) {
-                        auto child = doc.get_obj_id(obj, key);
-                        if (child) flatten_recursive(doc, *child, path, result);
+            if (auto val = reader.get(obj, key)) {
+                std::visit(
+                    overload{
+                        [&](ObjType) {
+                            auto child = reader.get_obj_id(obj, key);
+                            if (child)
+                                flatten_recursive(doc, *child, path, result);
+                        },
+                        [&](const ScalarValue& sv) {
+                            result[path] = std::visit(
+                                overload{
+                                    [](Null) -> nlohmann::json { return nullptr; },
+                                    [](bool b) -> nlohmann::json { return b; },
+                                    [](std::int64_t i) -> nlohmann::json { return i; },
+                                    [](std::uint64_t u) -> nlohmann::json { return u; },
+                                    [](double d) -> nlohmann::json { return d; },
+                                    [](const Counter& c) -> nlohmann::json { return c.value; },
+                                    [](const Timestamp& t) -> nlohmann::json {
+                                        return t.millis_since_epoch;
+                                    },
+                                    [](const std::string& s) -> nlohmann::json { return s; },
+                                    [](const Bytes& b) -> nlohmann::json {
+                                        return base64_encode(b);
+                                    },
+                                },
+                                sv);
+                        },
                     },
-                    [&](const ScalarValue& sv) {
-                        result[path] = std::visit(overload{
-                            [](Null) -> nlohmann::json { return nullptr; },
-                            [](bool b) -> nlohmann::json { return b; },
-                            [](std::int64_t i) -> nlohmann::json { return i; },
-                            [](std::uint64_t u) -> nlohmann::json { return u; },
-                            [](double d) -> nlohmann::json { return d; },
-                            [](const Counter& c) -> nlohmann::json { return c.value; },
-                            [](const Timestamp& t) -> nlohmann::json { return t.millis_since_epoch; },
-                            [](const std::string& s) -> nlohmann::json { return s; },
-                            [](const Bytes& b) -> nlohmann::json { return base64_encode(b); },
-                        }, sv);
-                    },
-                }, *val);
+                    *val);
             }
         }
     } else {
         // list
-        auto len = doc.length(obj);
+        auto len = reader.length(obj);
         for (std::size_t i = 0; i < len; ++i) {
             auto path = prefix + "/" + std::to_string(i);
-            if (auto val = doc.get(obj, i)) {
-                std::visit(overload{
-                    [&](ObjType) {
-                        auto child = doc.get_obj_id(obj, i);
-                        if (child) flatten_recursive(doc, *child, path, result);
+            if (auto val = reader.get(obj, i)) {
+                std::visit(
+                    overload{
+                        [&](ObjType) {
+                            auto child = reader.get_obj_id(obj, i);
+                            if (child)
+                                flatten_recursive(doc, *child, path, result);
+                        },
+                        [&](const ScalarValue& sv) {
+                            result[path] = std::visit(
+                                overload{
+                                    [](Null) -> nlohmann::json { return nullptr; },
+                                    [](bool b) -> nlohmann::json { return b; },
+                                    [](std::int64_t i) -> nlohmann::json { return i; },
+                                    [](std::uint64_t u) -> nlohmann::json { return u; },
+                                    [](double d) -> nlohmann::json { return d; },
+                                    [](const Counter& c) -> nlohmann::json { return c.value; },
+                                    [](const Timestamp& t) -> nlohmann::json {
+                                        return t.millis_since_epoch;
+                                    },
+                                    [](const std::string& s) -> nlohmann::json { return s; },
+                                    [](const Bytes& b) -> nlohmann::json {
+                                        return base64_encode(b);
+                                    },
+                                },
+                                sv);
+                        },
                     },
-                    [&](const ScalarValue& sv) {
-                        result[path] = std::visit(overload{
-                            [](Null) -> nlohmann::json { return nullptr; },
-                            [](bool b) -> nlohmann::json { return b; },
-                            [](std::int64_t i) -> nlohmann::json { return i; },
-                            [](std::uint64_t u) -> nlohmann::json { return u; },
-                            [](double d) -> nlohmann::json { return d; },
-                            [](const Counter& c) -> nlohmann::json { return c.value; },
-                            [](const Timestamp& t) -> nlohmann::json { return t.millis_since_epoch; },
-                            [](const std::string& s) -> nlohmann::json { return s; },
-                            [](const Bytes& b) -> nlohmann::json { return base64_encode(b); },
-                        }, sv);
-                    },
-                }, *val);
+                    *val);
             }
         }
     }
@@ -1095,44 +1317,51 @@ void flatten_recursive(const Document& doc, const ObjId& obj,
 }  // anonymous namespace
 
 auto flatten(const Document& doc, const ObjId& obj)
-    -> std::map<std::string, nlohmann::json> {
-    auto result = std::map<std::string, nlohmann::json>{};
-    flatten_recursive(doc, obj, "", result);
-    return result;
+    -> std::expected<std::map<std::string, nlohmann::json>, Error> {
+    return capture_json_errors([&]() {
+        auto result = std::map<std::string, nlohmann::json>{};
+        flatten_recursive(doc, obj, "", result);
+        return result;
+    });
 }
 
-void unflatten(Document& doc,
+auto unflatten(Document& doc,
                const std::map<std::string, nlohmann::json>& flat,
-               const ObjId& target) {
-    doc.transact([&](Transaction& tx) {
-        for (const auto& [path, value] : flat) {
-            auto segments = parse_pointer(path);
-            if (segments.empty()) continue;
+               const ObjId& target) -> std::expected<void, Error> {
+    return capture_json_errors([&]() {
+        checked(doc.transact([&](Transaction& tx) {
+            checked(tx.object_type(target));
+            for (const auto& [path, value] : flat) {
+                auto segments = parse_pointer(path);
+                if (segments.empty())
+                    continue;
 
-            auto current = target;
-            // Walk/create intermediates
-            for (std::size_t i = 0; i + 1 < segments.size(); ++i) {
-                auto type = tx.object_type(current);
-                if (!type) break;
-                if (*type == ObjType::list || *type == ObjType::text) {
-                    auto idx = try_parse_index(segments[i]);
-                    if (!idx) break;
-                    auto child = tx.get_obj_id(current, *idx);
-                    if (!child) break;
-                    current = *child;
-                } else {
-                    auto child = tx.get_obj_id(current, segments[i]);
-                    if (!child) {
-                        current = tx.put_object(current, segments[i], ObjType::map);
-                    } else {
+                auto current = target;
+                for (std::size_t i = 0; i + 1 < segments.size(); ++i) {
+                    auto type = transaction_object_type(tx, current);
+                    if (!type)
+                        break;
+                    if (*type == ObjType::list || *type == ObjType::text) {
+                        auto idx = try_parse_index(segments[i]);
+                        if (!idx)
+                            break;
+                        auto child = transaction_get_obj_id(tx, current, *idx);
+                        if (!child)
+                            break;
                         current = *child;
+                    } else {
+                        auto child = transaction_get_obj_id(tx, current, segments[i]);
+                        if (!child) {
+                            current = checked(tx.put_object(current, segments[i], ObjType::map));
+                        } else {
+                            current = *child;
+                        }
                     }
                 }
+                auto& last = segments.back();
+                import_json_value_at_key(tx, current, last, value);
             }
-            // Set the leaf value
-            auto& last = segments.back();
-            import_json_value_at_key(tx, current, last, value);
-        }
+        }));
     });
 }
 

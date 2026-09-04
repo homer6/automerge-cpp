@@ -33,6 +33,39 @@ namespace automerge_cpp {
 
 namespace detail {
 struct DocState;
+
+template <typename T> struct IsErrorExpected : std::false_type {};
+
+template <typename T> struct IsErrorExpected<std::expected<T, Error>> : std::true_type {};
+
+template <typename T>
+inline constexpr bool is_error_expected_v = IsErrorExpected<std::remove_cvref_t<T>>::value;
+
+template <typename T> struct TransactionResult {
+    using type = std::expected<T, Error>;
+};
+
+template <typename T> struct TransactionResult<std::expected<T, Error>> {
+    using type = std::expected<T, Error>;
+};
+
+template <typename T>
+using transaction_result_t = typename TransactionResult<std::remove_cvref_t<T>>::type;
+
+template <typename T> struct TransactionPatchResult {
+    using type = std::expected<std::pair<T, std::vector<Patch>>, Error>;
+};
+
+template <typename T> struct TransactionPatchResult<std::expected<T, Error>> {
+    using type = std::expected<std::pair<T, std::vector<Patch>>, Error>;
+};
+
+template <> struct TransactionPatchResult<std::expected<void, Error>> {
+    using type = std::expected<std::vector<Patch>, Error>;
+};
+
+template <typename T>
+using transaction_patch_result_t = typename TransactionPatchResult<std::remove_cvref_t<T>>::type;
 }  // namespace detail
 
 /// A CRDT document that supports concurrent editing and deterministic merge.
@@ -98,26 +131,28 @@ public:
     /// is rolled back.
     /// @param fn A function that receives a Transaction reference.
     /// @param options Optional metadata for the committed change.
-    void transact(const std::function<void(Transaction&)>& fn, CommitOptions options = {});
+    auto transact(const std::function<void(Transaction&)>& fn, CommitOptions options = {})
+        -> std::expected<void, Error>;
 
     /// Execute a function within a transaction and return its result.
     ///
     /// @code
-    /// auto list_id = doc.transact([](Transaction& tx) {
+    /// auto list_id = *doc.transact([](Transaction& tx) {
     ///     return tx.put_object(root, "items", ObjType::list);
     /// });
     /// @endcode
     template <typename Fn>
         requires std::invocable<Fn, Transaction&> &&
                  (!std::is_void_v<std::invoke_result_t<Fn, Transaction&>>)
-    auto transact(Fn&& fn, CommitOptions options = {}) -> std::invoke_result_t<Fn, Transaction&>;
+    auto transact(Fn&& fn, CommitOptions options = {})
+        -> detail::transaction_result_t<std::invoke_result_t<Fn, Transaction&>>;
 
     /// Execute a void function within a transaction (template overload).
     template <typename Fn>
         requires std::invocable<Fn, Transaction&> &&
                  std::is_void_v<std::invoke_result_t<Fn, Transaction&>> &&
                  (!std::convertible_to<Fn, std::function<void(Transaction&)>>)
-    void transact(Fn&& fn, CommitOptions options = {});
+    auto transact(Fn&& fn, CommitOptions options = {}) -> std::expected<void, Error>;
 
     // -- Reading: map operations ----------------------------------------------
 
@@ -125,38 +160,41 @@ public:
     /// @param obj The map object to read from.
     /// @param key The key to look up.
     /// @return The value, or nullopt if the key doesn't exist.
-    auto get(const ObjId& obj, std::string_view key) const -> std::optional<Value>;
+    auto get(const ObjId& obj, std::string_view key) const
+        -> std::expected<std::optional<Value>, Error>;
 
     /// Get all concurrent values at a map key (for conflict inspection).
     /// @param obj The map object to read from.
     /// @param key The key to look up.
     /// @return All values at this key (empty if key doesn't exist).
-    auto get_all(const ObjId& obj, std::string_view key) const -> std::vector<Value>;
+    auto get_all(const ObjId& obj, std::string_view key) const
+        -> std::expected<std::vector<Value>, Error>;
 
     // -- Reading: list operations ---------------------------------------------
 
     /// Get the value at a list index.
     /// @param obj The list object to read from.
     /// @param index The index to look up.
-    /// @return The value, or nullopt if the index is out of bounds.
-    auto get(const ObjId& obj, std::size_t index) const -> std::optional<Value>;
+    /// @return The value, or an error if the index is out of bounds.
+    auto get(const ObjId& obj, std::size_t index) const
+        -> std::expected<std::optional<Value>, Error>;
 
     // -- Reading: ranges ------------------------------------------------------
 
     /// Get all keys in a map, sorted lexicographically.
-    auto keys(const ObjId& obj) const -> std::vector<std::string>;
+    auto keys(const ObjId& obj) const -> std::expected<std::vector<std::string>, Error>;
 
     /// Get all values in a map (in key order) or list (in index order).
-    auto values(const ObjId& obj) const -> std::vector<Value>;
+    auto values(const ObjId& obj) const -> std::expected<std::vector<Value>, Error>;
 
     /// Get the number of entries in a map or elements in a list. Text elements are Unicode
     /// scalar values.
-    auto length(const ObjId& obj) const -> std::size_t;
+    auto length(const ObjId& obj) const -> std::expected<std::size_t, Error>;
 
     // -- Reading: text --------------------------------------------------------
 
     /// Get the text content of a text object as a string.
-    auto text(const ObjId& obj) const -> std::string;
+    auto text(const ObjId& obj) const -> std::expected<std::string, Error>;
 
     // -- Typed getters --------------------------------------------------------
 
@@ -168,8 +206,13 @@ public:
     /// auto age  = doc.get<std::int64_t>(root, "age");
     /// @endcode
     template <typename T>
-    auto get(const ObjId& obj, std::string_view key) const -> std::optional<T> {
-        return get_scalar<T>(get(obj, key));
+    auto get(const ObjId& obj, std::string_view key) const
+        -> std::expected<std::optional<T>, Error> {
+        auto value = get(obj, key);
+        if (!value) {
+            return std::unexpected{value.error()};
+        }
+        return get_scalar<T>(*value);
     }
 
     /// Get a typed scalar value from a list index.
@@ -177,8 +220,12 @@ public:
     /// auto item = doc.get<std::string>(list_id, std::size_t{0});
     /// @endcode
     template <typename T>
-    auto get(const ObjId& obj, std::size_t index) const -> std::optional<T> {
-        return get_scalar<T>(get(obj, index));
+    auto get(const ObjId& obj, std::size_t index) const -> std::expected<std::optional<T>, Error> {
+        auto value = get(obj, index);
+        if (!value) {
+            return std::unexpected{value.error()};
+        }
+        return get_scalar<T>(*value);
     }
 
     // -- Convenience: root access ---------------------------------------------
@@ -187,7 +234,8 @@ public:
     /// @code
     /// auto name = doc["name"];
     /// @endcode
-    [[nodiscard]] auto operator[](std::string_view key) const -> std::optional<Value> {
+    [[nodiscard]] auto operator[](std::string_view key) const
+        -> std::expected<std::optional<Value>, Error> {
         return get(root, key);
     }
 
@@ -200,14 +248,14 @@ public:
     /// auto item = doc.get_path("todos", std::size_t{0}, "title");
     /// @endcode
     template <typename... Props>
-        requires (sizeof...(Props) > 0)
-    auto get_path(Props&&... props) const -> std::optional<Value>;
+        requires(sizeof...(Props) > 0)
+    auto get_path(Props&&... props) const -> std::expected<std::optional<Value>, Error>;
 
     // -- Object type query ----------------------------------------------------
 
     /// Get the type of an object (map, list, text, table).
-    /// @return The object type, or nullopt if the object doesn't exist.
-    auto object_type(const ObjId& obj) const -> std::optional<ObjType>;
+    /// @return The object type, or an error if the object doesn't exist.
+    auto object_type(const ObjId& obj) const -> std::expected<ObjType, Error>;
 
     // -- Child object lookup --------------------------------------------------
 
@@ -215,13 +263,15 @@ public:
     /// @param obj The parent map object.
     /// @param key The key to look up.
     /// @return The child ObjId, or nullopt if the key doesn't exist or isn't an object.
-    auto get_obj_id(const ObjId& obj, std::string_view key) const -> std::optional<ObjId>;
+    auto get_obj_id(const ObjId& obj, std::string_view key) const
+        -> std::expected<std::optional<ObjId>, Error>;
 
     /// Get the ObjId of a nested object at a list index.
     /// @param obj The parent list object.
     /// @param index The index to look up.
-    /// @return The child ObjId, or nullopt if the index is out of bounds or isn't an object.
-    auto get_obj_id(const ObjId& obj, std::size_t index) const -> std::optional<ObjId>;
+    /// @return The child ObjId, or nullopt if the value isn't an object.
+    auto get_obj_id(const ObjId& obj, std::size_t index) const
+        -> std::expected<std::optional<ObjId>, Error>;
 
     // -- Fork and Merge -------------------------------------------------------
 
@@ -241,7 +291,8 @@ public:
     auto get_changes() const -> std::vector<Change>;
 
     /// Get changes not reachable from the supplied heads.
-    auto get_changes_since(const std::vector<ChangeHash>& heads) const -> std::vector<Change>;
+    auto get_changes_since(const std::vector<ChangeHash>& heads) const
+        -> std::expected<std::vector<Change>, Error>;
 
     /// Get changes present in another document but absent from this document.
     auto get_changes_added(const Document& other) const -> std::vector<Change>;
@@ -296,14 +347,14 @@ public:
     /// Supports both v2 (chunk-based) and v1 (row-based) formats with
     /// automatic detection.
     /// @param data The binary data to load from.
-    /// @return The loaded document, or nullopt if the data is invalid.
-    static auto load(std::span<const std::byte> data) -> std::optional<Document>;
+    /// @return The loaded document, or an error if the data is invalid.
+    static auto load(std::span<const std::byte> data) -> std::expected<Document, Error>;
 
     /// Load one upstream compact document chunk as a shallow checkpoint.
     ///
     /// The visible state and checkpoint heads are retained. Changes and operations before the
     /// checkpoint are not kept in the resident history.
-    static auto load_shallow(std::span<const std::byte> data) -> std::optional<Document>;
+    static auto load_shallow(std::span<const std::byte> data) -> std::expected<Document, Error>;
 
     /// Load a document and return patches that materialize its visible state.
     ///
@@ -343,11 +394,12 @@ public:
     /// @param options Optional metadata for the committed change.
     /// @return The patches produced by the transaction.
     auto transact_with_patches(const std::function<void(Transaction&)>& fn,
-                               CommitOptions options = {}) -> std::vector<Patch>;
+                               CommitOptions options = {})
+        -> std::expected<std::vector<Patch>, Error>;
 
     /// Execute a transaction, return both the function result and patches.
     /// @code
-    /// auto [list_id, patches] = doc.transact_with_patches([](Transaction& tx) {
+    /// auto [list_id, patches] = *doc.transact_with_patches([](Transaction& tx) {
     ///     return tx.put_object(root, "items", ObjType::list);
     /// });
     /// @endcode
@@ -355,7 +407,7 @@ public:
         requires std::invocable<Fn, Transaction&> &&
                  (!std::is_void_v<std::invoke_result_t<Fn, Transaction&>>)
     auto transact_with_patches(Fn&& fn, CommitOptions options = {})
-        -> std::pair<std::invoke_result_t<Fn, Transaction&>, std::vector<Patch>>;
+        -> detail::transaction_patch_result_t<std::invoke_result_t<Fn, Transaction&>>;
 
     // -- Historical reads (time travel) ---------------------------------------
 
@@ -363,52 +415,53 @@ public:
     /// @param obj The map object.
     /// @param key The key to look up.
     /// @param heads The DAG heads defining the point in time.
-    auto get_at(const ObjId& obj, std::string_view key,
-                const std::vector<ChangeHash>& heads) const -> std::optional<Value>;
+    auto get_at(const ObjId& obj, std::string_view key, const std::vector<ChangeHash>& heads) const
+        -> std::expected<std::optional<Value>, Error>;
 
     /// Get a list value as it was at a given point in history.
-    auto get_at(const ObjId& obj, std::size_t index,
-                const std::vector<ChangeHash>& heads) const -> std::optional<Value>;
+    auto get_at(const ObjId& obj, std::size_t index, const std::vector<ChangeHash>& heads) const
+        -> std::expected<std::optional<Value>, Error>;
 
     /// Get map keys at a given point in history.
-    auto keys_at(const ObjId& obj,
-                 const std::vector<ChangeHash>& heads) const -> std::vector<std::string>;
+    auto keys_at(const ObjId& obj, const std::vector<ChangeHash>& heads) const
+        -> std::expected<std::vector<std::string>, Error>;
 
     /// Get values at a given point in history.
-    auto values_at(const ObjId& obj,
-                   const std::vector<ChangeHash>& heads) const -> std::vector<Value>;
+    auto values_at(const ObjId& obj, const std::vector<ChangeHash>& heads) const
+        -> std::expected<std::vector<Value>, Error>;
 
     /// Get length at a given point in history.
-    auto length_at(const ObjId& obj,
-                   const std::vector<ChangeHash>& heads) const -> std::size_t;
+    auto length_at(const ObjId& obj, const std::vector<ChangeHash>& heads) const
+        -> std::expected<std::size_t, Error>;
 
     /// Get text content at a given point in history.
-    auto text_at(const ObjId& obj,
-                 const std::vector<ChangeHash>& heads) const -> std::string;
+    auto text_at(const ObjId& obj, const std::vector<ChangeHash>& heads) const
+        -> std::expected<std::string, Error>;
 
     // -- Cursors --------------------------------------------------------------
 
     /// Create a cursor at a position in a list or text.
     /// @param obj The list or text object.
     /// @param index The current list-element or text-scalar index to anchor the cursor to.
-    /// @return A Cursor, or nullopt if the index is out of bounds.
-    auto cursor(const ObjId& obj, std::size_t index) const -> std::optional<Cursor>;
+    /// @return A cursor, or an error if the index is out of bounds.
+    auto cursor(const ObjId& obj, std::size_t index) const -> std::expected<Cursor, Error>;
 
     /// Resolve a cursor to its current index.
     /// @param obj The list or text object.
     /// @param cursor The cursor to resolve.
     /// @return The current list-element or text-scalar index, or nullopt if the element was
     /// deleted.
-    auto resolve_cursor(const ObjId& obj, const Cursor& cursor) const -> std::optional<std::size_t>;
+    auto resolve_cursor(const ObjId& obj, const Cursor& cursor) const
+        -> std::expected<std::optional<std::size_t>, Error>;
 
     // -- Rich text marks ------------------------------------------------------
 
     /// Get all marks on a text or list object.
-    auto marks(const ObjId& obj) const -> std::vector<Mark>;
+    auto marks(const ObjId& obj) const -> std::expected<std::vector<Mark>, Error>;
 
     /// Get marks at a given point in history.
-    auto marks_at(const ObjId& obj,
-                  const std::vector<ChangeHash>& heads) const -> std::vector<Mark>;
+    auto marks_at(const ObjId& obj, const std::vector<ChangeHash>& heads) const
+        -> std::expected<std::vector<Mark>, Error>;
 
     /// Get the thread pool (may be nullptr if sequential mode).
     auto get_thread_pool() const -> std::shared_ptr<thread_pool>;
@@ -449,7 +502,8 @@ private:
     void update_sync_state_after_receive(SyncState& sync_state, const SyncMessage& message);
 
     /// Internal: walk a path of Props to resolve a nested value.
-    auto get_path_impl(std::span<const Prop> path) const -> std::optional<Value>;
+    auto get_path_impl(std::span<const Prop> path) const
+        -> std::expected<std::optional<Value>, Error>;
 
     std::unique_ptr<detail::DocState> state_;
     std::shared_ptr<thread_pool> pool_;
@@ -463,15 +517,29 @@ private:
 template <typename Fn>
     requires std::invocable<Fn, Transaction&> &&
              (!std::is_void_v<std::invoke_result_t<Fn, Transaction&>>)
-auto Document::transact(Fn&& fn, CommitOptions options) -> std::invoke_result_t<Fn, Transaction&> {
+auto Document::transact(Fn&& fn, CommitOptions options)
+    -> detail::transaction_result_t<std::invoke_result_t<Fn, Transaction&>> {
     auto lock = std::unique_lock{mutex_};
     auto tx = Transaction{*state_};
     try {
         auto result = fn(tx);
-        tx.commit(std::move(options));
-        return result;
+        if constexpr (detail::is_error_expected_v<decltype(result)>) {
+            if (!result) {
+                static_cast<void>(tx.rollback());
+                return std::unexpected{result.error()};
+            }
+        }
+        const auto committed = tx.commit(std::move(options));
+        if (!committed) {
+            return std::unexpected{committed.error()};
+        }
+        if constexpr (detail::is_error_expected_v<decltype(result)>) {
+            return result;
+        } else {
+            return std::expected<std::remove_cvref_t<decltype(result)>, Error>{std::move(result)};
+        }
     } catch (...) {
-        tx.rollback();
+        static_cast<void>(tx.rollback());
         throw;
     }
 }
@@ -480,14 +548,14 @@ template <typename Fn>
     requires std::invocable<Fn, Transaction&> &&
              std::is_void_v<std::invoke_result_t<Fn, Transaction&>> &&
              (!std::convertible_to<Fn, std::function<void(Transaction&)>>)
-void Document::transact(Fn&& fn, CommitOptions options) {
+auto Document::transact(Fn&& fn, CommitOptions options) -> std::expected<void, Error> {
     auto lock = std::unique_lock{mutex_};
     auto tx = Transaction{*state_};
     try {
         fn(tx);
-        tx.commit(std::move(options));
+        return tx.commit(std::move(options));
     } catch (...) {
-        tx.rollback();
+        static_cast<void>(tx.rollback());
         throw;
     }
 }
@@ -496,33 +564,63 @@ template <typename Fn>
     requires std::invocable<Fn, Transaction&> &&
              (!std::is_void_v<std::invoke_result_t<Fn, Transaction&>>)
 auto Document::transact_with_patches(Fn&& fn, CommitOptions options)
-    -> std::pair<std::invoke_result_t<Fn, Transaction&>, std::vector<Patch>> {
+    -> detail::transaction_patch_result_t<std::invoke_result_t<Fn, Transaction&>> {
     auto lock = std::unique_lock{mutex_};
     auto tx = Transaction{*state_};
     try {
         auto result = fn(tx);
+        if constexpr (detail::is_error_expected_v<decltype(result)>) {
+            if (!result) {
+                static_cast<void>(tx.rollback());
+                return std::unexpected{result.error()};
+            }
+        }
         auto ops = tx.pending_ops_;
-        tx.commit(std::move(options));
-        return {std::move(result), ops_to_patches_internal(ops)};
+        const auto committed = tx.commit(std::move(options));
+        if (!committed) {
+            return std::unexpected{committed.error()};
+        }
+        auto patches = ops_to_patches_internal(ops);
+        if constexpr (detail::is_error_expected_v<decltype(result)>) {
+            using Value = typename std::remove_cvref_t<decltype(result)>::value_type;
+            if constexpr (std::is_void_v<Value>) {
+                return patches;
+            } else {
+                return std::pair<Value, std::vector<Patch>>{std::move(*result), std::move(patches)};
+            }
+        } else {
+            return std::pair<std::remove_cvref_t<decltype(result)>, std::vector<Patch>>{
+                std::move(result), std::move(patches)};
+        }
     } catch (...) {
-        tx.rollback();
+        static_cast<void>(tx.rollback());
         throw;
     }
 }
 
 template <typename... Props>
-    requires (sizeof...(Props) > 0)
-auto Document::get_path(Props&&... props) const -> std::optional<Value> {
+    requires(sizeof...(Props) > 0)
+auto Document::get_path(Props&&... props) const -> std::expected<std::optional<Value>, Error> {
     auto path = std::vector<Prop>{};
     path.reserve(sizeof...(Props));
+    auto has_null_key = false;
     auto to_prop = overload{
         [](std::string_view s) -> Prop { return std::string{s}; },
-        [](const char* s) -> Prop { return std::string{s}; },
+        [&has_null_key](const char* s) -> Prop {
+            if (s == nullptr) {
+                has_null_key = true;
+                return std::string{};
+            }
+            return std::string{s};
+        },
         [](const std::string& s) -> Prop { return s; },
         [](std::size_t i) -> Prop { return i; },
         [](int i) -> Prop { return static_cast<std::size_t>(i); },
     };
     (path.push_back(to_prop(std::forward<Props>(props))), ...);
+    if (has_null_key) {
+        return std::unexpected{Error{ErrorKind::invalid_key, "Path keys must not be null"}};
+    }
     return get_path_impl(path);
 }
 

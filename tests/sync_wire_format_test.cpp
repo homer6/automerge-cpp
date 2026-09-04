@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <expected>
 #include <filesystem>
 #include <fstream>
 #include <span>
@@ -14,6 +15,7 @@
 namespace {
 
 using automerge_cpp::Document;
+using automerge_cpp::Error;
 using automerge_cpp::root;
 using automerge_cpp::SyncMessage;
 using automerge_cpp::SyncState;
@@ -71,7 +73,7 @@ auto sync_documents(Document& first,
     return false;
 }
 
-auto load_sync_document(std::string_view name) -> std::optional<Document> {
+auto load_sync_document(std::string_view name) -> std::expected<Document, Error> {
     return Document::load(
         read_bytes(fixture_path(std::string{"sync_exchange/"} + std::string{name})));
 }
@@ -100,9 +102,9 @@ void expect_fixture_exchange_with_replacement(bool replace_first) {
         ASSERT_TRUE(received.has_value()) << "round " << round / 2;
     }
 
-    EXPECT_EQ(replacement->get<std::string>(root, "first"), "one");
-    EXPECT_EQ(replacement->get<std::int64_t>(root, "second"), 2);
-    EXPECT_EQ(replacement->get<bool>(root, "remote"), true);
+    EXPECT_EQ(*replacement->get<std::string>(root, "first"), "one");
+    EXPECT_EQ(*replacement->get<std::int64_t>(root, "second"), 2);
+    EXPECT_EQ(*replacement->get<bool>(root, "remote"), true);
 }
 
 TEST(SyncMessageWireFormat, empty_message_matches_upstream_bytes) {
@@ -160,8 +162,8 @@ TEST(SyncMessageWireFormat, message_with_changes_applies_after_decode) {
     const auto patches = target->receive_sync_message_with_patches(state, *message);
     ASSERT_TRUE(patches.has_value());
     EXPECT_FALSE(patches->empty());
-    EXPECT_EQ(target->get<std::string>(root, "first"), "one");
-    EXPECT_EQ(target->get<std::int64_t>(root, "second"), 2);
+    EXPECT_EQ(*target->get<std::string>(root, "first"), "one");
+    EXPECT_EQ(*target->get<std::int64_t>(root, "second"), 2);
 }
 
 TEST(SyncMessageWireFormat, fixture_exchange_accepts_either_cpp_peer) {

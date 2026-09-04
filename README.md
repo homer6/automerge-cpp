@@ -12,7 +12,7 @@ This is a **from-scratch** reimplementation, not a wrapper. It mirrors the upstr
 Automerge semantics while embracing idiomatic C++23: algebraic types, ranges pipelines,
 strong types, and an API inspired by [nlohmann/json](https://github.com/nlohmann/json).
 
-**653 GoogleTest cases passing** across 16 test files, plus two compatibility CTest steps when
+**690 GoogleTest cases passing** across 17 test files, plus two compatibility CTest steps when
 Cargo is available. Deep [nlohmann/json](https://github.com/nlohmann/json) interoperability
 included.
 
@@ -26,7 +26,7 @@ int main() {
     auto doc = am::Document{};
 
     // Initializer lists — just like nlohmann/json
-    const auto items = doc.transact([](am::Transaction& tx) {
+    const auto items = *doc.transact([](am::Transaction& tx) {
         tx.put(am::root, "title", "Shopping List");
         tx.put(am::root, "config", {{"theme", "dark"}, {"lang", "en"}});
         return tx.put(am::root, "items", {"Milk", "Eggs", "Bread"});
@@ -82,12 +82,12 @@ doc.transact([](auto& tx) {
 
 ```cpp
 // Lambda return type is deduced — no external variable needed
-auto list_id = doc.transact([](Transaction& tx) {
+auto list_id = *doc.transact([](Transaction& tx) {
     return tx.put(root, "items", {"Milk", "Eggs", "Bread"});
 });
 
 // transact_with_patches returns {result, patches}
-auto [obj_id, patches] = doc.transact_with_patches([](Transaction& tx) {
+auto [obj_id, patches] = *doc.transact_with_patches([](Transaction& tx) {
     return tx.put(root, "data", Map{});
 });
 ```
@@ -169,11 +169,11 @@ auto doc = am::Document{};
 am::json::import_json(doc, input);
 
 // Export back to JSON — lossless round-trip
-auto output = am::json::export_json(doc);
+auto output = *am::json::export_json(doc);
 assert(input == output);
 
 // JSON Pointer (RFC 6901) — path-based access
-auto score = am::json::get_pointer(doc, "/scores/0");          // 10
+auto score = *am::json::get_pointer(doc, "/scores/0");          // 10
 am::json::put_pointer(doc, "/config/port", am::ScalarValue{std::int64_t{8080}});
 am::json::delete_pointer(doc, "/scores/2");
 
@@ -188,7 +188,7 @@ am::json::apply_json_patch(doc, json::parse(R"([
 am::json::apply_merge_patch(doc, json{{"name", "Charlie"}, {"scores", nullptr}});
 
 // Flatten to JSON Pointer paths
-auto flat = am::json::flatten(doc);  // {"/config/port": 8080, "/name": "Charlie"}
+auto flat = *am::json::flatten(doc);  // {"/config/port": 8080, "/name": "Charlie"}
 
 // ADL serialization — automerge types ↔ nlohmann::json (in am:: namespace)
 json j = am::ScalarValue{am::Counter{42}};  // {"__type": "counter", "value": 42}
@@ -196,7 +196,7 @@ json j = am::ScalarValue{am::Counter{42}};  // {"__type": "counter", "value": 42
 // Fork, diff as RFC 6902, then merge
 auto bob = doc.fork();
 bob.transact([](am::Transaction& tx) { tx.put(am::root, "name", "Dave"); });
-auto diff = am::json::diff_json_patch(doc, bob);
+auto diff = *am::json::diff_json_patch(doc, bob);
 doc.merge(bob);
 ```
 
@@ -255,7 +255,7 @@ a full working example.
 
 ### Quality and Performance
 
-- **653 GoogleTest cases** across 16 test files, plus two compatibility CTest steps with Cargo
+- **690 GoogleTest cases** across 17 test files, plus two compatibility CTest steps with Cargo
 - **Fuzz testing**: libFuzzer targets for `Document::load()`, LEB128, and change chunk parsing
 - **Static analysis**: clang-tidy CI with `bugprone-*`, `performance-*`, `clang-analyzer-*`
 - **Sanitizer CI**: Address Sanitizer + Undefined Behavior Sanitizer
@@ -353,7 +353,7 @@ automerge-cpp/
     encoding/                 #   LEB128, RLE, delta, boolean codecs
     storage/                  #   columnar binary format
     sync/                     #   bloom filter for sync protocol
-  tests/                      # 653 tests (Google Test)
+  tests/                      # 690 tests (Google Test)
   examples/                   # 7 example programs
   benchmarks/                 # performance benchmarks (Google Benchmark)
   docs/                       # documentation

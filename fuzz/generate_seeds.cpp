@@ -39,8 +39,8 @@ int main() {
     {
         auto doc = automerge_cpp::Document{};
         doc.transact([](auto& tx) {
-            auto text_id = tx.put_object(automerge_cpp::root, "text",
-                                         automerge_cpp::ObjType::text);
+            auto text_id =
+                *tx.put_object(automerge_cpp::root, "text", automerge_cpp::ObjType::text);
             tx.splice_text(text_id, 0, 0, "hello world");
         });
         write_seed(dir + "/seed_text.bin", doc.save());
@@ -50,11 +50,11 @@ int main() {
     {
         auto doc = automerge_cpp::Document{};
         doc.transact([](auto& tx) {
-            auto map_id = tx.put_object(automerge_cpp::root, "nested",
-                                        automerge_cpp::ObjType::map);
+            auto map_id =
+                *tx.put_object(automerge_cpp::root, "nested", automerge_cpp::ObjType::map);
             tx.put(map_id, "inner", std::string{"value"});
-            auto list_id = tx.put_object(automerge_cpp::root, "items",
-                                         automerge_cpp::ObjType::list);
+            auto list_id =
+                *tx.put_object(automerge_cpp::root, "items", automerge_cpp::ObjType::list);
             tx.insert(list_id, 0, std::int64_t{1});
             tx.insert(list_id, 1, std::int64_t{2});
         });

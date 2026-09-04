@@ -243,16 +243,19 @@ auto SyncState::encode() const -> std::vector<std::byte> {
     return encoder.take();
 }
 
-auto SyncState::decode(std::span<const std::byte> data) -> std::optional<SyncState> {
+auto SyncState::decode(std::span<const std::byte> data) -> std::expected<SyncState, Error> {
     auto decoder = storage::Deserializer{data};
     const auto marker = decoder.read_u8();
     if (!marker || *marker != sync_state_type) {
-        return std::nullopt;
+        return decode_error("expected Automerge sync state type 0x43");
     }
 
     auto shared_heads = read_hashes(decoder, "shared heads");
-    if (!shared_heads || !decoder.at_end()) {
-        return std::nullopt;
+    if (!shared_heads) {
+        return std::unexpected{shared_heads.error()};
+    }
+    if (!decoder.at_end()) {
+        return decode_error("trailing sync state bytes");
     }
 
     auto state = SyncState{};

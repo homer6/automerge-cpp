@@ -10,16 +10,97 @@ Transaction::Transaction(detail::DocState& state)
     : state_{state}, rollback_state_{std::make_unique<detail::TransactionRollback>(state)} {}
 
 Transaction::~Transaction() {
-    rollback();
+    if (rollback_state_->is_active()) {
+        rollback_state_->rollback(state_);
+        pending_ops_.clear();
+    }
 }
 
-void Transaction::rollback() {
+auto Transaction::validate_active() const -> std::expected<void, Error> {
+    if (!rollback_state_->is_active()) {
+        return std::unexpected{
+            Error{ErrorKind::inactive_transaction, "transaction is no longer active"}};
+    }
+    return {};
+}
+
+auto Transaction::validate_key(std::string_view key) const -> std::expected<void, Error> {
+    if (!detail::split_utf8_scalars(key)) {
+        return std::unexpected{Error{ErrorKind::invalid_key, "map keys must be valid UTF-8"}};
+    }
+    return {};
+}
+
+auto Transaction::validate_scalar(const ScalarValue& value) const -> std::expected<void, Error> {
+    const auto* string = std::get_if<std::string>(&value);
+    if (string && !detail::split_utf8_scalars(*string)) {
+        return std::unexpected{Error{ErrorKind::invalid_utf8, "string values must be valid UTF-8"}};
+    }
+    return {};
+}
+
+auto Transaction::validate_object(const ObjId& obj,
+                                  std::initializer_list<ObjType> allowed_types) const
+    -> std::expected<const detail::ObjectState*, Error> {
+    const auto* object = state_.get_object(obj);
+    if (!object) {
+        return std::unexpected{
+            Error{ErrorKind::invalid_obj_id, "object identifier does not exist"}};
+    }
+    if (std::ranges::find(allowed_types, object->type) == allowed_types.end()) {
+        return std::unexpected{
+            Error{ErrorKind::invalid_object_type, "object has the wrong type for this operation"}};
+    }
+    return object;
+}
+
+auto Transaction::validate_index(const ObjId& obj, std::size_t index, bool allow_end) const
+    -> std::expected<void, Error> {
+    const auto object = validate_object(obj, {ObjType::list, ObjType::text});
+    if (!object) {
+        return std::unexpected{object.error()};
+    }
+    const auto length = state_.list_length(obj);
+    const auto valid = allow_end ? index <= length : index < length;
+    if (!valid) {
+        return std::unexpected{
+            Error{ErrorKind::index_out_of_bounds, "list or text index is out of bounds"}};
+    }
+    return {};
+}
+
+auto Transaction::state_length(const ObjId& obj) const -> std::size_t {
+    return state_.list_length(obj);
+}
+
+auto Transaction::rollback() -> std::expected<void, Error> {
+    const auto active = validate_active();
+    if (!active) {
+        return std::unexpected{active.error()};
+    }
     rollback_state_->rollback(state_);
     pending_ops_.clear();
+    return {};
 }
 
-void Transaction::put(const ObjId& obj, std::string_view key, ScalarValue val) {
-    rollback_state_->assert_active();
+auto Transaction::put(const ObjId& obj, std::string_view key, ScalarValue val)
+    -> std::expected<void, Error> {
+    const auto active = validate_active();
+    if (!active) {
+        return std::unexpected{active.error()};
+    }
+    const auto object = validate_object(obj, {ObjType::map, ObjType::table});
+    if (!object) {
+        return std::unexpected{object.error()};
+    }
+    const auto valid_key = validate_key(key);
+    if (!valid_key) {
+        return std::unexpected{valid_key.error()};
+    }
+    const auto valid_value = validate_scalar(val);
+    if (!valid_value) {
+        return std::unexpected{valid_value.error()};
+    }
     auto key_str = std::string{key};
     auto pred = state_.map_pred(obj, key_str);
     rollback_state_->record_map_key(state_, obj, key_str);
@@ -35,10 +116,23 @@ void Transaction::put(const ObjId& obj, std::string_view key, ScalarValue val) {
         .pred = std::move(pred),
     };
     pending_ops_.push_back(std::move(op));
+    return {};
 }
 
-auto Transaction::put_object(const ObjId& obj, std::string_view key, ObjType type) -> ObjId {
-    rollback_state_->assert_active();
+auto Transaction::put_object(const ObjId& obj, std::string_view key, ObjType type)
+    -> std::expected<ObjId, Error> {
+    const auto active = validate_active();
+    if (!active) {
+        return std::unexpected{active.error()};
+    }
+    const auto object = validate_object(obj, {ObjType::map, ObjType::table});
+    if (!object) {
+        return std::unexpected{object.error()};
+    }
+    const auto valid_key = validate_key(key);
+    if (!valid_key) {
+        return std::unexpected{valid_key.error()};
+    }
     auto key_str = std::string{key};
     auto pred = state_.map_pred(obj, key_str);
     rollback_state_->record_map_key(state_, obj, key_str);
@@ -59,8 +153,19 @@ auto Transaction::put_object(const ObjId& obj, std::string_view key, ObjType typ
     return new_obj;
 }
 
-void Transaction::delete_key(const ObjId& obj, std::string_view key) {
-    rollback_state_->assert_active();
+auto Transaction::delete_key(const ObjId& obj, std::string_view key) -> std::expected<void, Error> {
+    const auto active = validate_active();
+    if (!active) {
+        return std::unexpected{active.error()};
+    }
+    const auto object = validate_object(obj, {ObjType::map, ObjType::table});
+    if (!object) {
+        return std::unexpected{object.error()};
+    }
+    const auto valid_key = validate_key(key);
+    if (!valid_key) {
+        return std::unexpected{valid_key.error()};
+    }
     auto key_str = std::string{key};
     auto pred = state_.map_pred(obj, key_str);
     rollback_state_->record_map_key(state_, obj, key_str);
@@ -75,10 +180,23 @@ void Transaction::delete_key(const ObjId& obj, std::string_view key) {
         .pred = std::move(pred),
     };
     pending_ops_.push_back(std::move(op));
+    return {};
 }
 
-void Transaction::insert(const ObjId& obj, std::size_t index, ScalarValue val) {
-    rollback_state_->assert_active();
+auto Transaction::insert(const ObjId& obj, std::size_t index, ScalarValue val)
+    -> std::expected<void, Error> {
+    const auto active = validate_active();
+    if (!active) {
+        return std::unexpected{active.error()};
+    }
+    const auto valid_index = validate_index(obj, index, true);
+    if (!valid_index) {
+        return std::unexpected{valid_index.error()};
+    }
+    const auto valid_value = validate_scalar(val);
+    if (!valid_value) {
+        return std::unexpected{valid_value.error()};
+    }
     auto insert_after = state_.insert_after_for(obj, index);
     auto op_id = state_.next_op_id();
     rollback_state_->record_list_insert(obj, op_id);
@@ -94,10 +212,19 @@ void Transaction::insert(const ObjId& obj, std::size_t index, ScalarValue val) {
         .insert_after = insert_after,
     };
     pending_ops_.push_back(std::move(op));
+    return {};
 }
 
-auto Transaction::insert_object(const ObjId& obj, std::size_t index, ObjType type) -> ObjId {
-    rollback_state_->assert_active();
+auto Transaction::insert_object(const ObjId& obj, std::size_t index, ObjType type)
+    -> std::expected<ObjId, Error> {
+    const auto active = validate_active();
+    if (!active) {
+        return std::unexpected{active.error()};
+    }
+    const auto valid_index = validate_index(obj, index, true);
+    if (!valid_index) {
+        return std::unexpected{valid_index.error()};
+    }
     auto insert_after = state_.insert_after_for(obj, index);
     auto op_id = state_.next_op_id();
     rollback_state_->record_list_insert(obj, op_id);
@@ -118,8 +245,20 @@ auto Transaction::insert_object(const ObjId& obj, std::size_t index, ObjType typ
     return new_obj;
 }
 
-void Transaction::set(const ObjId& obj, std::size_t index, ScalarValue val) {
-    rollback_state_->assert_active();
+auto Transaction::set(const ObjId& obj, std::size_t index, ScalarValue val)
+    -> std::expected<void, Error> {
+    const auto active = validate_active();
+    if (!active) {
+        return std::unexpected{active.error()};
+    }
+    const auto valid_index = validate_index(obj, index, false);
+    if (!valid_index) {
+        return std::unexpected{valid_index.error()};
+    }
+    const auto valid_value = validate_scalar(val);
+    if (!valid_value) {
+        return std::unexpected{valid_value.error()};
+    }
     auto pred = state_.list_pred(obj, index);
     rollback_state_->record_list_value(state_, obj, index);
     auto op_id = state_.next_op_id();
@@ -134,10 +273,18 @@ void Transaction::set(const ObjId& obj, std::size_t index, ScalarValue val) {
         .pred = std::move(pred),
     };
     pending_ops_.push_back(std::move(op));
+    return {};
 }
 
-void Transaction::delete_index(const ObjId& obj, std::size_t index) {
-    rollback_state_->assert_active();
+auto Transaction::delete_index(const ObjId& obj, std::size_t index) -> std::expected<void, Error> {
+    const auto active = validate_active();
+    if (!active) {
+        return std::unexpected{active.error()};
+    }
+    const auto valid_index = validate_index(obj, index, false);
+    if (!valid_index) {
+        return std::unexpected{valid_index.error()};
+    }
     auto pred = state_.list_pred(obj, index);
     rollback_state_->record_list_visibility(state_, obj, index);
     auto op_id = state_.next_op_id();
@@ -151,13 +298,26 @@ void Transaction::delete_index(const ObjId& obj, std::size_t index) {
         .pred = std::move(pred),
     };
     pending_ops_.push_back(std::move(op));
+    return {};
 }
 
 auto Transaction::splice_text(const ObjId& obj,
                               std::size_t pos,
                               std::size_t del,
                               std::string_view text) -> std::expected<void, Error> {
-    rollback_state_->assert_active();
+    const auto active = validate_active();
+    if (!active) {
+        return std::unexpected{active.error()};
+    }
+    const auto object = validate_object(obj, {ObjType::text});
+    if (!object) {
+        return std::unexpected{object.error()};
+    }
+    const auto length = state_.list_length(obj);
+    if (pos > length || del > length - pos) {
+        return std::unexpected{
+            Error{ErrorKind::index_out_of_bounds, "text splice range is out of bounds"}};
+    }
     const auto scalars = detail::split_utf8_scalars(text);
     if (!scalars) {
         return std::unexpected{scalars.error()};
@@ -210,9 +370,27 @@ auto Transaction::splice_text(const ObjId& obj,
     return {};
 }
 
-void Transaction::increment(const ObjId& obj, std::string_view key, std::int64_t delta) {
-    rollback_state_->assert_active();
+auto Transaction::increment(const ObjId& obj, std::string_view key, std::int64_t delta)
+    -> std::expected<void, Error> {
+    const auto active = validate_active();
+    if (!active) {
+        return std::unexpected{active.error()};
+    }
+    const auto object = validate_object(obj, {ObjType::map, ObjType::table});
+    if (!object) {
+        return std::unexpected{object.error()};
+    }
+    const auto valid_key = validate_key(key);
+    if (!valid_key) {
+        return std::unexpected{valid_key.error()};
+    }
     auto key_str = std::string{key};
+    const auto value = state_.map_get(obj, key_str);
+    const auto* scalar = value ? std::get_if<ScalarValue>(&*value) : nullptr;
+    if (!scalar || !std::holds_alternative<Counter>(*scalar)) {
+        return std::unexpected{
+            Error{ErrorKind::invalid_value_type, "increment requires an existing counter"}};
+    }
     auto pred = state_.map_pred(obj, key_str);
     rollback_state_->record_map_key(state_, obj, key_str);
     auto op_id = state_.next_op_id();
@@ -226,15 +404,45 @@ void Transaction::increment(const ObjId& obj, std::string_view key, std::int64_t
         .pred = std::move(pred),
     };
     pending_ops_.push_back(std::move(op));
+    return {};
 }
 
-void Transaction::mark(const ObjId& obj, std::size_t start, std::size_t end,
-                       std::string_view name, ScalarValue value) {
-    rollback_state_->assert_active();
+auto Transaction::mark(const ObjId& obj,
+                       std::size_t start,
+                       std::size_t end,
+                       std::string_view name,
+                       ScalarValue value) -> std::expected<void, Error> {
+    const auto active = validate_active();
+    if (!active) {
+        return std::unexpected{active.error()};
+    }
+    const auto object = validate_object(obj, {ObjType::list, ObjType::text});
+    if (!object) {
+        return std::unexpected{object.error()};
+    }
+    const auto length = state_.list_length(obj);
+    if (start >= end || end > length) {
+        return std::unexpected{
+            Error{ErrorKind::invalid_mark, "mark range must be non-empty and within the object"}};
+    }
+    const auto valid_name = validate_key(name);
+    if (!valid_name) {
+        return std::unexpected{valid_name.error()};
+    }
+    if (name.empty()) {
+        return std::unexpected{
+            Error{ErrorKind::invalid_mark, "mark names must be non-empty"}};
+    }
+    const auto valid_value = validate_scalar(value);
+    if (!valid_value) {
+        return std::unexpected{valid_value.error()};
+    }
     const auto start_elem = state_.list_element_id_at(obj, start);
-    assert(start_elem);
     const auto end_elem = state_.list_element_id_at(obj, end > 0 ? end - 1 : 0);
-    assert(end_elem);
+    if (!start_elem || !end_elem) {
+        return std::unexpected{
+            Error{ErrorKind::invalid_mark, "mark endpoints do not resolve to visible elements"}};
+    }
     const auto start_after = state_.insert_after_for(obj, start);
     const auto end_after = state_.insert_after_for(obj, end);
 
@@ -266,15 +474,17 @@ void Transaction::mark(const ObjId& obj, std::size_t start, std::size_t end,
     };
     pending_ops_.push_back(std::move(begin));
     pending_ops_.push_back(std::move(finish));
+    return {};
 }
 
-void Transaction::commit(CommitOptions options) {
+auto Transaction::commit(CommitOptions options) -> std::expected<void, Error> {
     if (!rollback_state_->is_active()) {
-        return;
+        return std::unexpected{
+            Error{ErrorKind::inactive_transaction, "transaction is no longer active"}};
     }
     if (pending_ops_.empty()) {
         rollback_state_->finish_commit();
-        return;
+        return {};
     }
 
     rollback_state_->begin_commit(state_);
@@ -304,42 +514,120 @@ void Transaction::commit(CommitOptions options) {
     // Store change
     state_.append_local_change(std::move(change));
     rollback_state_->finish_commit();
+    return {};
 }
 
 // =============================================================================
 // Read methods (lock-free, safe within transact's exclusive lock)
 // =============================================================================
 
-auto Transaction::get(const ObjId& obj, std::string_view key) const -> std::optional<Value> {
+auto Transaction::get(const ObjId& obj, std::string_view key) const
+    -> std::expected<std::optional<Value>, Error> {
+    const auto active = validate_active();
+    if (!active) {
+        return std::unexpected{active.error()};
+    }
+    const auto object = validate_object(obj, {ObjType::map, ObjType::table});
+    if (!object) {
+        return std::unexpected{object.error()};
+    }
+    const auto valid_key = validate_key(key);
+    if (!valid_key) {
+        return std::unexpected{valid_key.error()};
+    }
     return state_.map_get(obj, std::string{key});
 }
 
-auto Transaction::get(const ObjId& obj, std::size_t index) const -> std::optional<Value> {
-    return state_.list_get(obj, index);
+auto Transaction::get(const ObjId& obj, std::size_t index) const -> std::expected<Value, Error> {
+    const auto active = validate_active();
+    if (!active) {
+        return std::unexpected{active.error()};
+    }
+    const auto valid_index = validate_index(obj, index, false);
+    if (!valid_index) {
+        return std::unexpected{valid_index.error()};
+    }
+    return *state_.list_get(obj, index);
 }
 
-auto Transaction::object_type(const ObjId& obj) const -> std::optional<ObjType> {
-    return state_.object_type(obj);
+auto Transaction::object_type(const ObjId& obj) const -> std::expected<ObjType, Error> {
+    const auto active = validate_active();
+    if (!active) {
+        return std::unexpected{active.error()};
+    }
+    const auto* object = state_.get_object(obj);
+    if (!object) {
+        return std::unexpected{
+            Error{ErrorKind::invalid_obj_id, "object identifier does not exist"}};
+    }
+    return object->type;
 }
 
-auto Transaction::get_obj_id(const ObjId& obj, std::string_view key) const -> std::optional<ObjId> {
+auto Transaction::get_obj_id(const ObjId& obj, std::string_view key) const
+    -> std::expected<std::optional<ObjId>, Error> {
+    const auto active = validate_active();
+    if (!active) {
+        return std::unexpected{active.error()};
+    }
+    const auto object = validate_object(obj, {ObjType::map, ObjType::table});
+    if (!object) {
+        return std::unexpected{object.error()};
+    }
+    const auto valid_key = validate_key(key);
+    if (!valid_key) {
+        return std::unexpected{valid_key.error()};
+    }
     return state_.get_obj_id_for_key(obj, std::string{key});
 }
 
-auto Transaction::get_obj_id(const ObjId& obj, std::size_t index) const -> std::optional<ObjId> {
+auto Transaction::get_obj_id(const ObjId& obj, std::size_t index) const
+    -> std::expected<std::optional<ObjId>, Error> {
+    const auto active = validate_active();
+    if (!active) {
+        return std::unexpected{active.error()};
+    }
+    const auto valid_index = validate_index(obj, index, false);
+    if (!valid_index) {
+        return std::unexpected{valid_index.error()};
+    }
     return state_.get_obj_id_for_index(obj, index);
 }
 
-auto Transaction::length(const ObjId& obj) const -> std::size_t {
+auto Transaction::length(const ObjId& obj) const -> std::expected<std::size_t, Error> {
+    const auto active = validate_active();
+    if (!active) {
+        return std::unexpected{active.error()};
+    }
+    const auto* object = state_.get_object(obj);
+    if (!object) {
+        return std::unexpected{
+            Error{ErrorKind::invalid_obj_id, "object identifier does not exist"}};
+    }
     return state_.object_length(obj);
 }
 
-auto Transaction::keys(const ObjId& obj) const -> std::vector<std::string> {
+auto Transaction::keys(const ObjId& obj) const -> std::expected<std::vector<std::string>, Error> {
+    const auto active = validate_active();
+    if (!active) {
+        return std::unexpected{active.error()};
+    }
+    const auto object = validate_object(obj, {ObjType::map, ObjType::table});
+    if (!object) {
+        return std::unexpected{object.error()};
+    }
     return state_.map_keys(obj);
 }
 
-auto Transaction::text(const ObjId& obj) const -> std::string {
+auto Transaction::text(const ObjId& obj) const -> std::expected<std::string, Error> {
+    const auto active = validate_active();
+    if (!active) {
+        return std::unexpected{active.error()};
+    }
+    const auto object = validate_object(obj, {ObjType::text});
+    if (!object) {
+        return std::unexpected{object.error()};
+    }
     return state_.text_content(obj);
 }
 
-}  // namespace automerge_cpp
+} // namespace automerge_cpp

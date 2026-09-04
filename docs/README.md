@@ -5,6 +5,7 @@ One file per subject. A page says what exists, why, how to verify it, and how to
 | Page | Subject |
 |---|---|
 | [`api.md`](api.md) | Public API reference: `Automerge`, transactions, values, save and load, sync |
+| [`errors.md`](errors.md) | Public failure model, error kinds, and operation return types |
 | [`style.md`](style.md) | Code style for this repository |
 | [`json-integration.md`](json-integration.md) | Converting between documents and JSON |
 | [`benchmark-results.md`](benchmark-results.md) | Benchmark results (macOS) |

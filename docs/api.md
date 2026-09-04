@@ -64,17 +64,17 @@ doc.transact([](auto& tx) {
 });
 
 // Return-value transaction — lambda return type is deduced
-auto list_id = doc.transact([](Transaction& tx) {
+auto list_id = *doc.transact([](Transaction& tx) {
     return tx.put_object(root, "items", ObjType::list);
 });
 
 // Return-value transaction with patches
-auto [obj_id, patches] = doc.transact_with_patches([](Transaction& tx) {
+auto [obj_id, patches] = *doc.transact_with_patches([](Transaction& tx) {
     return tx.put_object(root, "data", ObjType::map);
 });
 
 // Void transaction with patches
-auto patches = doc.transact_with_patches([](auto& tx) {
+auto patches = *doc.transact_with_patches([](auto& tx) {
     tx.put(root, "x", 42);
 });
 
@@ -91,19 +91,29 @@ doc.transact(
 
 ```cpp
 // Signatures
-void transact(const std::function<void(Transaction&)>& fn, CommitOptions options = {});
+auto transact(const std::function<void(Transaction&)>& fn, CommitOptions options = {})
+    -> std::expected<void, Error>;
 
 template <typename Fn>
-auto transact(Fn&& fn, CommitOptions options = {}) -> std::invoke_result_t<Fn, Transaction&>;
+auto transact(Fn&& fn, CommitOptions options = {}) -> std::expected<T, Error>;
 template <typename Fn>
-void transact(Fn&& fn, CommitOptions options = {});  // void-returning template overload
+auto transact(Fn&& fn, CommitOptions options = {}) -> std::expected<void, Error>;
 
 auto transact_with_patches(const std::function<void(Transaction&)>& fn,
-                           CommitOptions options = {}) -> std::vector<Patch>;
+                           CommitOptions options = {})
+    -> std::expected<std::vector<Patch>, Error>;
 template <typename Fn>
 auto transact_with_patches(Fn&& fn, CommitOptions options = {})
-    -> std::pair<std::invoke_result_t<Fn, Transaction&>, std::vector<Patch>>;
+    -> std::expected<std::pair<T, std::vector<Patch>>, Error>;
 ```
+
+When a callable returns `std::expected<T, Error>`, the runner flattens that result instead of
+nesting it. A returned error rolls back all operations performed by the callable. For
+`transact_with_patches`, an `expected<void, Error>` callable produces the same
+`expected<vector<Patch>, Error>` shape as a void callable.
+
+Read document state before entering the callback, or use the transaction's read operations inside
+it. Calling a `Document` read from the callback tries to acquire the document lock recursively.
 
 `CommitOptions::message` is an optional human-readable string. `CommitOptions::time` is an
 optional signed count of milliseconds since the Unix epoch. On commit, `time` becomes
@@ -114,20 +124,20 @@ part of the encoded change body and therefore affect its hash.
 ### Reading — Maps
 
 ```cpp
-doc.get(ObjId, std::string_view key)       -> std::optional<Value>
-doc.get_all(ObjId, std::string_view key)   -> std::vector<Value>   // all conflict values
+doc.get(ObjId, std::string_view key) -> std::expected<std::optional<Value>, Error>
+doc.get_all(ObjId, std::string_view key) -> std::expected<std::vector<Value>, Error>
 ```
 
 ### Reading — Lists
 
 ```cpp
-doc.get(ObjId, std::size_t index)          -> std::optional<Value>
+doc.get(ObjId, std::size_t index) -> std::expected<std::optional<Value>, Error>
 ```
 
 ### Typed get\<T\>()
 
 Like [nlohmann/json's `get<T>()`](https://json.nlohmann.me/api/basic_json/get/),
-returns `optional<T>` directly with no variant unwrapping:
+returns `expected<optional<T>, Error>` with no variant unwrapping:
 
 ```cpp
 auto name  = doc.get<std::string>(root, "name");       // optional<string>
@@ -141,12 +151,15 @@ auto ts    = doc.get<Timestamp>(root, "created");        // optional<Timestamp>
 auto item  = doc.get<std::string>(list_id, std::size_t{0});
 ```
 
-Returns `nullopt` if the key/index doesn't exist **or** if the value is a different type.
+Map keys that do not exist and scalar type mismatches return `nullopt`. An invalid object, wrong
+object type, invalid UTF-8 key, or out-of-range list index returns an `Error`.
 
 ```cpp
 // Signatures
-template <typename T> auto get(const ObjId&, std::string_view) const -> std::optional<T>;
-template <typename T> auto get(const ObjId&, std::size_t) const -> std::optional<T>;
+template <typename T>
+auto get(const ObjId&, std::string_view) const -> std::expected<std::optional<T>, Error>;
+template <typename T>
+auto get(const ObjId&, std::size_t) const -> std::expected<std::optional<T>, Error>;
 ```
 
 ### operator[]
@@ -158,7 +171,7 @@ auto val = doc["key"];   // equivalent to doc.get(root, "key")
 ```
 
 ```cpp
-auto operator[](std::string_view key) const -> std::optional<Value>;
+auto operator[](std::string_view key) const -> std::expected<std::optional<Value>, Error>;
 ```
 
 ### get_path()
@@ -171,35 +184,36 @@ auto title = doc.get_path("todos", std::size_t{0}, "title");
 auto deep  = doc.get_path("a", "b", "c", "d");
 ```
 
-Returns `nullopt` if any intermediate path element doesn't exist or isn't an object.
+Returns `nullopt` if a map path element does not exist. Wrong object and scalar types, invalid
+UTF-8 keys, and out-of-range list indices return an `Error`.
 
 ```cpp
 template <typename... Props> requires (sizeof...(Props) > 0)
-auto get_path(Props&&... props) const -> std::optional<Value>;
+auto get_path(Props&&... props) const -> std::expected<std::optional<Value>, Error>;
 ```
 
 ### Reading — Ranges
 
 ```cpp
-doc.keys(ObjId)       -> std::vector<std::string>   // sorted map keys
-doc.values(ObjId)     -> std::vector<Value>          // values in key/index order
-doc.length(ObjId)     -> std::size_t                 // # of entries/elements/scalar values
+doc.keys(ObjId) -> std::expected<std::vector<std::string>, Error>
+doc.values(ObjId) -> std::expected<std::vector<Value>, Error>
+doc.length(ObjId) -> std::expected<std::size_t, Error>
 ```
 
 ### Reading — Text
 
 ```cpp
-doc.text(ObjId)       -> std::string                 // concatenated text content
+doc.text(ObjId) -> std::expected<std::string, Error>
 ```
 
 Text content is UTF-8. Text-object indices and `doc.length(text_obj)` count Unicode scalar values,
-matching automerge-rs `TextEncoding::UnicodeCodePoint`. `doc.text(text_obj).size()` is the UTF-8
-byte count because `std::string::size()` counts bytes.
+matching automerge-rs `TextEncoding::UnicodeCodePoint`. On success, the returned string's
+`size()` is the UTF-8 byte count.
 
 ### Object Queries
 
 ```cpp
-doc.object_type(ObjId) -> std::optional<ObjType>     // map, list, text, table
+doc.object_type(ObjId) -> std::expected<ObjType, Error>
 ```
 
 ### Fork and Merge
@@ -209,7 +223,7 @@ doc.fork()                                  -> Document              // deep cop
 doc.merge(const Document&)                  -> std::expected<void, Error>
 doc.merge_with_patches(const Document&)     -> std::expected<std::vector<Patch>, Error>
 doc.get_changes()                           -> std::vector<Change>   // full change history
-doc.get_changes_since(std::vector<ChangeHash>) -> std::vector<Change>
+doc.get_changes_since(std::vector<ChangeHash>) -> std::expected<std::vector<Change>, Error>
 doc.get_changes_added(const Document&)      -> std::vector<Change>   // changes in the argument
 doc.get_last_local_change()                 -> std::optional<Change>
 doc.apply_changes(std::vector<Change>)      -> std::expected<void, Error>
@@ -226,8 +240,8 @@ doc.save()                                  -> std::vector<std::byte>
 doc.save_compact()                          -> std::vector<std::byte>
 doc.save_incremental()                      -> std::vector<std::byte>
 doc.load_incremental(std::span<const std::byte>) -> std::expected<std::size_t, Error>
-Document::load(std::span<const std::byte>)  -> std::optional<Document>
-Document::load_shallow(std::span<const std::byte>) -> std::optional<Document>
+Document::load(std::span<const std::byte>) -> std::expected<Document, Error>
+Document::load_shallow(std::span<const std::byte>) -> std::expected<Document, Error>
 Document::load_with_patches(std::span<const std::byte>, Document& output)
                                               -> std::expected<std::vector<Patch>, Error>
 ```
@@ -242,25 +256,25 @@ doc.receive_sync_message_with_patches(SyncState&, const SyncMessage&)
 SyncMessage::encode()                       -> std::vector<std::byte>
 SyncMessage::decode(std::span<const std::byte>) -> std::expected<SyncMessage, Error>
 SyncState::encode()                         -> std::vector<std::byte>
-SyncState::decode(std::span<const std::byte>) -> std::optional<SyncState>
+SyncState::decode(std::span<const std::byte>) -> std::expected<SyncState, Error>
 ```
 
 ### Historical Reads — Time Travel
 
 ```cpp
-doc.get_at(ObjId, std::string_view key, const std::vector<ChangeHash>& heads) -> std::optional<Value>
-doc.get_at(ObjId, std::size_t index, const std::vector<ChangeHash>& heads)    -> std::optional<Value>
-doc.keys_at(ObjId, heads)    -> std::vector<std::string>
-doc.values_at(ObjId, heads)  -> std::vector<Value>
-doc.length_at(ObjId, heads)  -> std::size_t
-doc.text_at(ObjId, heads)    -> std::string
+doc.get_at(ObjId, key, heads) -> std::expected<std::optional<Value>, Error>
+doc.get_at(ObjId, index, heads) -> std::expected<std::optional<Value>, Error>
+doc.keys_at(ObjId, heads) -> std::expected<std::vector<std::string>, Error>
+doc.values_at(ObjId, heads) -> std::expected<std::vector<Value>, Error>
+doc.length_at(ObjId, heads) -> std::expected<std::size_t, Error>
+doc.text_at(ObjId, heads) -> std::expected<std::string, Error>
 ```
 
 ### Cursors — Stable Positions
 
 ```cpp
-doc.cursor(ObjId, std::size_t index)           -> std::optional<Cursor>
-doc.resolve_cursor(ObjId, const Cursor&)       -> std::optional<std::size_t>
+doc.cursor(ObjId, std::size_t index) -> std::expected<Cursor, Error>
+doc.resolve_cursor(ObjId, const Cursor&) -> std::expected<std::optional<std::size_t>, Error>
 ```
 
 Cursor indices count list elements for lists and Unicode scalar values for text objects.
@@ -268,8 +282,8 @@ Cursor indices count list elements for lists and Unicode scalar values for text 
 ### Rich Text Marks
 
 ```cpp
-doc.marks(ObjId)                               -> std::vector<Mark>
-doc.marks_at(ObjId, const std::vector<ChangeHash>&) -> std::vector<Mark>
+doc.marks(ObjId) -> std::expected<std::vector<Mark>, Error>
+doc.marks_at(ObjId, const std::vector<ChangeHash>&) -> std::expected<std::vector<Mark>, Error>
 ```
 
 Mark start and end indices count list elements for lists and Unicode scalar values for text.
@@ -307,7 +321,8 @@ Created internally by `Document::transact()`. Provides all mutation operations.
 
 `transact()` commits only when its callable returns successfully. If the callable throws,
 the document is restored and the exception is rethrown. `Transaction::rollback()` may be
-called explicitly to discard its writes; it is idempotent and prevents a later commit.
+called explicitly to discard its writes and prevents a later commit. Reusing a committed or
+rolled-back transaction returns `ErrorKind::inactive_transaction`.
 Reads through the transaction observe its writes before commit.
 
 ```cpp
@@ -328,12 +343,12 @@ For the implementation design and benchmark measurements, see
 ### Map Operations
 
 ```cpp
-tx.put(ObjId, std::string_view key, ScalarValue val)  -> void
-tx.put(ObjId, std::string_view key, ObjType type)     -> ObjId   // create empty object
-tx.put(ObjId, std::string_view key, List{...})         -> ObjId   // create populated list
-tx.put(ObjId, std::string_view key, Map{...})          -> ObjId   // create populated map
-tx.put_object(ObjId, std::string_view key, ObjType)    -> ObjId   // alias for put(ObjType)
-tx.delete_key(ObjId, std::string_view key)             -> void
+tx.put(ObjId, std::string_view key, ScalarValue val) -> std::expected<void, Error>
+tx.put(ObjId, std::string_view key, ObjType type) -> std::expected<ObjId, Error>
+tx.put(ObjId, std::string_view key, List{...}) -> std::expected<ObjId, Error>
+tx.put(ObjId, std::string_view key, Map{...}) -> std::expected<ObjId, Error>
+tx.put_object(ObjId, std::string_view key, ObjType) -> std::expected<ObjId, Error>
+tx.delete_key(ObjId, std::string_view key) -> std::expected<void, Error>
 ```
 
 ### Scalar Convenience Overloads (Map)
@@ -357,13 +372,13 @@ tx.put(root, "created", Timestamp{1700000000000}); // Timestamp
 ### List Operations
 
 ```cpp
-tx.insert(ObjId, std::size_t index, ScalarValue val)   -> void
-tx.insert(ObjId, std::size_t index, ObjType type)      -> ObjId   // create empty object
-tx.insert(ObjId, std::size_t index, List{...})          -> ObjId   // create populated list
-tx.insert(ObjId, std::size_t index, Map{...})           -> ObjId   // create populated map
-tx.insert_object(ObjId, std::size_t index, ObjType)     -> ObjId   // alias for insert(ObjType)
-tx.set(ObjId, std::size_t index, ScalarValue val)       -> void
-tx.delete_index(ObjId, std::size_t index)               -> void
+tx.insert(ObjId, std::size_t index, ScalarValue val) -> std::expected<void, Error>
+tx.insert(ObjId, std::size_t index, ObjType type) -> std::expected<ObjId, Error>
+tx.insert(ObjId, std::size_t index, List{...}) -> std::expected<ObjId, Error>
+tx.insert(ObjId, std::size_t index, Map{...}) -> std::expected<ObjId, Error>
+tx.insert_object(ObjId, std::size_t index, ObjType) -> std::expected<ObjId, Error>
+tx.set(ObjId, std::size_t index, ScalarValue val) -> std::expected<void, Error>
+tx.delete_index(ObjId, std::size_t index) -> std::expected<void, Error>
 ```
 
 ### Scalar Convenience Overloads (List)
@@ -390,16 +405,16 @@ key-value pairs `{{"k", v}, ...}` create a map.
 
 ```cpp
 // Bare initializer lists (auto-detect list vs map)
-tx.put(ObjId, key, {values...})            -> ObjId   // creates list
-tx.put(ObjId, key, {{"k1",v1}, {"k2",v2}}) -> ObjId   // creates map
-tx.insert(ObjId, idx, {values...})          -> ObjId   // creates list in list
-tx.insert(ObjId, idx, {{"k1",v1}, ...})     -> ObjId   // creates map in list
+tx.put(ObjId, key, {values...}) -> std::expected<ObjId, Error>
+tx.put(ObjId, key, {{"k1",v1}, {"k2",v2}}) -> std::expected<ObjId, Error>
+tx.insert(ObjId, idx, {values...}) -> std::expected<ObjId, Error>
+tx.insert(ObjId, idx, {{"k1",v1}, ...}) -> std::expected<ObjId, Error>
 
 // Explicit wrappers (List{}, Map{})
-tx.put(ObjId, key, List{values...})         -> ObjId
-tx.put(ObjId, key, Map{{"k1",v1}, ...})     -> ObjId
-tx.insert(ObjId, idx, List{values...})      -> ObjId
-tx.insert(ObjId, idx, Map{{"k1",v1}, ...})  -> ObjId
+tx.put(ObjId, key, List{values...}) -> std::expected<ObjId, Error>
+tx.put(ObjId, key, Map{{"k1",v1}, ...}) -> std::expected<ObjId, Error>
+tx.insert(ObjId, idx, List{values...}) -> std::expected<ObjId, Error>
+tx.insert(ObjId, idx, Map{{"k1",v1}, ...}) -> std::expected<ObjId, Error>
 ```
 
 #### Examples
@@ -407,22 +422,22 @@ tx.insert(ObjId, idx, Map{{"k1",v1}, ...})  -> ObjId
 ```cpp
 doc.transact([](auto& tx) {
     // Bare initializer lists — auto-detects list vs map
-    auto items = tx.put(root, "items", {"Milk", "Eggs", "Bread"});
-    auto config = tx.put(root, "config", {{"port", 8080}, {"host", "localhost"}});
+    auto items = *tx.put(root, "items", {"Milk", "Eggs", "Bread"});
+    auto config = *tx.put(root, "config", {{"port", 8080}, {"host", "localhost"}});
 
     // Explicit wrappers work too
-    auto tags = tx.put(root, "tags", List{"crdt", "cpp"});
-    auto meta = tx.put(root, "meta", Map{{"version", "1.0"}});
+    auto tags = *tx.put(root, "tags", List{"crdt", "cpp"});
+    auto meta = *tx.put(root, "meta", Map{{"version", "1.0"}});
 
     // Mixed types — int, string, double, bool
-    auto mixed = tx.put(root, "data", List{1, "hello", 3.14, true});
+    auto mixed = *tx.put(root, "data", List{1, "hello", 3.14, true});
 
     // Empty containers
-    auto empty_list = tx.put(root, "log", List{});
-    auto empty_map = tx.put(root, "meta", Map{});
+    auto empty_list = *tx.put(root, "log", List{});
+    auto empty_map = *tx.put(root, "meta", Map{});
 
     // Insert populated objects into lists
-    auto records = tx.put(root, "users", ObjType::list);
+    auto records = *tx.put(root, "users", ObjType::list);
     tx.insert(records, 0, {{"name", "Alice"}, {"role", "admin"}});
     tx.insert(records, 1, {{"name", "Bob"}, {"role", "editor"}});
 });
@@ -439,13 +454,13 @@ associative containers create maps. Uses `std::ranges::for_each` and
 ```cpp
 // Any range (vector, set, deque, etc.) → creates list
 template <std::ranges::input_range R>
-tx.put(ObjId, key, R&& range)              -> ObjId
-tx.insert(ObjId, idx, R&& range)           -> ObjId
+tx.put(ObjId, key, R&& range) -> std::expected<ObjId, Error>
+tx.insert(ObjId, idx, R&& range) -> std::expected<ObjId, Error>
 
 // Any associative container (map, unordered_map) → creates map
 template <typename AssocContainer>  // requires mapped_type
-tx.put(ObjId, key, const AssocContainer&)   -> ObjId
-tx.insert(ObjId, idx, const AssocContainer&) -> ObjId
+tx.put(ObjId, key, const AssocContainer&) -> std::expected<ObjId, Error>
+tx.insert(ObjId, idx, const AssocContainer&) -> std::expected<ObjId, Error>
 ```
 
 #### Examples
@@ -534,21 +549,33 @@ tx.splice_text(ObjId, std::size_t pos, std::size_t del,
 ```
 
 `pos` and `del` count Unicode scalar values. Inserted text must be valid UTF-8; invalid input
-returns `ErrorKind::invalid_operation` before the text object is changed. Each inserted scalar
+returns `ErrorKind::invalid_utf8` before the text object is changed. Each inserted scalar
 value produces one operation. A grapheme cluster can contain multiple scalar values and may be
 split by local or concurrent edits, matching upstream Automerge behavior.
 
 ### Counter Operations
 
 ```cpp
-tx.increment(ObjId, std::string_view key, std::int64_t delta) -> void
+tx.increment(ObjId, std::string_view key, std::int64_t delta) -> std::expected<void, Error>
 ```
 
 ### Mark Operations (Rich Text)
 
 ```cpp
 tx.mark(ObjId, std::size_t start, std::size_t end,
-        std::string_view name, ScalarValue value) -> void
+        std::string_view name, ScalarValue value) -> std::expected<void, Error>
+```
+
+Transaction reads validate their object before reporting normal absence:
+
+```cpp
+tx.get(ObjId, key) -> std::expected<std::optional<Value>, Error>
+tx.get(ObjId, index) -> std::expected<Value, Error>
+tx.get_obj_id(ObjId, key_or_index) -> std::expected<std::optional<ObjId>, Error>
+tx.object_type(ObjId) -> std::expected<ObjType, Error>
+tx.length(ObjId) -> std::expected<std::size_t, Error>
+tx.keys(ObjId) -> std::expected<std::vector<std::string>, Error>
+tx.text(ObjId) -> std::expected<std::string, Error>
 ```
 
 ---
@@ -971,8 +998,8 @@ auto keys = doc.keys(am::root);                         // {"active", "age", "na
 
 ```cpp
 auto doc = am::Document{};
-auto list_id = doc.transact([](am::Transaction& tx) {
-    auto list = tx.put_object(am::root, "items", am::ObjType::list);
+auto list_id = *doc.transact([](am::Transaction& tx) {
+    auto list = *tx.put_object(am::root, "items", am::ObjType::list);
     tx.insert(list, 0, "Milk");
     tx.insert(list, 1, "Eggs");
     return list;
@@ -989,8 +1016,8 @@ doc.get_path("items", std::size_t{0});          // Value{"Milk"}
 
 ```cpp
 auto doc = am::Document{};
-auto text_id = doc.transact([](am::Transaction& tx) {
-    auto t = tx.put_object(am::root, "content", am::ObjType::text);
+auto text_id = *doc.transact([](am::Transaction& tx) {
+    auto t = *tx.put_object(am::root, "content", am::ObjType::text);
     tx.splice_text(t, 0, 0, "Hello World");
     return t;
 });
@@ -1096,7 +1123,7 @@ for (int i = 0; i < 10; ++i) {
 ### Patches
 
 ```cpp
-auto patches = doc.transact_with_patches([&](auto& tx) {
+auto patches = *doc.transact_with_patches([&](auto& tx) {
     tx.put(am::root, "name", "Alice");
     tx.splice_text(text_id, 5, 6, " C++23");
 });
@@ -1156,8 +1183,8 @@ auto idx = doc.resolve_cursor(list_id, *cur);
 ### Rich Text Marks
 
 ```cpp
-auto text_id = doc.transact([](am::Transaction& tx) {
-    auto t = tx.put_object(am::root, "content", am::ObjType::text);
+auto text_id = *doc.transact([](am::Transaction& tx) {
+    auto t = *tx.put_object(am::root, "content", am::ObjType::text);
     tx.splice_text(t, 0, 0, "Hello World");
     return t;
 });
@@ -1211,9 +1238,9 @@ nlohmann::json patch_j = patches;                      // vector<Patch> → JSON
 
 ```cpp
 // Export the full document (or subtree) as JSON
-auto j = am::json::export_json(doc);                        // full document
-auto j = am::json::export_json(doc, config_id);             // subtree
-auto j = am::json::export_json_at(doc, heads);              // historical
+auto j = *am::json::export_json(doc);                        // full document
+auto j = *am::json::export_json(doc, config_id);             // subtree
+auto j = *am::json::export_json_at(doc, heads);              // historical
 
 // Import JSON into a document
 am::json::import_json(doc, json{{"name", "Alice"}, {"age", 30}});
@@ -1227,27 +1254,32 @@ doc.transact([&](am::Transaction& tx) {
 auto input = json{{"a", 1}, {"b", {{"c", 2}}}};
 auto doc = am::Document{};
 am::json::import_json(doc, input);
-assert(am::json::export_json(doc) == input);
+assert(*am::json::export_json(doc) == input);
 ```
+
+These document-facing JSON functions return `std::expected<..., Error>`. Invalid object IDs,
+historical heads, pointers, patch documents, target types, keys, values, and indices are reported
+without throwing. Mutating document overloads apply atomically and leave the document unchanged
+when they return an error.
 
 ### Child Object Lookup
 
 ```cpp
 auto child = doc.get_obj_id(am::root, "config");       // map key
 auto elem  = doc.get_obj_id(list_id, std::size_t{0});  // list index
-// Returns nullopt if key/index doesn't exist or value isn't an object
+// Missing map keys and scalar values return nullopt; invalid indices return an Error
 ```
 
 ### JSON Pointer (RFC 6901)
 
 ```cpp
-auto val = am::json::get_pointer(doc, "/config/port");     // get nested value
+auto val = *am::json::get_pointer(doc, "/config/port");     // get nested value
 am::json::put_pointer(doc, "/config/timeout", am::ScalarValue{std::int64_t{30}});
 am::json::delete_pointer(doc, "/config/debug");
 
 // Escaped characters: ~0 = ~, ~1 = /
-auto val = am::json::get_pointer(doc, "/a~1b");            // key "a/b"
-auto val = am::json::get_pointer(doc, "/c~0d");            // key "c~d"
+auto val = *am::json::get_pointer(doc, "/a~1b");            // key "a/b"
+auto val = *am::json::get_pointer(doc, "/c~0d");            // key "c~d"
 
 // List append with "-"
 am::json::put_pointer(doc, "/items/-", am::ScalarValue{std::string{"new"}});
@@ -1266,7 +1298,7 @@ am::json::apply_json_patch(doc, json::parse(R"([
 ])"));
 
 // Generate a diff between two documents
-auto patch = am::json::diff_json_patch(doc_before, doc_after);
+auto patch = *am::json::diff_json_patch(doc_before, doc_after);
 ```
 
 ### JSON Merge Patch (RFC 7386)
@@ -1278,13 +1310,13 @@ am::json::apply_merge_patch(doc, json{
     {"config", {{"port", 9090}}},  // recursive merge
 });
 
-auto patch = am::json::generate_merge_patch(doc_before, doc_after);
+auto patch = *am::json::generate_merge_patch(doc_before, doc_after);
 ```
 
 ### Flatten / Unflatten
 
 ```cpp
-auto flat = am::json::flatten(doc);
+auto flat = *am::json::flatten(doc);
 // {"/name": "Alice", "/config/port": 8080, "/items/0": "Milk", ...}
 
 am::json::unflatten(doc, flat);  // recreate nested structure from flat map
