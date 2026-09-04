@@ -7,7 +7,7 @@
 #include <automerge-cpp/types.hpp>
 #include <automerge-cpp/value.hpp>
 
-#include "crypto/sha256.hpp"
+#include "storage/change_chunk.hpp"
 
 #include <algorithm>
 #include <cassert>
@@ -831,47 +831,14 @@ struct DocState {
         return std::nullopt;
     }
 
-    // -- Change hash computation (SHA-256 based) --------------------------------
+    // -- Change hash computation (SHA-256 based) ---------------------------
 
     static auto compute_change_hash(const Change& change) -> ChangeHash {
-        // Build a deterministic byte representation of the change
-        // Size: 16 (actor) + 8 (seq) + 8 (start_op) + 8 (ts) + 8 (num_ops) + deps*32
-        auto input = std::vector<std::byte>{};
-        input.reserve(48 + change.deps.size() * 32);
-
-        // Actor ID
-        input.insert(input.end(), change.actor.bytes.begin(), change.actor.bytes.end());
-
-        // Seq (little-endian 8 bytes)
-        for (int i = 0; i < 8; ++i) {
-            input.push_back(static_cast<std::byte>(change.seq >> (i * 8)));
-        }
-
-        // Start op
-        for (int i = 0; i < 8; ++i) {
-            input.push_back(static_cast<std::byte>(change.start_op >> (i * 8)));
-        }
-
-        // Timestamp
-        auto ts = static_cast<std::uint64_t>(change.timestamp);
-        for (int i = 0; i < 8; ++i) {
-            input.push_back(static_cast<std::byte>(ts >> (i * 8)));
-        }
-
-        // Number of operations
-        auto num_ops = static_cast<std::uint64_t>(change.operations.size());
-        for (int i = 0; i < 8; ++i) {
-            input.push_back(static_cast<std::byte>(num_ops >> (i * 8)));
-        }
-
-        // Dependency hashes
-        for (const auto& dep : change.deps) {
-            input.insert(input.end(), dep.bytes.begin(), dep.bytes.end());
-        }
-
-        auto digest = crypto::sha256(input);
+        const auto body = storage::serialize_change_body(change);
+        const auto digest =
+            storage::compute_change_hash_from_chunk(storage::ChunkType::change, body);
         ChangeHash result{};
-        std::memcpy(result.bytes.data(), digest.data(), 32);
+        std::memcpy(result.bytes.data(), digest.data(), result.bytes.size());
         return result;
     }
 };

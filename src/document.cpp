@@ -442,70 +442,19 @@ auto Document::get_missing_deps(const std::vector<ChangeHash>& heads) const
 
 // -- Phase 4: Binary Serialization --------------------------------------------
 
-// Format: Magic(4) + Version(1) + ActorTable + Changes + Heads + LocalState
-
-static constexpr std::uint8_t MAGIC[] = {0x85, 0x6F, 0x4A, 0x83};
-static constexpr std::uint8_t FORMAT_VERSION = 0x01;
-
 auto Document::save() const -> std::vector<std::byte> {
     auto guard = read_guard();
-    const auto& actor_table = state_->actor_table();
-
-    // Build document body (pre-size: actor table + heads + ~256 bytes per change)
-    auto body = std::vector<std::byte>{};
-    body.reserve(128 + actor_table.size() * 20 + state_->heads.size() * 32
-                 + state_->change_history.size() * 256);
-
-    // Actor table: count + length-prefixed actors
-    encoding::encode_uleb128(actor_table.size(), body);
-    for (const auto& actor : actor_table) {
-        encoding::encode_uleb128(ActorId::size, body);
-        body.insert(body.end(), actor.bytes.begin(), actor.bytes.end());
-    }
-
-    // Heads
-    encoding::encode_uleb128(state_->heads.size(), body);
-    for (const auto& h : state_->heads) {
-        body.insert(body.end(), h.bytes.begin(), h.bytes.end());
-    }
-
-    // Change count
-    encoding::encode_uleb128(state_->change_history.size(), body);
-
-    // Change bodies (each as a sub-blob)
-    for (const auto& change : state_->change_history) {
-        auto change_body = storage::serialize_change_body(change, actor_table);
-        encoding::encode_uleb128(change_body.size(), body);
-        body.insert(body.end(), change_body.begin(), change_body.end());
-    }
-
-    // Local metadata: actor index + next_counter + local_seq + clock
-    auto local_actor_idx = std::uint64_t{0};
-    for (std::size_t i = 0; i < actor_table.size(); ++i) {
-        if (actor_table[i] == state_->actor) {
-            local_actor_idx = static_cast<std::uint64_t>(i);
-            break;
-        }
-    }
-    encoding::encode_uleb128(local_actor_idx, body);
-    encoding::encode_uleb128(state_->next_counter, body);
-    encoding::encode_uleb128(state_->local_seq, body);
-
-    // Clock
-    encoding::encode_uleb128(state_->clock.size(), body);
-    for (const auto& [actor, seq] : state_->clock) {
-        for (std::size_t i = 0; i < actor_table.size(); ++i) {
-            if (actor_table[i] == actor) {
-                encoding::encode_uleb128(i, body);
-                break;
-            }
-        }
-        encoding::encode_uleb128(seq, body);
-    }
-
-    // Write as a document chunk
     auto output = std::vector<std::byte>{};
-    storage::write_chunk(storage::ChunkType::document, body, output);
+    for (const auto& change : state_->change_history) {
+        const auto chunk = storage::serialize_change_chunk(change);
+        output.insert(output.end(), chunk.begin(), chunk.end());
+    }
+
+    if (output.empty()) {
+        auto body = std::vector<std::byte>{std::byte{0x43}};
+        body.insert(body.end(), state_->actor.bytes.begin(), state_->actor.bytes.end());
+        storage::write_chunk(storage::ChunkType::document, body, output);
+    }
     return output;
 }
 
@@ -519,277 +468,79 @@ struct ParsedDocData {
     std::map<ActorId, std::uint64_t> clock;
 };
 
-static auto parse_v1(std::span<const std::byte> data) -> std::optional<ParsedDocData> {
-    auto d = storage::Deserializer{data};
+static auto parse_empty_document(std::span<const std::byte> data) -> std::optional<ParsedDocData> {
+    const auto header = storage::parse_chunk_header(data);
+    if (!header || header->type != storage::ChunkType::document)
+        return std::nullopt;
+    if (!storage::validate_chunk_checksum(*header, data))
+        return std::nullopt;
+    if (header->body_offset + header->body_length != data.size())
+        return std::nullopt;
 
-    // Skip magic (already verified) + version byte
-    d.read_bytes(4);
-    d.read_u8();
-
-    // Actor table
-    auto num_actors = d.read_uleb128();
-    if (!num_actors) return std::nullopt;
-    auto actor_table = std::vector<ActorId>{};
-    actor_table.reserve(static_cast<std::size_t>(*num_actors));
-    for (std::uint64_t i = 0; i < *num_actors; ++i) {
-        auto actor = d.read_actor_id();
-        if (!actor) return std::nullopt;
-        actor_table.push_back(*actor);
+    const auto body = data.subspan(header->body_offset, header->body_length);
+    if (body.size() != ActorId::size + 1 || body.front() != std::byte{0x43}) {
+        return std::nullopt;
     }
 
-    auto actor_idx = d.read_uleb128();
-    if (!actor_idx || *actor_idx >= actor_table.size()) return std::nullopt;
-
-    auto next_counter = d.read_uleb128();
-    if (!next_counter) return std::nullopt;
-    auto local_seq = d.read_uleb128();
-    if (!local_seq) return std::nullopt;
-
-    auto num_changes = d.read_uleb128();
-    if (!num_changes) return std::nullopt;
-
-    auto changes = std::vector<Change>{};
-    changes.reserve(static_cast<std::size_t>(*num_changes));
-
-    for (std::uint64_t ci = 0; ci < *num_changes; ++ci) {
-        auto change_actor_idx = d.read_uleb128();
-        if (!change_actor_idx || *change_actor_idx >= actor_table.size()) return std::nullopt;
-
-        auto seq = d.read_uleb128();
-        if (!seq) return std::nullopt;
-        auto start_op = d.read_uleb128();
-        if (!start_op) return std::nullopt;
-        auto timestamp = d.read_sleb128();
-        if (!timestamp) return std::nullopt;
-
-        auto has_msg = d.read_u8();
-        if (!has_msg) return std::nullopt;
-        auto message = std::optional<std::string>{};
-        if (*has_msg == 1) {
-            auto msg = d.read_string();
-            if (!msg) return std::nullopt;
-            message = std::move(*msg);
-        }
-
-        auto num_deps = d.read_uleb128();
-        if (!num_deps) return std::nullopt;
-        auto deps = std::vector<ChangeHash>{};
-        deps.reserve(static_cast<std::size_t>(*num_deps));
-        for (std::uint64_t di = 0; di < *num_deps; ++di) {
-            auto dep = d.read_change_hash();
-            if (!dep) return std::nullopt;
-            deps.push_back(*dep);
-        }
-
-        auto num_ops = d.read_uleb128();
-        if (!num_ops) return std::nullopt;
-        auto operations = std::vector<Op>{};
-        operations.reserve(static_cast<std::size_t>(*num_ops));
-
-        for (std::uint64_t oi = 0; oi < *num_ops; ++oi) {
-            auto id = d.read_op_id(actor_table);
-            if (!id) return std::nullopt;
-            auto obj = d.read_obj_id(actor_table);
-            if (!obj) return std::nullopt;
-            auto key = d.read_prop();
-            if (!key) return std::nullopt;
-            auto action = d.read_u8();
-            if (!action) return std::nullopt;
-            auto value = d.read_value();
-            if (!value) return std::nullopt;
-
-            auto num_pred = d.read_uleb128();
-            if (!num_pred) return std::nullopt;
-            auto pred = std::vector<OpId>{};
-            pred.reserve(static_cast<std::size_t>(*num_pred));
-            for (std::uint64_t pi = 0; pi < *num_pred; ++pi) {
-                auto p = d.read_op_id(actor_table);
-                if (!p) return std::nullopt;
-                pred.push_back(*p);
-            }
-
-            auto has_ia = d.read_u8();
-            if (!has_ia) return std::nullopt;
-            auto insert_after = std::optional<OpId>{};
-            if (*has_ia == 1) {
-                auto ia = d.read_op_id(actor_table);
-                if (!ia) return std::nullopt;
-                insert_after = *ia;
-            }
-
-            operations.push_back(Op{
-                .id = *id, .obj = *obj, .key = std::move(*key),
-                .action = static_cast<OpType>(*action), .value = std::move(*value),
-                .pred = std::move(pred), .insert_after = insert_after,
-            });
-        }
-
-        changes.push_back(Change{
-            .actor = actor_table[static_cast<std::size_t>(*change_actor_idx)],
-            .seq = *seq, .start_op = *start_op, .timestamp = *timestamp,
-            .message = std::move(message), .deps = std::move(deps),
-            .operations = std::move(operations),
-        });
-    }
-
-    auto num_heads = d.read_uleb128();
-    if (!num_heads) return std::nullopt;
-    auto heads = std::vector<ChangeHash>{};
-    heads.reserve(static_cast<std::size_t>(*num_heads));
-    for (std::uint64_t i = 0; i < *num_heads; ++i) {
-        auto h = d.read_change_hash();
-        if (!h) return std::nullopt;
-        heads.push_back(*h);
-    }
-
-    auto num_clock = d.read_uleb128();
-    if (!num_clock) return std::nullopt;
-    auto clock = std::map<ActorId, std::uint64_t>{};
-    for (std::uint64_t i = 0; i < *num_clock; ++i) {
-        auto cidx = d.read_uleb128();
-        if (!cidx || *cidx >= actor_table.size()) return std::nullopt;
-        auto cseq = d.read_uleb128();
-        if (!cseq) return std::nullopt;
-        clock[actor_table[static_cast<std::size_t>(*cidx)]] = *cseq;
-    }
-
-    // Recompute change hashes with SHA-256 (old format used FNV-1a).
-    // Build a map from each change to its recomputed hash, then find the
-    // true heads (changes that are not a dependency of any other change).
-    auto change_hashes = std::vector<ChangeHash>{};
-    change_hashes.reserve(changes.size());
-    for (const auto& change : changes) {
-        change_hashes.push_back(detail::DocState::compute_change_hash(change));
-    }
-
-    // A head is a change whose hash is not listed as a dep of any other change.
-    auto dep_set = std::unordered_set<ChangeHash>{};
-    for (const auto& change : changes) {
-        for (const auto& dep : change.deps) {
-            dep_set.insert(dep);
-        }
-    }
-    // Old deps used FNV-1a hashes which won't match recomputed SHA-256 hashes,
-    // so also check by recomputed hash: a change is a head if no other change
-    // depends on it. Build a set of recomputed hashes that appear as deps.
-    auto recomputed_dep_set = std::unordered_set<ChangeHash>{};
-    for (std::size_t i = 0; i < changes.size(); ++i) {
-        // Check if any later change lists this change's recomputed hash as a dep
-        // Since old deps are FNV-1a, we use positional dependency: a change at
-        // position i is a dep if any change at position j>i has seq == changes[i].seq+1
-        // for the same actor.
-    }
-    // Simpler approach: in a linear history the heads are just the last change
-    // per actor. For v1 format (which predates multi-actor merge support), this
-    // correctly reconstructs concurrent heads.
-    auto actor_last_hash = std::map<ActorId, ChangeHash>{};
-    for (std::size_t i = 0; i < changes.size(); ++i) {
-        actor_last_hash[changes[i].actor] = change_hashes[i];
-    }
-    auto result_heads = std::vector<ChangeHash>{};
-    for (const auto& [actor, hash] : actor_last_hash) {
-        result_heads.push_back(hash);
-    }
-
+    auto actor = ActorId{};
+    std::memcpy(actor.bytes.data(), body.data() + 1, actor.bytes.size());
     return ParsedDocData{
-        .local_actor = actor_table[static_cast<std::size_t>(*actor_idx)],
-        .next_counter = *next_counter,
-        .local_seq = *local_seq,
-        .changes = std::move(changes),
-        .heads = std::move(result_heads),
-        .clock = std::move(clock),
+        .local_actor = actor,
+        .next_counter = 1,
+        .local_seq = 0,
+        .changes = {},
+        .heads = {},
+        .clock = {},
     };
 }
 
-// -- v2 format parser (chunk-based) -------------------------------------------
+static auto parse_change_stream(std::span<const std::byte> data) -> std::optional<ParsedDocData> {
+    if (data.empty())
+        return std::nullopt;
 
-static auto parse_v2(std::span<const std::byte> data) -> std::optional<ParsedDocData> {
-    auto header = storage::parse_chunk_header(data);
-    if (!header) return std::nullopt;
-
-    if (!storage::validate_chunk_checksum(*header, data)) return std::nullopt;
-    if (header->type != storage::ChunkType::document) return std::nullopt;
-
-    auto body = data.subspan(header->body_offset, header->body_length);
-    auto pos = std::size_t{0};
-
-    auto read_uleb = [&]() -> std::optional<std::uint64_t> {
-        if (pos >= body.size()) return std::nullopt;
-        auto r = encoding::decode_uleb128(body.subspan(pos));
-        if (!r) return std::nullopt;
-        pos += r->bytes_read;
-        return r->value;
-    };
-
-    // Actor table
-    auto num_actors = read_uleb();
-    if (!num_actors) return std::nullopt;
-    auto actor_table = std::vector<ActorId>{};
-    actor_table.reserve(static_cast<std::size_t>(*num_actors));
-    for (std::uint64_t i = 0; i < *num_actors; ++i) {
-        auto actor_len = read_uleb();
-        if (!actor_len || *actor_len != ActorId::size) return std::nullopt;
-        if (pos + ActorId::size > body.size()) return std::nullopt;
-        auto actor = ActorId{};
-        std::memcpy(actor.bytes.data(), &body[pos], ActorId::size);
-        pos += ActorId::size;
-        actor_table.push_back(actor);
-    }
-
-    // Heads
-    auto num_heads = read_uleb();
-    if (!num_heads) return std::nullopt;
-    auto heads = std::vector<ChangeHash>{};
-    heads.reserve(static_cast<std::size_t>(*num_heads));
-    for (std::uint64_t i = 0; i < *num_heads; ++i) {
-        if (pos + 32 > body.size()) return std::nullopt;
-        auto h = ChangeHash{};
-        std::memcpy(h.bytes.data(), &body[pos], 32);
-        pos += 32;
-        heads.push_back(h);
-    }
-
-    // Changes
-    auto num_changes = read_uleb();
-    if (!num_changes) return std::nullopt;
     auto changes = std::vector<Change>{};
-    changes.reserve(static_cast<std::size_t>(*num_changes));
-
-    for (std::uint64_t ci = 0; ci < *num_changes; ++ci) {
-        auto change_len = read_uleb();
-        if (!change_len || pos + *change_len > body.size()) return std::nullopt;
-        auto change_body = body.subspan(pos, static_cast<std::size_t>(*change_len));
-        pos += static_cast<std::size_t>(*change_len);
-
-        auto change = storage::parse_change_chunk(change_body, actor_table);
-        if (!change) return std::nullopt;
-        changes.push_back(std::move(*change));
-    }
-
-    // Local metadata
-    auto local_actor_idx = read_uleb();
-    if (!local_actor_idx || *local_actor_idx >= actor_table.size()) return std::nullopt;
-    auto next_counter = read_uleb();
-    if (!next_counter) return std::nullopt;
-    auto local_seq = read_uleb();
-    if (!local_seq) return std::nullopt;
-
-    // Clock
-    auto num_clock = read_uleb();
-    if (!num_clock) return std::nullopt;
+    auto heads = std::vector<ChangeHash>{};
     auto clock = std::map<ActorId, std::uint64_t>{};
-    for (std::uint64_t i = 0; i < *num_clock; ++i) {
-        auto cidx = read_uleb();
-        if (!cidx || *cidx >= actor_table.size()) return std::nullopt;
-        auto cseq = read_uleb();
-        if (!cseq) return std::nullopt;
-        clock[actor_table[static_cast<std::size_t>(*cidx)]] = *cseq;
+    auto position = std::size_t{0};
+    auto local_actor = ActorId{};
+    auto next_counter = std::uint64_t{1};
+    auto local_seq = std::uint64_t{0};
+
+    while (position < data.size()) {
+        const auto remaining = data.subspan(position);
+        const auto header = storage::parse_chunk_header(remaining);
+        if (!header || header->body_offset + header->body_length > remaining.size()) {
+            return std::nullopt;
+        }
+
+        const auto chunk_size = header->body_offset + header->body_length;
+        const auto parsed_change = storage::parse_change_chunk(remaining.first(chunk_size));
+        if (!parsed_change)
+            return std::nullopt;
+
+        if (changes.empty()) {
+            local_actor = parsed_change->change.actor;
+        }
+        for (const auto& dependency : parsed_change->change.deps) {
+            std::erase(heads, dependency);
+        }
+        heads.push_back(parsed_change->hash);
+        clock[parsed_change->change.actor] =
+            std::max(clock[parsed_change->change.actor], parsed_change->change.seq);
+        if (parsed_change->change.actor == local_actor) {
+            local_seq = std::max(local_seq, parsed_change->change.seq);
+            for (const auto& operation : parsed_change->change.operations) {
+                next_counter = std::max(next_counter, operation.id.counter + 1);
+            }
+        }
+        changes.push_back(parsed_change->change);
+        position += chunk_size;
     }
 
     return ParsedDocData{
-        .local_actor = actor_table[static_cast<std::size_t>(*local_actor_idx)],
-        .next_counter = *next_counter,
-        .local_seq = *local_seq,
+        .local_actor = local_actor,
+        .next_counter = next_counter,
+        .local_seq = local_seq,
         .changes = std::move(changes),
         .heads = std::move(heads),
         .clock = std::move(clock),
@@ -797,23 +548,16 @@ static auto parse_v2(std::span<const std::byte> data) -> std::optional<ParsedDoc
 }
 
 auto Document::load(std::span<const std::byte> data) -> std::optional<Document> {
-    if (data.size() < 5) return std::nullopt;
-
-    // Check magic bytes
-    if (data[0] != std::byte{0x85} || data[1] != std::byte{0x6F} ||
-        data[2] != std::byte{0x4A} || data[3] != std::byte{0x83}) {
+    if (data.size() < 5)
         return std::nullopt;
-    }
-
-    // Try v2 (chunk-based) first since it's the current format.
-    // Fall back to v1 if v2 parsing fails (backward compat).
-    std::optional<ParsedDocData> parsed = parse_v2(data);
+    auto parsed = parse_empty_document(data);
     if (!parsed) {
-        parsed = parse_v1(data);
+        parsed = parse_change_stream(data);
     }
-    if (!parsed) return std::nullopt;
+    if (!parsed)
+        return std::nullopt;
 
-    auto doc = Document{1u};  // no pool — caller can assign one later
+    auto doc = Document{1u}; // no pool — caller can assign one later
     doc.set_actor_id(parsed->local_actor);
     doc.state_->next_counter = parsed->next_counter;
     doc.state_->local_seq = parsed->local_seq;

@@ -40,8 +40,8 @@ automerge-cpp/
 │   ├── storage/                            #   Binary serialization
 │   │   ├── serializer.hpp                  #     byte stream writer (v1 format)
 │   │   ├── deserializer.hpp                #     byte stream reader (v1 format)
-│   │   ├── chunk.hpp                       #     chunk envelope (magic + SHA-256 checksum + type + length)
-│   │   ├── change_chunk.hpp                #     change body serialization/deserialization
+│   │   ├── chunk.hpp                       #     chunk envelope and upstream change hash
+│   │   ├── change_chunk.hpp                #     complete change chunk serialization/deserialization
 │   │   └── columns/                        #     columnar encoding
 │   │       ├── column_spec.hpp             #       column type enum and spec bitfield
 │   │       ├── raw_column.hpp              #       raw column parse/write
@@ -58,6 +58,7 @@ automerge-cpp/
 │   ├── op_test.cpp
 │   ├── change_test.cpp
 │   ├── document_test.cpp                   #   core, merge, serialization, sync, patches, time travel, cursors, marks
+│   ├── change_hash_fixture_test.cpp        #   automerge-rs change hash fixtures
 │   ├── leb128_test.cpp
 │   ├── rle_test.cpp                        #   RLE encoder/decoder round-trips
 │   ├── delta_encoder_test.cpp              #   delta encoder/decoder round-trips
@@ -228,7 +229,7 @@ See [docs/plans/architecture.md](docs/plans/architecture.md) for the full design
 
 ## Testing
 
-591 tests across 14 test files. Uses Google Test (fetched via CMake FetchContent).
+592 tests across 15 test files. Uses Google Test (fetched via CMake FetchContent).
 
 | Test File | Count | Covers |
 |-----------|-------|--------|
@@ -237,6 +238,7 @@ See [docs/plans/architecture.md](docs/plans/architecture.md) for the full design
 | `value_test.cpp` | 14 | ScalarValue, Value, ObjType, Null, Counter, Timestamp |
 | `op_test.cpp` | 4 | Op, OpType |
 | `change_test.cpp` | 4 | Change |
+| `change_hash_fixture_test.cpp` | 1 | automerge-rs change chunk hash compatibility |
 | `document_test.cpp` | 266 | Document core, merge, serialization, sync, patches, time travel, cursors, marks, thread safety, conflict resolution, list concurrency, counters, save/load edge cases, large data stress, text/marks, sync protocol, typed get<T>(), scalar overloads, batch ops, operator[], get_path, get_scalar, overload helper, List/Map initializers, bare initializer lists, STL containers |
 | `leb128_test.cpp` | 22 | LEB128 encode/decode |
 | `rle_test.cpp` | 69 | RLE encoder/decoder round-trips |
@@ -307,6 +309,7 @@ See [docs/benchmark-results.md](docs/benchmark-results.md) for full results.
 | nlohmann/json Interop | [docs/plans/nlohmann-json-interop.md](docs/plans/nlohmann-json-interop.md) | JSON integration design |
 | Profiling Analysis | [docs/plans/profiling-analysis.md](docs/plans/profiling-analysis.md) | v0.3.0 bottleneck profiling (sample/perf), parallelization opportunities |
 | v0.4.0 Performance Plan | [docs/plans/v0.4.0-performance.md](docs/plans/v0.4.0-performance.md) | Phase 11 performance release plan (Fenwick tree, hash cache, thread pool, ARM SHA-256) |
+| Change Hashes | [docs/change-hashes.md](docs/change-hashes.md) | Upstream-compatible change hash definition and fixtures |
 
 ## Dependencies
 

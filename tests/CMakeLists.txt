@@ -22,6 +22,7 @@ add_executable(automerge_cpp_tests
     column_spec_test.cpp
     chunk_test.cpp
     change_op_columns_test.cpp
+    change_hash_fixture_test.cpp
 )
 
 target_link_libraries(automerge_cpp_tests
@@ -29,6 +30,11 @@ target_link_libraries(automerge_cpp_tests
         automerge-cpp::automerge-cpp
         GTest::gtest_main
         ZLIB::ZLIB
+)
+
+target_compile_definitions(automerge_cpp_tests
+    PRIVATE
+        AUTOMERGE_CPP_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 
 include(GoogleTest)
