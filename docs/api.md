@@ -76,19 +76,39 @@ auto [obj_id, patches] = doc.transact_with_patches([](Transaction& tx) {
 auto patches = doc.transact_with_patches([](auto& tx) {
     tx.put(root, "x", 42);
 });
+
+// Attach a message and fixed millisecond timestamp to the committed change
+doc.transact(
+    [](Transaction& tx) {
+        tx.put(root, "status", "imported");
+    },
+    CommitOptions{
+        .message = "import customer record",
+        .time = std::int64_t{1725000000123},
+    });
 ```
 
 ```cpp
 // Signatures
-void transact(const std::function<void(Transaction&)>& fn);
+void transact(const std::function<void(Transaction&)>& fn, CommitOptions options = {});
 
-template <typename Fn> auto transact(Fn&& fn) -> std::invoke_result_t<Fn, Transaction&>;
-template <typename Fn> void transact(Fn&& fn);  // void-returning template overload
+template <typename Fn>
+auto transact(Fn&& fn, CommitOptions options = {}) -> std::invoke_result_t<Fn, Transaction&>;
+template <typename Fn>
+void transact(Fn&& fn, CommitOptions options = {});  // void-returning template overload
 
-auto transact_with_patches(const std::function<void(Transaction&)>& fn) -> std::vector<Patch>;
-template <typename Fn> auto transact_with_patches(Fn&& fn)
+auto transact_with_patches(const std::function<void(Transaction&)>& fn,
+                           CommitOptions options = {}) -> std::vector<Patch>;
+template <typename Fn>
+auto transact_with_patches(Fn&& fn, CommitOptions options = {})
     -> std::pair<std::invoke_result_t<Fn, Transaction&>, std::vector<Patch>>;
 ```
+
+`CommitOptions::message` is an optional human-readable string. `CommitOptions::time` is an
+optional signed count of milliseconds since the Unix epoch. On commit, `time` becomes
+`Change::timestamp`. Default options preserve the existing encoding: timestamp `0` and no
+message. Both fields are advisory metadata; they do not affect conflict resolution, but they are
+part of the encoded change body and therefore affect its hash.
 
 ### Reading — Maps
 
@@ -293,6 +313,11 @@ doc.transact([](Transaction& tx) {
     tx.rollback();
 });
 ```
+
+`Transaction::commit(CommitOptions options = {})` may be called directly inside the callable
+when metadata must be chosen there. The enclosing `Document::transact()` call observes that the
+transaction is already inactive and does not create another change. No-operation commits do not
+create a change.
 
 For the implementation design and benchmark measurements, see
 [Transaction Rollback](transactions/rollback.md).

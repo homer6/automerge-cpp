@@ -4,7 +4,8 @@
 
 Transactions are atomic. A throwing `Document::transact()` callable rolls back its writes and
 rethrows. A `Transaction` destroyed before commit also rolls back. `Transaction::rollback()` is
-public, idempotent, and prevents the transaction from committing.
+public, idempotent, and prevents the transaction from committing. `CommitOptions` supplied to a
+throwing transaction are discarded with its operations and cannot affect a later transaction.
 
 ## Design
 
@@ -21,7 +22,8 @@ mutator records a compact inverse before it changes `DocState`:
 Rollback applies these records in reverse dependency order, restores `next_counter`, clears
 pending operations, and marks the transaction inactive. Commit marks the transaction inactive
 only after it has appended the change, so an exception while constructing a change can still be
-rolled back.
+rolled back. Commit options are passed by value only after the transaction callable succeeds;
+they are not retained in document state before commit.
 
 ## Why this design
 
@@ -57,7 +59,8 @@ journal when the transaction is created. The journal is not on the per-operation
 
 Run the full test suite and the benchmark command above. The regression tests cover a throwing
 transaction across map, list, text, counter, mark, and nested-object writes; explicit rollback;
-read-your-writes; and fixed committed bytes using the current upstream chunk encoding.
+read-your-writes; discarded commit options; and fixed committed bytes using the current upstream
+chunk encoding.
 `ChangeHashFixture.matches_automerge_rs_change_chunks` independently verifies that encoding and
 the resulting hashes against automerge-rs fixtures. When adding a mutator, add its inverse record
 before the eager `DocState` write and extend the throwing-transaction test.

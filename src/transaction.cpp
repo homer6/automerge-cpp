@@ -252,7 +252,7 @@ void Transaction::mark(const ObjId& obj, std::size_t start, std::size_t end,
     pending_ops_.push_back(std::move(op));
 }
 
-void Transaction::commit() {
+void Transaction::commit(CommitOptions options) {
     if (!rollback_state_->is_active()) {
         return;
     }
@@ -267,8 +267,8 @@ void Transaction::commit() {
         .actor = state_.actor,
         .seq = ++state_.local_seq,
         .start_op = rollback_state_->start_op(),
-        .timestamp = 0,
-        .message = std::nullopt,
+        .timestamp = options.time.value_or(0),
+        .message = std::move(options.message),
         .deps = rollback_state_->heads_before(),
         .operations = std::move(pending_ops_),
     };

@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <concepts>
 #include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <initializer_list>
 #include <memory>
@@ -28,6 +29,14 @@ namespace detail {
 struct DocState;
 struct TransactionRollback;
 } // namespace detail
+
+/// Optional metadata attached to a committed change.
+struct CommitOptions {
+    std::optional<std::string> message; ///< Human-readable description of the change.
+    std::optional<std::int64_t> time;   ///< Unix timestamp in milliseconds.
+
+    auto operator==(const CommitOptions&) const -> bool = default;
+};
 
 /// A mutation interface for modifying a Document.
 ///
@@ -60,6 +69,12 @@ public:
     /// to their values when the transaction began. Calling rollback more than
     /// once has no effect. A rolled-back transaction cannot be committed.
     void rollback();
+
+    /// Commit this transaction with optional change metadata.
+    ///
+    /// Has no effect if the transaction has no operations or is no longer active.
+    /// @param options Message and timestamp to store on the committed change.
+    void commit(CommitOptions options = {});
 
     /// Set a scalar value at a map key.
     /// @param obj The map object to modify.
@@ -475,8 +490,6 @@ public:
     auto text(const ObjId& obj) const -> std::string;
 
 private:
-    void commit();
-
     detail::DocState& state_;
     std::vector<Op> pending_ops_;
     std::unique_ptr<detail::TransactionRollback> rollback_state_;

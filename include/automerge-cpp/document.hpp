@@ -97,7 +97,8 @@ public:
     /// when the function returns. If the function throws, the transaction
     /// is rolled back.
     /// @param fn A function that receives a Transaction reference.
-    void transact(const std::function<void(Transaction&)>& fn);
+    /// @param options Optional metadata for the committed change.
+    void transact(const std::function<void(Transaction&)>& fn, CommitOptions options = {});
 
     /// Execute a function within a transaction and return its result.
     ///
@@ -109,14 +110,14 @@ public:
     template <typename Fn>
         requires std::invocable<Fn, Transaction&> &&
                  (!std::is_void_v<std::invoke_result_t<Fn, Transaction&>>)
-    auto transact(Fn&& fn) -> std::invoke_result_t<Fn, Transaction&>;
+    auto transact(Fn&& fn, CommitOptions options = {}) -> std::invoke_result_t<Fn, Transaction&>;
 
     /// Execute a void function within a transaction (template overload).
     template <typename Fn>
         requires std::invocable<Fn, Transaction&> &&
                  std::is_void_v<std::invoke_result_t<Fn, Transaction&>> &&
                  (!std::convertible_to<Fn, std::function<void(Transaction&)>>)
-    void transact(Fn&& fn);
+    void transact(Fn&& fn, CommitOptions options = {});
 
     // -- Reading: map operations ----------------------------------------------
 
@@ -330,8 +331,10 @@ public:
     /// Patches describe the externally visible effects of the transaction
     /// (puts, inserts, deletes, increments, text splices).
     /// @param fn A function that receives a Transaction reference.
+    /// @param options Optional metadata for the committed change.
     /// @return The patches produced by the transaction.
-    auto transact_with_patches(const std::function<void(Transaction&)>& fn) -> std::vector<Patch>;
+    auto transact_with_patches(const std::function<void(Transaction&)>& fn,
+                               CommitOptions options = {}) -> std::vector<Patch>;
 
     /// Execute a transaction, return both the function result and patches.
     /// @code
@@ -342,7 +345,7 @@ public:
     template <typename Fn>
         requires std::invocable<Fn, Transaction&> &&
                  (!std::is_void_v<std::invoke_result_t<Fn, Transaction&>>)
-    auto transact_with_patches(Fn&& fn)
+    auto transact_with_patches(Fn&& fn, CommitOptions options = {})
         -> std::pair<std::invoke_result_t<Fn, Transaction&>, std::vector<Patch>>;
 
     // -- Historical reads (time travel) ---------------------------------------
@@ -451,12 +454,12 @@ private:
 template <typename Fn>
     requires std::invocable<Fn, Transaction&> &&
              (!std::is_void_v<std::invoke_result_t<Fn, Transaction&>>)
-auto Document::transact(Fn&& fn) -> std::invoke_result_t<Fn, Transaction&> {
+auto Document::transact(Fn&& fn, CommitOptions options) -> std::invoke_result_t<Fn, Transaction&> {
     auto lock = std::unique_lock{mutex_};
     auto tx = Transaction{*state_};
     try {
         auto result = fn(tx);
-        tx.commit();
+        tx.commit(std::move(options));
         return result;
     } catch (...) {
         tx.rollback();
@@ -468,12 +471,12 @@ template <typename Fn>
     requires std::invocable<Fn, Transaction&> &&
              std::is_void_v<std::invoke_result_t<Fn, Transaction&>> &&
              (!std::convertible_to<Fn, std::function<void(Transaction&)>>)
-void Document::transact(Fn&& fn) {
+void Document::transact(Fn&& fn, CommitOptions options) {
     auto lock = std::unique_lock{mutex_};
     auto tx = Transaction{*state_};
     try {
         fn(tx);
-        tx.commit();
+        tx.commit(std::move(options));
     } catch (...) {
         tx.rollback();
         throw;
@@ -483,14 +486,14 @@ void Document::transact(Fn&& fn) {
 template <typename Fn>
     requires std::invocable<Fn, Transaction&> &&
              (!std::is_void_v<std::invoke_result_t<Fn, Transaction&>>)
-auto Document::transact_with_patches(Fn&& fn)
+auto Document::transact_with_patches(Fn&& fn, CommitOptions options)
     -> std::pair<std::invoke_result_t<Fn, Transaction&>, std::vector<Patch>> {
     auto lock = std::unique_lock{mutex_};
     auto tx = Transaction{*state_};
     try {
         auto result = fn(tx);
         auto ops = tx.pending_ops_;
-        tx.commit();
+        tx.commit(std::move(options));
         return {std::move(result), ops_to_patches_internal(ops)};
     } catch (...) {
         tx.rollback();

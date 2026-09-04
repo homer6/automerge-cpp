@@ -148,12 +148,12 @@ void Document::set_actor_id(ActorId id) {
     state_->actor = id;
 }
 
-void Document::transact(const std::function<void(Transaction&)>& fn) {
+void Document::transact(const std::function<void(Transaction&)>& fn, CommitOptions options) {
     auto lock = std::unique_lock{mutex_};
     auto tx = Transaction{*state_};
     try {
         fn(tx);
-        tx.commit();
+        tx.commit(std::move(options));
     } catch (...) {
         tx.rollback();
         throw;
@@ -1452,8 +1452,8 @@ static auto ops_to_patches(const std::vector<Op>& ops) -> std::vector<Patch> {
     return patches;
 }
 
-auto Document::transact_with_patches(const std::function<void(Transaction&)>& fn)
-    -> std::vector<Patch> {
+auto Document::transact_with_patches(const std::function<void(Transaction&)>& fn,
+                                     CommitOptions options) -> std::vector<Patch> {
     auto lock = std::unique_lock{mutex_};
     auto tx = Transaction{*state_};
     try {
@@ -1461,7 +1461,7 @@ auto Document::transact_with_patches(const std::function<void(Transaction&)>& fn
 
         // Capture ops before commit moves them
         auto ops = tx.pending_ops_;
-        tx.commit();
+        tx.commit(std::move(options));
 
         return ops_to_patches(ops);
     } catch (...) {

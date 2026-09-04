@@ -60,6 +60,7 @@ TEST(ChangeHashFixture, matches_automerge_rs_change_chunks) {
         "list_inserts",
         "text_splice",
         "two_actor_merge",
+        "commit_metadata",
     };
 
     for (const auto fixture_name : fixture_names) {
@@ -112,6 +113,23 @@ TEST(ChangeHashFixture, matches_automerge_rs_change_chunks) {
         EXPECT_EQ(*compact_result, expected_hashes.size()) << fixture_name;
         EXPECT_EQ(compact_document.get_heads(), expected_heads) << fixture_name;
     }
+
+    auto actor_bytes = std::array<std::byte, automerge_cpp::ActorId::size>{};
+    actor_bytes.fill(std::byte{0x77});
+    auto document = Document{};
+    document.set_actor_id(automerge_cpp::ActorId{actor_bytes});
+    document.transact(
+        [](auto& transaction) { transaction.put(automerge_cpp::root, "metadata", true); },
+        automerge_cpp::CommitOptions{
+            .message = "import customer record",
+            .time = std::int64_t{1725000000123},
+        });
+    const auto expected_hashes = read_lines(fixture_path("commit_metadata.hashes"));
+    const auto heads = document.get_heads();
+    ASSERT_EQ(expected_hashes.size(), 1u);
+    ASSERT_EQ(heads.size(), 1u);
+    EXPECT_EQ(to_hex(heads.front()), expected_hashes.front());
+    EXPECT_EQ(document.save_incremental(), read_bytes(fixture_path("commit_metadata.am")));
 }
 
 TEST(IncrementalSaveFixture, matches_automerge_rs_change_chunks) {

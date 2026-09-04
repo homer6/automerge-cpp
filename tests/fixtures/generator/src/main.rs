@@ -1,6 +1,6 @@
 use automerge::{
     sync::{Capability, Message, MessageVersion, State, SyncDoc},
-    transaction::Transactable,
+    transaction::{CommitOptions, Transactable},
     ActorId, AutoCommit, ObjType, ROOT,
 };
 use std::fs;
@@ -71,6 +71,16 @@ fn two_actor_merge() -> AutoCommit {
     second.commit();
     first.merge(&mut second).unwrap();
     first
+}
+
+fn commit_metadata() -> AutoCommit {
+    let mut document = AutoCommit::new().with_actor(actor(0x77));
+    document.put(ROOT, "metadata", true).unwrap();
+    document.commit_with(CommitOptions {
+        message: Some("import customer record".to_owned()),
+        time: Some(1_725_000_000_123),
+    });
+    document
 }
 
 fn write_incremental_fixture() {
@@ -179,6 +189,7 @@ fn main() {
     write_fixture("list_inserts", &mut list_inserts());
     write_fixture("text_splice", &mut text_splice());
     write_fixture("two_actor_merge", &mut two_actor_merge());
+    write_fixture("commit_metadata", &mut commit_metadata());
     write_incremental_fixture();
     sync_exchange();
 }

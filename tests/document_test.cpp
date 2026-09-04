@@ -888,6 +888,145 @@ TEST(Transaction, committed_change_bytes_remain_stable) {
               "7f00");
 }
 
+TEST(Transaction, commit_options_are_stored_and_change_hash) {
+    auto plain = make_doc(12);
+    auto with_metadata = make_doc(12);
+    const auto write = [](Transaction& tx) { tx.put(root, "value", std::int64_t{42}); };
+
+    plain.transact(write);
+    with_metadata.transact(write,
+                           CommitOptions{
+                               .message = "import customer record",
+                               .time = std::int64_t{1725000000123},
+                           });
+
+    const auto plain_changes = plain.get_changes();
+    const auto metadata_changes = with_metadata.get_changes();
+    ASSERT_EQ(plain_changes.size(), 1u);
+    ASSERT_EQ(metadata_changes.size(), 1u);
+    EXPECT_FALSE(plain_changes.front().message.has_value());
+    EXPECT_EQ(plain_changes.front().timestamp, 0);
+    EXPECT_EQ(metadata_changes.front().message, "import customer record");
+    EXPECT_EQ(metadata_changes.front().timestamp, 1725000000123);
+    EXPECT_NE(plain.get_heads(), with_metadata.get_heads());
+}
+
+TEST(Transaction, all_document_transaction_forms_accept_commit_options) {
+    auto doc = make_doc(13);
+
+    const auto object =
+        doc.transact([](Transaction& tx) { return tx.put_object(root, "items", ObjType::list); },
+                     CommitOptions{.message = "create items", .time = std::int64_t{1000}});
+    const auto [result, result_patches] = doc.transact_with_patches(
+        [&](Transaction& tx) {
+            tx.insert(object, 0, "first");
+            return std::int64_t{7};
+        },
+        CommitOptions{.message = "insert first", .time = std::int64_t{2000}});
+    const auto void_patches = doc.transact_with_patches(
+        [&](Transaction& tx) { tx.insert(object, 1, "second"); },
+        CommitOptions{.message = "insert second", .time = std::int64_t{3000}});
+
+    const auto changes = doc.get_changes();
+    ASSERT_EQ(changes.size(), 3u);
+    EXPECT_EQ(changes[0].message, "create items");
+    EXPECT_EQ(changes[0].timestamp, 1000);
+    EXPECT_EQ(result, 7);
+    EXPECT_FALSE(result_patches.empty());
+    EXPECT_EQ(changes[1].message, "insert first");
+    EXPECT_EQ(changes[1].timestamp, 2000);
+    EXPECT_FALSE(void_patches.empty());
+    EXPECT_EQ(changes[2].message, "insert second");
+    EXPECT_EQ(changes[2].timestamp, 3000);
+}
+
+TEST(Transaction, direct_commit_accepts_commit_options) {
+    auto doc = make_doc(14);
+
+    doc.transact([](Transaction& tx) {
+        tx.put(root, "value", true);
+        tx.commit(CommitOptions{
+            .message = "manual commit",
+            .time = std::int64_t{4000},
+        });
+    });
+
+    const auto changes = doc.get_changes();
+    ASSERT_EQ(changes.size(), 1u);
+    EXPECT_EQ(changes.front().message, "manual commit");
+    EXPECT_EQ(changes.front().timestamp, 4000);
+}
+
+TEST(Transaction, commit_metadata_survives_persistence_and_change_queries) {
+    auto source = make_doc(15);
+    source.transact([](Transaction& tx) { tx.put(root, "persisted", true); },
+                    CommitOptions{.message = "persist metadata", .time = std::int64_t{5000}});
+
+    const auto source_changes = source.get_changes();
+    ASSERT_EQ(source_changes.size(), 1u);
+    EXPECT_EQ(source_changes.front().message, "persist metadata");
+    EXPECT_EQ(source_changes.front().timestamp, 5000);
+
+    const auto incremental = source.save_incremental();
+    auto incrementally_loaded = Document{};
+    const auto applied = incrementally_loaded.load_incremental(incremental);
+    ASSERT_TRUE(applied.has_value());
+    EXPECT_EQ(*applied, 1u);
+    EXPECT_EQ(incrementally_loaded.get_changes(), source_changes);
+
+    const auto loaded = Document::load(source.save());
+    ASSERT_TRUE(loaded.has_value());
+    EXPECT_EQ(loaded->get_changes(), source_changes);
+}
+
+TEST(Transaction, commit_metadata_survives_sync) {
+    auto source = make_doc(16);
+    auto target = make_doc(17);
+    source.transact([](Transaction& tx) { tx.put(root, "synced", true); },
+                    CommitOptions{.message = "sync metadata", .time = std::int64_t{6000}});
+    auto source_state = SyncState{};
+    auto target_state = SyncState{};
+
+    for (auto round = 0; round < 20; ++round) {
+        auto progressed = false;
+        if (const auto message = source.generate_sync_message(source_state)) {
+            ASSERT_TRUE(target.receive_sync_message(target_state, *message).has_value());
+            progressed = true;
+        }
+        if (const auto message = target.generate_sync_message(target_state)) {
+            ASSERT_TRUE(source.receive_sync_message(source_state, *message).has_value());
+            progressed = true;
+        }
+        if (!progressed) {
+            break;
+        }
+    }
+
+    const auto changes = target.get_changes();
+    ASSERT_EQ(changes.size(), 1u);
+    EXPECT_EQ(changes.front().message, "sync metadata");
+    EXPECT_EQ(changes.front().timestamp, 6000);
+}
+
+TEST(Transaction, rollback_discards_commit_options) {
+    auto doc = make_doc(18);
+
+    EXPECT_THROW(doc.transact(
+                     [](Transaction& tx) {
+                         tx.put(root, "temporary", true);
+                         throw std::runtime_error{"stop"};
+                     },
+                     CommitOptions{.message = "discarded", .time = std::int64_t{7000}}),
+                 std::runtime_error);
+    EXPECT_TRUE(doc.get_changes().empty());
+
+    doc.transact([](Transaction& tx) { tx.put(root, "kept", true); });
+    const auto changes = doc.get_changes();
+    ASSERT_EQ(changes.size(), 1u);
+    EXPECT_FALSE(changes.front().message.has_value());
+    EXPECT_EQ(changes.front().timestamp, 0);
+}
+
 TEST(Document, fork_creates_independent_copy) {
     auto doc = make_doc(1);
     doc.transact([](auto& tx) {
