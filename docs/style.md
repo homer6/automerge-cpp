@@ -526,3 +526,13 @@ Before submitting code, verify:
 - [ ] Every public function has a clear return type encoding its semantics
 - [ ] Tests exist and pass
 - [ ] No warnings at `-Wall -Wextra`
+
+---
+
+## Formatting
+
+`.clang-format` at the repository root is the formatter configuration (LLVM base, 100 columns,
+4-space indents, one statement per line, no collapsed short functions). Existing code predates it
+and is not reformatted wholesale; format the lines you change with `git clang-format` before each
+commit so diffs stay reviewable. On macOS the Homebrew binary lives at
+`/opt/homebrew/opt/llvm/bin/clang-format`; on Linux install `clang-format-19`.
