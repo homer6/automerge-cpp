@@ -43,8 +43,9 @@ doc.actor_id()              -> const ActorId&
 doc.set_actor_id(ActorId)   -> void
 ```
 
-Call `set_actor_id` before the first mutation when an application, test, or fixture requires a
-deterministic actor ID. This explicitly replaces the randomly generated ID.
+Call `set_actor_id` when an application, test, or fixture requires a deterministic actor ID. This
+replaces the randomly generated ID, or selects the actor used for subsequent changes in a document
+with interleaved local actor histories.
 
 ### Mutation
 

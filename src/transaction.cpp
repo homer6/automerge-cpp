@@ -163,23 +163,6 @@ auto Transaction::splice_text(const ObjId& obj,
         return std::unexpected{scalars.error()};
     }
 
-    // Delete scalar values
-    for (std::size_t i = 0; i < del; ++i) {
-        auto pred = state_.list_pred(obj, pos);
-        rollback_state_->record_list_visibility(state_, obj, pos);
-        auto op_id = state_.next_op_id();
-        state_.list_delete(obj, pos);
-        auto op = Op{
-            .id = op_id,
-            .obj = obj,
-            .key = list_index(pos),
-            .action = OpType::del,
-            .value = Value{ScalarValue{Null{}}},
-            .pred = std::move(pred),
-        };
-        pending_ops_.push_back(std::move(op));
-    }
-
     // Insert one complete scalar value per op, chaining insert_after.
     auto prev_op_id = std::optional<OpId>{};
     for (std::size_t i = 0; i < scalars->size(); ++i) {
@@ -203,6 +186,24 @@ auto Transaction::splice_text(const ObjId& obj,
             .value = std::move(scalar_value),
             .pred = {},
             .insert_after = insert_after,
+        };
+        pending_ops_.push_back(std::move(op));
+    }
+
+    // Upstream assigns insertion operation IDs before deletion operation IDs.
+    const auto delete_position = pos + scalars->size();
+    for (std::size_t i = 0; i < del; ++i) {
+        auto pred = state_.list_pred(obj, delete_position);
+        rollback_state_->record_list_visibility(state_, obj, delete_position);
+        auto op_id = state_.next_op_id();
+        state_.list_delete(obj, delete_position);
+        auto op = Op{
+            .id = op_id,
+            .obj = obj,
+            .key = list_index(pos),
+            .action = OpType::del,
+            .value = Value{ScalarValue{Null{}}},
+            .pred = std::move(pred),
         };
         pending_ops_.push_back(std::move(op));
     }
@@ -230,26 +231,41 @@ void Transaction::increment(const ObjId& obj, std::string_view key, std::int64_t
 void Transaction::mark(const ObjId& obj, std::size_t start, std::size_t end,
                        std::string_view name, ScalarValue value) {
     rollback_state_->assert_active();
-    // Resolve start and end to element OpIds
-    auto start_elem = state_.list_element_id_at(obj, start);
+    const auto start_elem = state_.list_element_id_at(obj, start);
     assert(start_elem);
-    auto end_elem = state_.list_element_id_at(obj, end > 0 ? end - 1 : 0);
+    const auto end_elem = state_.list_element_id_at(obj, end > 0 ? end - 1 : 0);
     assert(end_elem);
+    const auto start_after = state_.insert_after_for(obj, start);
+    const auto end_after = state_.insert_after_for(obj, end);
 
-    auto name_str = std::string{name};
-    auto op_id = state_.next_op_id();
-    rollback_state_->record_mark_insert(obj, op_id);
-    state_.mark_range(obj, op_id, *start_elem, *end_elem,
-                      name_str, value);
-    auto op = Op{
-        .id = op_id,
+    const auto name_string = std::string{name};
+    const auto begin_id = state_.next_op_id();
+    const auto end_id = state_.next_op_id();
+    rollback_state_->record_mark_insert(obj, begin_id);
+    state_.mark_range(obj, begin_id, *start_elem, *end_elem, name_string, value);
+    auto begin = Op{
+        .id = begin_id,
         .obj = obj,
-        .key = map_key(std::move(name_str)),
+        .key = list_index(start),
         .action = OpType::mark,
         .value = Value{value},
-        .pred = {*start_elem, *end_elem},
+        .pred = {},
+        .insert_after = start_after,
+        .expand = true,
+        .mark_name = name_string,
     };
-    pending_ops_.push_back(std::move(op));
+    auto finish = Op{
+        .id = end_id,
+        .obj = obj,
+        .key = list_index(end),
+        .action = OpType::mark,
+        .value = Value{ScalarValue{Null{}}},
+        .pred = {},
+        .insert_after = end_after,
+        .expand = true,
+    };
+    pending_ops_.push_back(std::move(begin));
+    pending_ops_.push_back(std::move(finish));
 }
 
 void Transaction::commit(CommitOptions options) {

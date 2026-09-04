@@ -12,6 +12,7 @@ One file per subject. A page says what exists, why, how to verify it, and how to
 | [`change-application.md`](change-application.md) | Checked external change application and pending dependencies |
 | [`change-hashes.md`](change-hashes.md) | Upstream-compatible change hash definition and fixtures |
 | [`ci.md`](ci.md) | Hosted CI toolchains and local job reproduction |
+| [`fixtures.md`](fixtures.md) | Byte-level automerge-rs compatibility sweep and regeneration |
 | [`transactions/rollback.md`](transactions/rollback.md) | Transaction rollback design and verification |
 | [`incremental-save.md`](incremental-save.md) | Incremental persistence and public change-set queries |
 | [`text/unicode-scalar-values.md`](text/unicode-scalar-values.md) | UTF-8 validation and Unicode scalar-value text indexing |

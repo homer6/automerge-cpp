@@ -148,6 +148,8 @@ auto Document::actor_id() const -> const ActorId& {
 void Document::set_actor_id(ActorId id) {
     auto lock = std::unique_lock{mutex_};
     state_->actor = id;
+    const auto clock = state_->clock.find(id);
+    state_->local_seq = clock == state_->clock.end() ? 0 : clock->second;
 }
 
 void Document::transact(const std::function<void(Transaction&)>& fn, CommitOptions options) {
@@ -234,6 +236,7 @@ auto Document::fork() const -> Document {
     const auto actor = forked.state_->actor;
     *forked.state_ = *state_;
     forked.state_->actor = actor;
+    forked.state_->local_seq = 0;
     return forked;
 }
 
@@ -908,8 +911,7 @@ auto Document::save() const -> std::vector<std::byte> {
     }
 
     if (output.empty()) {
-        auto body = std::vector<std::byte>{std::byte{0x43}};
-        body.insert(body.end(), state_->actor.bytes.begin(), state_->actor.bytes.end());
+        const auto body = std::vector<std::byte>(4, std::byte{0});
         storage::write_chunk(storage::ChunkType::document, body, output);
     }
     if (!output.empty()) {
@@ -1096,7 +1098,9 @@ auto Document::load(std::span<const std::byte> data) -> std::optional<Document> 
     if (!changes_are_valid || !validate_text_operations(*doc.state_, parsed->changes)) {
         return std::nullopt;
     }
-    doc.set_actor_id(parsed->local_actor);
+    if (!parsed->changes.empty()) {
+        doc.set_actor_id(parsed->local_actor);
+    }
     doc.state_->next_counter = parsed->next_counter;
     doc.state_->local_seq = parsed->local_seq;
 
@@ -1473,7 +1477,7 @@ static auto ops_to_patches(const std::vector<Op>& ops) -> std::vector<Patch> {
             continue;
         }
 
-        // Coalesce splice_text inserts (insert-only, no preceding deletes)
+        // Coalesce splice_text inserts and any following deletes from the same splice call.
         if (op.action == OpType::splice_text) {
             auto obj = op.obj;
             auto index = std::get<std::size_t>(op.key);
@@ -1487,12 +1491,19 @@ static auto ops_to_patches(const std::vector<Op>& ops) -> std::vector<Patch> {
                 }
                 ++j;
             }
+            auto delete_count = std::size_t{0};
+            while (j + delete_count < ops.size() && ops[j + delete_count].action == OpType::del &&
+                   ops[j + delete_count].obj == obj &&
+                   std::holds_alternative<std::size_t>(ops[j + delete_count].key) &&
+                   std::get<std::size_t>(ops[j + delete_count].key) == index) {
+                ++delete_count;
+            }
             patches.push_back(Patch{
                 .obj = obj,
                 .key = list_index(index),
-                .action = PatchSpliceText{index, 0, std::move(text)},
+                .action = PatchSpliceText{index, delete_count, std::move(text)},
             });
-            i = j;
+            i = j + delete_count;
             continue;
         }
 

@@ -62,6 +62,8 @@ inline constexpr auto successor_actor =
     ColumnSpec{column_id::succ_actor, ColumnType::actor_id, false};
 inline constexpr auto successor_counter =
     ColumnSpec{column_id::succ_counter, ColumnType::delta_int, false};
+inline constexpr auto expand = ColumnSpec{column_id::expand, ColumnType::boolean, false};
+inline constexpr auto mark_name = ColumnSpec{column_id::mark_name, ColumnType::string_rle, false};
 } // namespace document_op_columns
 
 struct DocumentColumnLayout {
@@ -394,6 +396,8 @@ struct DecodedDocumentOperationColumns {
     std::vector<std::uint64_t> successor_counts;
     std::vector<std::uint64_t> successor_actors;
     std::vector<std::int64_t> successor_counters;
+    std::vector<bool> expands;
+    std::vector<std::optional<std::string>> mark_names;
 };
 
 inline auto decode_document_operation_columns(const std::vector<RawColumn>& columns)
@@ -437,7 +441,13 @@ inline auto decode_document_operation_columns(const std::vector<RawColumn>& colu
         StringDecoder{key_string_data}, count, !key_string_data.empty());
     const auto inserts =
         decode_document_booleans(find_document_column(columns, document_op_columns::insert), count);
-    if (!obj_actors || !obj_counters || !key_actors || !key_counters || !key_strings || !inserts) {
+    const auto expands =
+        decode_document_booleans(find_document_column(columns, document_op_columns::expand), count);
+    const auto mark_name_data = find_document_column(columns, document_op_columns::mark_name);
+    const auto mark_names = decode_document_nullable<StringDecoder, std::string>(
+        StringDecoder{mark_name_data}, count, !mark_name_data.empty());
+    if (!obj_actors || !obj_counters || !key_actors || !key_counters || !key_strings || !inserts ||
+        !expands || !mark_names) {
         return std::nullopt;
     }
 
@@ -467,6 +477,8 @@ inline auto decode_document_operation_columns(const std::vector<RawColumn>& colu
         .successor_counts = std::move(*successor_counts),
         .successor_actors = std::move(*successor_actors),
         .successor_counters = std::move(*successor_counters),
+        .expands = std::move(*expands),
+        .mark_names = std::move(*mark_names),
     };
 }
 
@@ -544,6 +556,8 @@ inline auto decode_document_operation(const DecodedDocumentOperationColumns& col
                 .value = std::move(action->second),
                 .pred = {},
                 .insert_after = insert_after,
+                .expand = columns.expands[index],
+                .mark_name = columns.mark_names[index],
             },
         .successors = std::move(successors),
     };

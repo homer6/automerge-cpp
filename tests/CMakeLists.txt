@@ -41,3 +41,35 @@ target_compile_definitions(automerge_cpp_tests
 
 include(GoogleTest)
 gtest_discover_tests(automerge_cpp_tests)
+
+add_executable(automerge_cpp_fixture_writer fixture_writer.cpp)
+target_link_libraries(automerge_cpp_fixture_writer PRIVATE automerge-cpp::automerge-cpp)
+
+set(AUTOMERGE_CPP_REVERSE_FIXTURE_DIR "${CMAKE_CURRENT_BINARY_DIR}/reverse-fixtures")
+add_test(
+    NAME automerge_cpp_write_reverse_fixtures
+    COMMAND automerge_cpp_fixture_writer "${AUTOMERGE_CPP_REVERSE_FIXTURE_DIR}"
+)
+set_tests_properties(
+    automerge_cpp_write_reverse_fixtures
+    PROPERTIES LABELS compatibility
+)
+
+find_program(AUTOMERGE_CPP_CARGO_EXECUTABLE cargo)
+if(AUTOMERGE_CPP_CARGO_EXECUTABLE)
+    add_test(
+        NAME automerge_cpp_verify_reverse_fixtures
+        COMMAND
+            "${CMAKE_COMMAND}" -E env
+            "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/cargo-target"
+            "${AUTOMERGE_CPP_CARGO_EXECUTABLE}" run --quiet
+            --manifest-path "${CMAKE_SOURCE_DIR}/tests/fixtures/generator/Cargo.toml"
+            -- verify-cpp "${AUTOMERGE_CPP_REVERSE_FIXTURE_DIR}"
+    )
+    set_tests_properties(
+        automerge_cpp_verify_reverse_fixtures
+        PROPERTIES
+            DEPENDS automerge_cpp_write_reverse_fixtures
+            LABELS "compatibility;cargo"
+    )
+endif()

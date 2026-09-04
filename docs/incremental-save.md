@@ -7,9 +7,9 @@ incremental chunk stream to an existing document, and query subsets of its chang
 
 `save()` retains this copy's established full-save format. A nonempty document is serialized as
 concatenated, complete Automerge change chunks in history order. It does not emit automerge-rs's
-compact document chunk. An empty document is serialized with the private empty-document marker
-described in [change hashes](change-hashes.md). Calling `save()` advances the incremental cursor to
-the current heads.
+compact document chunk for a nonempty history. An empty document is serialized as automerge-rs's
+canonical empty compact document chunk. Calling `save()` advances the incremental cursor to the
+current heads.
 
 `save_incremental()` serializes every change that is not a transitive dependency of the saved
 heads. Its result is a concatenated stream of upstream change chunks and is empty when there are no
@@ -21,10 +21,10 @@ cursor, matching automerge-rs `AutoCommit` behavior.
 
 ## Loading
 
-`load_incremental(bytes)` accepts concatenated change chunks, an upstream compact document chunk,
-or this copy's empty-document marker. Compact document loading supports independently DEFLATE-
-compressed change and operation columns. The decoder reconstructs predecessor operations and
-change hashes, and verifies that the reconstructed heads match the document chunk.
+`load_incremental(bytes)` accepts concatenated change chunks or an upstream compact document
+chunk. Compact document loading supports independently DEFLATE-compressed change and operation
+columns. The decoder reconstructs predecessor operations and change hashes, and verifies that the
+reconstructed heads match the document chunk.
 
 The complete input is parsed before mutation. Reconstructed changes then pass through the same
 validation, deduplication, dependency queue, and apply path as `apply_changes()`. The return type is

@@ -1534,11 +1534,26 @@ TEST(Document, get_heads_tracks_dag) {
 TEST(Document, save_and_load_empty_document) {
     auto doc = make_doc(1);
     auto bytes = doc.save();
-    EXPECT_FALSE(bytes.empty());
+    const auto expected = std::vector<std::byte>{
+        std::byte{0x85},
+        std::byte{0x6f},
+        std::byte{0x4a},
+        std::byte{0x83},
+        std::byte{0xb8},
+        std::byte{0x1a},
+        std::byte{0x95},
+        std::byte{0x44},
+        std::byte{0x00},
+        std::byte{0x04},
+        std::byte{0x00},
+        std::byte{0x00},
+        std::byte{0x00},
+        std::byte{0x00},
+    };
+    EXPECT_EQ(bytes, expected);
 
     auto loaded = Document::load(bytes);
     ASSERT_TRUE(loaded.has_value());
-    EXPECT_EQ(loaded->actor_id(), doc.actor_id());
     EXPECT_EQ(loaded->length(root), 0u);
 }
 

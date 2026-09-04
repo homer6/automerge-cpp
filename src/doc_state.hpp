@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <iterator>
 #include <map>
 #include <optional>
 #include <ranges>
@@ -45,6 +46,14 @@ struct MarkEntry {
     ScalarValue value;
 };
 
+struct PendingMark {
+    ObjId obj;
+    OpId mark_id;
+    std::optional<OpId> start_after;
+    std::string name;
+    ScalarValue value;
+};
+
 // The state of a single CRDT object in the document tree.
 struct ObjectState {
     ObjType type;
@@ -68,6 +77,7 @@ struct DocState {
     std::vector<ChangeHash> heads;
     std::map<ActorId, std::uint64_t> clock;  // actor -> max seq seen
     std::uint64_t local_seq = 0;
+    std::unordered_map<ActorId, PendingMark> pending_marks;
 
     // Encoded changes form a materialized prefix of change_history. Local commits after that
     // prefix retain their parent by history index until a hash-bearing API needs the bytes.
@@ -525,6 +535,41 @@ struct DocState {
         return pos;
     }
 
+    static auto first_visible_after(const ObjectState& state, const std::optional<OpId>& after)
+        -> std::optional<OpId> {
+        auto begin = state.list_elements.begin();
+        if (after) {
+            const auto anchor =
+                std::ranges::find(state.list_elements, *after, &ListElement::insert_id);
+            if (anchor == state.list_elements.end()) {
+                return std::nullopt;
+            }
+            begin = std::next(anchor);
+        }
+        const auto element = std::find_if(
+            begin, state.list_elements.end(), [](const auto& entry) { return entry.visible; });
+        return element == state.list_elements.end() ? std::nullopt
+                                                    : std::optional{element->insert_id};
+    }
+
+    static auto last_visible_at_or_before(const ObjectState& state,
+                                          const std::optional<OpId>& before)
+        -> std::optional<OpId> {
+        if (!before) {
+            return std::nullopt;
+        }
+        const auto anchor =
+            std::ranges::find(state.list_elements, *before, &ListElement::insert_id);
+        if (anchor == state.list_elements.end()) {
+            return std::nullopt;
+        }
+        const auto element = std::find_if(std::make_reverse_iterator(std::next(anchor)),
+                                          state.list_elements.rend(),
+                                          [](const auto& entry) { return entry.visible; });
+        return element == state.list_elements.rend() ? std::nullopt
+                                                     : std::optional{element->insert_id};
+    }
+
     // -- Remote operation application (Phase 3) -------------------------------
 
     void apply_op(const Op& op) {
@@ -626,21 +671,39 @@ struct DocState {
                 break;
             }
             case OpType::mark: {
-                // Mark ops use: key=mark name, value=mark value,
-                // pred[0]=start element, pred[1]=end element
-                if (!is_map) break;  // name is stored as string key
-                if (op.pred.size() < 2) break;
                 auto* obj_state = get_object(op.obj);
                 if (!obj_state) break;
-                obj_state->marks.push_back(MarkEntry{
-                    .mark_id = op.id,
-                    .start_elem = op.pred[0],
-                    .end_elem = op.pred[1],
-                    .name = *key_str,
-                    .value = std::get_if<ScalarValue>(&op.value)
-                        ? *std::get_if<ScalarValue>(&op.value)
-                        : ScalarValue{Null{}},
-                });
+                if (op.mark_name) {
+                    const auto* value = std::get_if<ScalarValue>(&op.value);
+                    if (!value)
+                        break;
+                    pending_marks.insert_or_assign(op.id.actor,
+                                                   PendingMark{
+                                                       .obj = op.obj,
+                                                       .mark_id = op.id,
+                                                       .start_after = op.insert_after,
+                                                       .name = *op.mark_name,
+                                                       .value = *value,
+                                                   });
+                    break;
+                }
+
+                const auto pending = pending_marks.find(op.id.actor);
+                if (pending == pending_marks.end() || pending->second.obj != op.obj)
+                    break;
+                const auto start_elem =
+                    first_visible_after(*obj_state, pending->second.start_after);
+                const auto end_elem = last_visible_at_or_before(*obj_state, op.insert_after);
+                if (start_elem && end_elem) {
+                    obj_state->marks.push_back(MarkEntry{
+                        .mark_id = pending->second.mark_id,
+                        .start_elem = *start_elem,
+                        .end_elem = *end_elem,
+                        .name = pending->second.name,
+                        .value = pending->second.value,
+                    });
+                }
+                pending_marks.erase(pending);
                 break;
             }
         }

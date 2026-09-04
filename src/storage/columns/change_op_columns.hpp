@@ -139,7 +139,8 @@ inline auto encode_change_ops(const std::vector<Op>& ops, const std::vector<Acto
         }
 
         // KEY: depends on whether it's a string key or an element reference
-        const bool is_map_key = std::holds_alternative<std::string>(op.key);
+        const bool is_map_key =
+            std::holds_alternative<std::string>(op.key) && op.action != OpType::mark;
         if (is_map_key) {
             has_map_key = true;
             key_actor_enc.append_null();
@@ -151,7 +152,8 @@ inline auto encode_change_ops(const std::vector<Op>& ops, const std::vector<Acto
             if (op.insert_after) {
                 key_actor_enc.append(find_actor_idx(op.insert_after->actor));
                 key_counter_enc.append(static_cast<std::int64_t>(op.insert_after->counter));
-            } else if (op.action == OpType::insert || op.action == OpType::splice_text) {
+            } else if (op.action == OpType::insert || op.action == OpType::splice_text ||
+                       op.action == OpType::mark) {
                 // Insert at head
                 key_actor_enc.append_null();
                 key_counter_enc.append(0);
@@ -169,7 +171,8 @@ inline auto encode_change_ops(const std::vector<Op>& ops, const std::vector<Acto
         }
 
         // INSERT flag
-        const bool is_insert = (op.action == OpType::insert || op.action == OpType::splice_text);
+        const bool is_insert = op.action == OpType::insert || op.action == OpType::splice_text ||
+                               op.action == OpType::mark;
         insert_enc.append(is_insert);
 
         // ACTION code
@@ -198,10 +201,10 @@ inline auto encode_change_ops(const std::vector<Op>& ops, const std::vector<Acto
 
         // EXPAND (mark-related)
         if (op.action == OpType::mark) {
-            expand_enc.append(true);
+            expand_enc.append(op.expand);
             has_expand = true;
-            if (is_map_key) {
-                mark_name_enc.append(std::get<std::string>(op.key));
+            if (op.mark_name) {
+                mark_name_enc.append(*op.mark_name);
                 has_mark_name = true;
             } else {
                 mark_name_enc.append_null();
@@ -305,6 +308,8 @@ inline auto decode_change_ops(const std::vector<RawColumn>& columns,
     auto pred_group_data = find_col(change_op_columns::pred_group);
     auto pred_actor_data = find_col(change_op_columns::pred_actor);
     auto pred_counter_data = find_col(change_op_columns::pred_counter);
+    auto expand_data = find_col(change_op_columns::expand);
+    auto mark_name_data = find_col(change_op_columns::mark_name);
 
     // Create decoders
     auto obj_actor_dec = encoding::RleDecoder<std::uint64_t>{obj_actor_data};
@@ -317,6 +322,8 @@ inline auto decode_change_ops(const std::vector<RawColumn>& columns,
     auto pred_group_dec = encoding::RleDecoder<std::uint64_t>{pred_group_data};
     auto pred_actor_dec = encoding::RleDecoder<std::uint64_t>{pred_actor_data};
     auto pred_counter_dec = encoding::DeltaDecoder{pred_counter_data};
+    auto expand_dec = encoding::BooleanDecoder{expand_data};
+    auto mark_name_dec = encoding::RleDecoder<std::string>{mark_name_data};
 
     auto val_meta_dec = encoding::RleDecoder<std::uint64_t>{val_meta_data};
     auto val_raw_pos = std::size_t{0};
@@ -405,7 +412,10 @@ inline auto decode_change_ops(const std::vector<RawColumn>& columns,
             return std::nullopt;
 
         // Map action code + insert flag to OpType + Value
-        if (is_insert) {
+        if (action_code == 7) {
+            op.action = OpType::mark;
+            op.value = *value;
+        } else if (is_insert) {
             if (action_code == 0 || action_code == 2 || action_code == 4 || action_code == 6) {
                 op.action = OpType::insert;
                 const auto object_type = action_code == 0   ? ObjType::map
@@ -459,13 +469,24 @@ inline auto decode_change_ops(const std::vector<RawColumn>& columns,
                 op.action = OpType::make_object;
                 op.value = Value{ObjType::table};
                 break;
-            case 7:
-                op.action = OpType::mark;
-                op.value = *value;
-                break;
             default:
                 return std::nullopt;
             }
+        }
+
+        if (!expand_data.empty()) {
+            const auto expand = expand_dec.next();
+            if (!expand) {
+                return std::nullopt;
+            }
+            op.expand = *expand;
+        }
+        if (!mark_name_data.empty()) {
+            const auto mark_name = mark_name_dec.next();
+            if (!mark_name) {
+                return std::nullopt;
+            }
+            op.mark_name = *mark_name;
         }
 
         // PRED

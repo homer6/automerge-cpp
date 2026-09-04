@@ -86,7 +86,7 @@ public:
     /// Get the actor ID of this document.
     auto actor_id() const -> const ActorId&;
 
-    /// Set the actor ID. Must be called before any mutations.
+    /// Set the actor ID used for subsequent local changes.
     void set_actor_id(ActorId id);
 
     // -- Mutation -------------------------------------------------------------
