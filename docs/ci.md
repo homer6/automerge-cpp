@@ -140,3 +140,13 @@ test -f docs/html/index.html
 ```
 
 The hosted setup step enables GitHub Pages when the repository does not yet have a Pages site.
+
+## Fixture bytes and the Pages job
+
+`tests/fixtures/**` is marked `binary` in `.gitattributes` because the Windows runner checks out
+with `core.autocrlf=true`, and a translated fixture no longer matches automerge-rs byte for byte
+(`ChangeHashFixture.matches_automerge_rs_change_chunks` failed on `main` for that reason). The
+`.hashes` files and the generator sources are text with LF endings. The Pages workflow runs only
+on manual dispatch: this repository is private and the Actions token cannot create a Pages site
+(`Resource not accessible by integration`); enable Pages in the repository settings before
+dispatching it.

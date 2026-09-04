@@ -1,0 +1,4 @@
+# Fixture bytes are compared byte-for-byte against automerge-rs; never translate line endings.
+tests/fixtures/** binary
+tests/fixtures/**/*.hashes text eol=lf
+tests/fixtures/generator/** text eol=lf
