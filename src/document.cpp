@@ -1,6 +1,7 @@
 #include <automerge-cpp/document.hpp>
 
 #include <automerge-cpp/cursor.hpp>
+#include <automerge-cpp/document.hpp>
 #include <automerge-cpp/mark.hpp>
 #include <automerge-cpp/patch.hpp>
 #include <automerge-cpp/thread_pool.hpp>
@@ -13,6 +14,7 @@
 #include "storage/document_chunk.hpp"
 #include "storage/serializer.hpp"
 #include "sync/bloom_filter.hpp"
+#include "utf8.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -267,6 +269,46 @@ static auto validate_change(const Change& change) -> std::expected<void, Error> 
     return {};
 }
 
+static auto validate_text_operations(const detail::DocState& state,
+                                     const std::vector<Change>& changes)
+    -> std::expected<void, Error> {
+    auto incoming_object_types = std::unordered_map<ObjId, ObjType>{};
+    std::ranges::for_each(changes, [&](const Change& change) {
+        std::ranges::for_each(change.operations, [&](const Op& operation) {
+            if (const auto* type = std::get_if<ObjType>(&operation.value)) {
+                incoming_object_types.emplace(ObjId{operation.id}, *type);
+            }
+        });
+    });
+    const auto text_operations_are_scalars =
+        std::ranges::all_of(changes, [&](const Change& change) {
+            return std::ranges::all_of(change.operations, [&](const Op& operation) {
+                if (operation.action != OpType::splice_text) {
+                    return true;
+                }
+                const auto incoming_type = incoming_object_types.find(operation.obj);
+                const auto type = incoming_type != incoming_object_types.end()
+                                      ? std::optional{incoming_type->second}
+                                      : state.object_type(operation.obj);
+                if (!type || *type != ObjType::text) {
+                    return true;
+                }
+                const auto* scalar = std::get_if<ScalarValue>(&operation.value);
+                if (!scalar) {
+                    return false;
+                }
+                const auto* text = std::get_if<std::string>(scalar);
+                return text && detail::is_single_utf8_scalar(*text);
+            });
+        });
+    if (!text_operations_are_scalars) {
+        return std::unexpected{
+            Error{ErrorKind::invalid_change,
+                  "text insertion operations must contain one valid UTF-8 scalar value"}};
+    }
+    return {};
+}
+
 static auto queued_sequence_conflicts(const detail::DocState& state,
                                       const Change& incoming,
                                       const ChangeHash& incoming_hash) -> bool {
@@ -369,6 +411,10 @@ struct ChangeAdmission {
 
 static auto validate_changes(const detail::DocState& state, const std::vector<Change>& changes)
     -> std::expected<std::vector<ChangeAdmission>, Error> {
+    const auto text_validation = validate_text_operations(state, changes);
+    if (!text_validation) {
+        return std::unexpected{text_validation.error()};
+    }
     auto admissions = std::vector<ChangeAdmission>{};
     admissions.reserve(changes.size());
     auto supplied_hashes = std::unordered_set<ChangeHash>{};
@@ -680,7 +726,13 @@ auto Document::load(std::span<const std::byte> data) -> std::optional<Document> 
     if (!parsed)
         return std::nullopt;
 
+    const auto changes_are_valid = std::ranges::all_of(
+        parsed->changes, [](const Change& change) { return validate_change(change).has_value(); });
+
     auto doc = Document{1u}; // no pool — caller can assign one later
+    if (!changes_are_valid || !validate_text_operations(*doc.state_, parsed->changes)) {
+        return std::nullopt;
+    }
     doc.set_actor_id(parsed->local_actor);
     doc.state_->next_counter = parsed->next_counter;
     doc.state_->local_seq = parsed->local_seq;

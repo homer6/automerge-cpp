@@ -447,6 +447,194 @@ TEST(Document, text_splice_replace) {
     EXPECT_EQ(doc.text(text_id), "Hello C++");
 }
 
+TEST(Document, text_splice_uses_unicode_scalar_indices) {
+    auto doc = Document{};
+    auto text_id = ObjId{};
+
+    const auto initial = doc.transact([&](auto& tx) {
+        text_id = tx.put_object(root, "content", ObjType::text);
+        return tx.splice_text(text_id, 0, 0, "é界👩‍👩‍👧‍👦é");
+    });
+    ASSERT_TRUE(initial.has_value());
+    EXPECT_EQ(doc.length(text_id), 11u);
+
+    const auto replaced_accent =
+        doc.transact([&](auto& tx) { return tx.splice_text(text_id, 0, 1, "à"); });
+    const auto replaced_cjk =
+        doc.transact([&](auto& tx) { return tx.splice_text(text_id, 1, 1, "猫"); });
+    const auto split_grapheme =
+        doc.transact([&](auto& tx) { return tx.splice_text(text_id, 5, 0, "X"); });
+    const auto replaced_combining_mark =
+        doc.transact([&](auto& tx) { return tx.splice_text(text_id, 11, 1, "̈"); });
+
+    EXPECT_TRUE(replaced_accent.has_value());
+    EXPECT_TRUE(replaced_cjk.has_value());
+    EXPECT_TRUE(split_grapheme.has_value());
+    EXPECT_TRUE(replaced_combining_mark.has_value());
+    EXPECT_EQ(doc.text(text_id), "à猫👩‍👩X‍👧‍👦ë");
+    EXPECT_EQ(doc.length(text_id), 12u);
+}
+
+TEST(Document, text_splice_emits_one_op_per_unicode_scalar) {
+    auto doc = Document{};
+    auto text_id = ObjId{};
+    const auto expected_scalars =
+        std::vector<std::string>{"é", "界", "👩", "‍", "👩", "‍", "👧", "‍", "👦", "e", "́"};
+
+    const auto result = doc.transact([&](auto& tx) {
+        text_id = tx.put_object(root, "content", ObjType::text);
+        return tx.splice_text(text_id, 0, 0, "é界👩‍👩‍👧‍👦é");
+    });
+    ASSERT_TRUE(result.has_value());
+
+    const auto changes = doc.get_changes();
+    ASSERT_EQ(changes.size(), 1u);
+    ASSERT_EQ(changes[0].operations.size(), expected_scalars.size() + 1);
+    for (std::size_t index = 0; index < expected_scalars.size(); ++index) {
+        const auto& operation = changes[0].operations[index + 1];
+        EXPECT_EQ(operation.action, OpType::splice_text);
+        const auto* scalar = std::get_if<ScalarValue>(&operation.value);
+        ASSERT_NE(scalar, nullptr);
+        const auto* text = std::get_if<std::string>(scalar);
+        ASSERT_NE(text, nullptr);
+        EXPECT_EQ(*text, expected_scalars[index]);
+    }
+}
+
+TEST(Document, text_splice_rejects_invalid_utf8_without_mutation) {
+    auto doc = Document{};
+    auto text_id = ObjId{};
+    doc.transact([&](auto& tx) {
+        text_id = tx.put_object(root, "content", ObjType::text);
+        tx.splice_text(text_id, 0, 0, "valid");
+    });
+    const auto heads_before = doc.get_heads();
+    const auto invalid_text = std::vector<std::string>{
+        std::string{static_cast<char>(0x80)},
+        std::string{static_cast<char>(0xc0), static_cast<char>(0xaf)},
+        std::string{static_cast<char>(0xe2), static_cast<char>(0x82)},
+        std::string{static_cast<char>(0xed), static_cast<char>(0xa0), static_cast<char>(0x80)},
+        std::string{static_cast<char>(0xf4),
+                    static_cast<char>(0x90),
+                    static_cast<char>(0x80),
+                    static_cast<char>(0x80)},
+    };
+
+    for (const auto& text : invalid_text) {
+        const auto result =
+            doc.transact([&](auto& tx) { return tx.splice_text(text_id, 0, 1, text); });
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().kind, ErrorKind::invalid_operation);
+        EXPECT_EQ(result.error().message, "text must be valid UTF-8");
+    }
+
+    EXPECT_EQ(doc.text(text_id), "valid");
+    EXPECT_EQ(doc.get_heads(), heads_before);
+}
+
+TEST(Document, apply_changes_rejects_text_ops_with_multiple_scalars) {
+    auto source = Document{};
+    auto text_id = ObjId{};
+    source.transact([&](auto& tx) {
+        text_id = tx.put_object(root, "content", ObjType::text);
+        tx.splice_text(text_id, 0, 0, "x");
+    });
+    auto changes = source.get_changes();
+    ASSERT_EQ(changes.size(), 1u);
+    ASSERT_EQ(changes[0].operations.size(), 2u);
+    changes[0].operations[1].value = Value{ScalarValue{std::string{"xy"}}};
+
+    auto target = Document{};
+    const auto result = target.apply_changes(std::move(changes));
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().kind, ErrorKind::invalid_change);
+    EXPECT_EQ(target.length(root), 0u);
+}
+
+TEST(Document, concurrent_inserts_in_multibyte_text_merge_as_valid_utf8) {
+    auto base = Document{};
+    auto text_id = ObjId{};
+    base.transact([&](auto& tx) {
+        text_id = tx.put_object(root, "content", ObjType::text);
+        tx.splice_text(text_id, 0, 0, "é界🙂");
+    });
+    auto first = base.fork();
+    auto second = base.fork();
+    first.transact([&](auto& tx) { tx.splice_text(text_id, 1, 0, "猫"); });
+    second.transact([&](auto& tx) { tx.splice_text(text_id, 2, 0, "🚀"); });
+
+    const auto merge_result = first.merge(second);
+
+    ASSERT_TRUE(merge_result.has_value());
+    const auto merged = first.text(text_id);
+    EXPECT_NE(merged.find("é"), std::string::npos);
+    EXPECT_NE(merged.find("界"), std::string::npos);
+    EXPECT_NE(merged.find("🙂"), std::string::npos);
+    EXPECT_NE(merged.find("猫"), std::string::npos);
+    EXPECT_NE(merged.find("🚀"), std::string::npos);
+    EXPECT_EQ(first.length(text_id), 5u);
+}
+
+TEST(Document, marks_and_cursors_use_unicode_scalar_indices) {
+    auto doc = Document{};
+    auto text_id = ObjId{};
+    doc.transact([&](auto& tx) {
+        text_id = tx.put_object(root, "content", ObjType::text);
+        tx.splice_text(text_id, 0, 0, "é界👩‍👩‍👧‍👦é");
+        tx.mark(text_id, 1, 9, "bold", true);
+    });
+    const auto cursor = doc.cursor(text_id, 8);
+    ASSERT_TRUE(cursor.has_value());
+
+    doc.transact([&](auto& tx) { tx.splice_text(text_id, 1, 0, "猫"); });
+
+    const auto marks = doc.marks(text_id);
+    ASSERT_EQ(marks.size(), 1u);
+    EXPECT_EQ(marks[0].start, 2u);
+    EXPECT_EQ(marks[0].end, 10u);
+    const auto resolved = doc.resolve_cursor(text_id, *cursor);
+    ASSERT_TRUE(resolved.has_value());
+    EXPECT_EQ(*resolved, 9u);
+}
+
+TEST(Document, unicode_text_patches_use_scalar_indices) {
+    auto doc = Document{};
+    auto text_id = ObjId{};
+    doc.transact([&](auto& tx) {
+        text_id = tx.put_object(root, "content", ObjType::text);
+        tx.splice_text(text_id, 0, 0, "é界🙂");
+    });
+
+    auto [result, patches] =
+        doc.transact_with_patches([&](auto& tx) { return tx.splice_text(text_id, 1, 1, "猫🚀"); });
+
+    ASSERT_TRUE(result.has_value());
+    ASSERT_EQ(patches.size(), 1u);
+    const auto* splice = std::get_if<PatchSpliceText>(&patches[0].action);
+    ASSERT_NE(splice, nullptr);
+    EXPECT_EQ(splice->index, 1u);
+    EXPECT_EQ(splice->delete_count, 1u);
+    EXPECT_EQ(splice->text, "猫🚀");
+    EXPECT_EQ(doc.text(text_id), "é猫🚀🙂");
+}
+
+TEST(Document, unicode_text_save_load_round_trip) {
+    auto doc = Document{};
+    auto text_id = ObjId{};
+    doc.transact([&](auto& tx) {
+        text_id = tx.put_object(root, "content", ObjType::text);
+        tx.splice_text(text_id, 0, 0, "café 世界 👩‍👩‍👧‍👦 é");
+    });
+
+    const auto bytes = doc.save();
+    const auto loaded = Document::load(bytes);
+
+    ASSERT_TRUE(loaded.has_value());
+    EXPECT_EQ(loaded->text(text_id), "café 世界 👩‍👩‍👧‍👦 é");
+    EXPECT_EQ(loaded->length(text_id), 18u);
+}
+
 // -- Counter operations -------------------------------------------------------
 
 TEST(Document, counter_put_and_increment) {
@@ -624,6 +812,30 @@ TEST(Transaction, explicit_rollback_is_idempotent_and_prevents_commit) {
     });
 
     EXPECT_EQ(doc.save(), bytes_before);
+}
+
+TEST(Transaction, rollback_restores_multibyte_text_scalar_splice) {
+    auto doc = make_doc(11);
+    auto text_id = ObjId{};
+    const auto original = std::string{"é界👩‍👩‍👧‍👦é"};
+    doc.transact([&](Transaction& tx) {
+        text_id = tx.put_object(root, "text", ObjType::text);
+        ASSERT_TRUE(tx.splice_text(text_id, 0, 0, original).has_value());
+    });
+    const auto bytes_before = doc.save();
+
+    doc.transact([&](Transaction& tx) {
+        ASSERT_TRUE(tx.splice_text(text_id, 2, 7, "猫🚀").has_value());
+        EXPECT_EQ(tx.text(text_id), "é界猫🚀é");
+
+        tx.rollback();
+
+        EXPECT_EQ(tx.text(text_id), original);
+        EXPECT_EQ(tx.length(text_id), 11u);
+    });
+
+    EXPECT_EQ(doc.save(), bytes_before);
+    EXPECT_EQ(doc.text(text_id), original);
 }
 
 TEST(Transaction, throwing_return_value_lambda_rolls_back) {

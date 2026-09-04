@@ -162,7 +162,7 @@ auto get_path(Props&&... props) const -> std::optional<Value>;
 ```cpp
 doc.keys(ObjId)       -> std::vector<std::string>   // sorted map keys
 doc.values(ObjId)     -> std::vector<Value>          // values in key/index order
-doc.length(ObjId)     -> std::size_t                 // # of entries/elements
+doc.length(ObjId)     -> std::size_t                 // # of entries/elements/scalar values
 ```
 
 ### Reading — Text
@@ -170,6 +170,10 @@ doc.length(ObjId)     -> std::size_t                 // # of entries/elements
 ```cpp
 doc.text(ObjId)       -> std::string                 // concatenated text content
 ```
+
+Text content is UTF-8. Text-object indices and `doc.length(text_obj)` count Unicode scalar values,
+matching automerge-rs `TextEncoding::UnicodeCodePoint`. `doc.text(text_obj).size()` is the UTF-8
+byte count because `std::string::size()` counts bytes.
 
 ### Object Queries
 
@@ -225,12 +229,16 @@ doc.cursor(ObjId, std::size_t index)           -> std::optional<Cursor>
 doc.resolve_cursor(ObjId, const Cursor&)       -> std::optional<std::size_t>
 ```
 
+Cursor indices count list elements for lists and Unicode scalar values for text objects.
+
 ### Rich Text Marks
 
 ```cpp
 doc.marks(ObjId)                               -> std::vector<Mark>
 doc.marks_at(ObjId, const std::vector<ChangeHash>&) -> std::vector<Mark>
 ```
+
+Mark start and end indices count list elements for lists and Unicode scalar values for text.
 
 ### Thread Pool
 
@@ -483,8 +491,13 @@ tx.insert_range(list, 0, vals);
 
 ```cpp
 tx.splice_text(ObjId, std::size_t pos, std::size_t del,
-               std::string_view text) -> void
+               std::string_view text) -> std::expected<void, Error>
 ```
+
+`pos` and `del` count Unicode scalar values. Inserted text must be valid UTF-8; invalid input
+returns `ErrorKind::invalid_operation` before the text object is changed. Each inserted scalar
+value produces one operation. A grapheme cluster can contain multiple scalar values and may be
+split by local or concurrent edits, matching upstream Automerge behavior.
 
 ### Counter Operations
 
@@ -787,7 +800,11 @@ struct PatchPut { Value value; bool conflict; };
 struct PatchInsert { std::size_t index; Value value; };
 struct PatchDelete { std::size_t index; std::size_t count; };
 struct PatchIncrement { std::int64_t delta; };
-struct PatchSpliceText { std::size_t index; std::size_t delete_count; std::string text; };
+struct PatchSpliceText {
+    std::size_t index;         // Unicode scalar-value index
+    std::size_t delete_count;  // Unicode scalar-value count
+    std::string text;
+};
 
 using PatchAction = std::variant<PatchPut, PatchInsert, PatchDelete, PatchIncrement, PatchSpliceText>;
 
@@ -824,8 +841,8 @@ Supports: `==`, `<=>`.
 
 ```cpp
 struct Mark {
-    std::size_t start;      // start index (inclusive)
-    std::size_t end;        // end index (exclusive)
+    std::size_t start;      // list-element or text-scalar index (inclusive)
+    std::size_t end;        // list-element or text-scalar index (exclusive)
     std::string name;       // e.g. "bold", "italic", "link"
     ScalarValue value;      // e.g. true, "https://..."
 };

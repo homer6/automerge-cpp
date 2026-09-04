@@ -1,6 +1,8 @@
 #include <automerge-cpp/transaction.hpp>
 
+#include "doc_state.hpp"
 #include "transaction_rollback.hpp"
+#include "utf8.hpp"
 
 namespace automerge_cpp {
 
@@ -151,10 +153,17 @@ void Transaction::delete_index(const ObjId& obj, std::size_t index) {
     pending_ops_.push_back(std::move(op));
 }
 
-void Transaction::splice_text(const ObjId& obj, std::size_t pos, std::size_t del,
-                               std::string_view text) {
+auto Transaction::splice_text(const ObjId& obj,
+                              std::size_t pos,
+                              std::size_t del,
+                              std::string_view text) -> std::expected<void, Error> {
     rollback_state_->assert_active();
-    // Delete characters
+    const auto scalars = detail::split_utf8_scalars(text);
+    if (!scalars) {
+        return std::unexpected{scalars.error()};
+    }
+
+    // Delete scalar values
     for (std::size_t i = 0; i < del; ++i) {
         auto pred = state_.list_pred(obj, pos);
         rollback_state_->record_list_visibility(state_, obj, pos);
@@ -171,9 +180,9 @@ void Transaction::splice_text(const ObjId& obj, std::size_t pos, std::size_t del
         pending_ops_.push_back(std::move(op));
     }
 
-    // Insert characters — one op per character, chaining insert_after
+    // Insert one complete scalar value per op, chaining insert_after.
     auto prev_op_id = std::optional<OpId>{};
-    for (std::size_t i = 0; i < text.size(); ++i) {
+    for (std::size_t i = 0; i < scalars->size(); ++i) {
         auto insert_after = std::optional<OpId>{};
         if (i == 0) {
             insert_after = state_.insert_after_for(obj, pos);
@@ -184,19 +193,20 @@ void Transaction::splice_text(const ObjId& obj, std::size_t pos, std::size_t del
         auto op_id = state_.next_op_id();
         rollback_state_->record_list_insert(obj, op_id);
         prev_op_id = op_id;
-        auto char_val = Value{ScalarValue{std::string(1, text[i])}};
-        state_.list_insert(obj, pos + i, op_id, char_val, insert_after);
+        auto scalar_value = Value{ScalarValue{std::string{(*scalars)[i]}}};
+        state_.list_insert(obj, pos + i, op_id, scalar_value, insert_after);
         auto op = Op{
             .id = op_id,
             .obj = obj,
             .key = list_index(pos + i),
             .action = OpType::splice_text,
-            .value = std::move(char_val),
+            .value = std::move(scalar_value),
             .pred = {},
             .insert_after = insert_after,
         };
         pending_ops_.push_back(std::move(op));
     }
+    return {};
 }
 
 void Transaction::increment(const ObjId& obj, std::string_view key, std::int64_t delta) {

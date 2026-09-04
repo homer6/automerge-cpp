@@ -49,8 +49,8 @@ struct PatchIncrement {
 
 /// Text was spliced (inserted and/or deleted).
 struct PatchSpliceText {
-    std::size_t index;         ///< The starting index of the splice.
-    std::size_t delete_count;  ///< The number of characters deleted.
+    std::size_t index;         ///< The starting Unicode scalar-value index of the splice.
+    std::size_t delete_count;  ///< The number of Unicode scalar values deleted.
     std::string text;          ///< The text that was inserted.
     auto operator==(const PatchSpliceText&) const -> bool = default;
 };

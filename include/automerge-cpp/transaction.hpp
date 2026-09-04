@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <automerge-cpp/error.hpp>
 #include <automerge-cpp/op.hpp>
 #include <automerge-cpp/types.hpp>
 #include <automerge-cpp/value.hpp>
@@ -10,6 +11,7 @@
 #include <algorithm>
 #include <concepts>
 #include <cstddef>
+#include <expected>
 #include <initializer_list>
 #include <memory>
 #include <optional>
@@ -101,13 +103,14 @@ public:
     /// @param index The position to delete.
     void delete_index(const ObjId& obj, std::size_t index);
 
-    /// Splice text: delete characters and/or insert new text.
+    /// Splice text: delete Unicode scalar values and/or insert valid UTF-8 text.
     /// @param obj The text object to modify.
     /// @param pos The starting position.
     /// @param del The number of characters to delete.
     /// @param text The text to insert at the position.
-    void splice_text(const ObjId& obj, std::size_t pos, std::size_t del,
-                     std::string_view text);
+    /// @return Success, or an error if text is not valid UTF-8.
+    auto splice_text(const ObjId& obj, std::size_t pos, std::size_t del, std::string_view text)
+        -> std::expected<void, Error>;
 
     /// Increment a counter value at a map key.
     /// @param obj The map object containing the counter.

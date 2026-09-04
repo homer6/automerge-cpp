@@ -13,6 +13,7 @@ One file per subject. A page says what exists, why, how to verify it, and how to
 | [`change-hashes.md`](change-hashes.md) | Upstream-compatible change hash definition and fixtures |
 | [`transactions/rollback.md`](transactions/rollback.md) | Transaction rollback design and verification |
 | [`incremental-save.md`](incremental-save.md) | Incremental persistence and public change-set queries |
+| [`text/unicode-scalar-values.md`](text/unicode-scalar-values.md) | UTF-8 validation and Unicode scalar-value text indexing |
 | [`plans/`](plans/) | Design plans that preceded implementation |
 | `Doxyfile` | Doxygen configuration for the generated reference |
 

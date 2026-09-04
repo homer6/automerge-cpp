@@ -148,7 +148,8 @@ public:
     /// Get all values in a map (in key order) or list (in index order).
     auto values(const ObjId& obj) const -> std::vector<Value>;
 
-    /// Get the number of entries in a map or elements in a list/text.
+    /// Get the number of entries in a map or elements in a list. Text elements are Unicode
+    /// scalar values.
     auto length(const ObjId& obj) const -> std::size_t;
 
     // -- Reading: text --------------------------------------------------------
@@ -355,14 +356,15 @@ public:
 
     /// Create a cursor at a position in a list or text.
     /// @param obj The list or text object.
-    /// @param index The current index to anchor the cursor to.
+    /// @param index The current list-element or text-scalar index to anchor the cursor to.
     /// @return A Cursor, or nullopt if the index is out of bounds.
     auto cursor(const ObjId& obj, std::size_t index) const -> std::optional<Cursor>;
 
     /// Resolve a cursor to its current index.
     /// @param obj The list or text object.
     /// @param cursor The cursor to resolve.
-    /// @return The current index, or nullopt if the element was deleted.
+    /// @return The current list-element or text-scalar index, or nullopt if the element was
+    /// deleted.
     auto resolve_cursor(const ObjId& obj, const Cursor& cursor) const -> std::optional<std::size_t>;
 
     // -- Rich text marks ------------------------------------------------------
