@@ -1,5 +1,3 @@
-#include <automerge-cpp/document.hpp>
-
 #include <automerge-cpp/cursor.hpp>
 #include <automerge-cpp/document.hpp>
 #include <automerge-cpp/mark.hpp>
@@ -66,14 +64,17 @@ static auto make_random_actor_id() -> ActorId {
 
 static auto make_default_pool() -> std::shared_ptr<thread_pool> {
     auto n = std::thread::hardware_concurrency();
-    if (n <= 1) return nullptr;
+    if (n <= 1)
+        return nullptr;
     return std::make_shared<thread_pool>(n);
 }
 
 static auto make_pool(unsigned int num_threads) -> std::shared_ptr<thread_pool> {
-    if (num_threads == 1) return nullptr;
+    if (num_threads == 1)
+        return nullptr;
     auto n = (num_threads == 0) ? std::thread::hardware_concurrency() : num_threads;
-    if (n <= 1) return nullptr;
+    if (n <= 1)
+        return nullptr;
     return std::make_shared<thread_pool>(n);
 }
 
@@ -182,15 +183,16 @@ auto Document::keys(const ObjId& obj) const -> std::vector<std::string> {
 auto Document::values(const ObjId& obj) const -> std::vector<Value> {
     auto guard = read_guard();
     const auto type = state_->object_type(obj);
-    if (!type) return {};
+    if (!type)
+        return {};
 
     switch (*type) {
-        case ObjType::map:
-        case ObjType::table:
-            return state_->map_values(obj);
-        case ObjType::list:
-        case ObjType::text:
-            return state_->list_values(obj);
+    case ObjType::map:
+    case ObjType::table:
+        return state_->map_values(obj);
+    case ObjType::list:
+    case ObjType::text:
+        return state_->list_values(obj);
     }
     return {};
 }
@@ -329,6 +331,7 @@ static void apply_change(detail::DocState& state, const Change& change) {
     std::ranges::for_each(
         change.deps, [&](const ChangeHash& dependency) { std::erase(state.heads, dependency); });
     state.heads.push_back(hash);
+    std::ranges::sort(state.heads);
     state.change_history.push_back(change);
 }
 
@@ -1059,6 +1062,7 @@ auto Document::load(std::span<const std::byte> data) -> std::optional<Document> 
 
     doc.state_->change_history = std::move(parsed->changes);
     doc.state_->heads = std::move(parsed->heads);
+    std::ranges::sort(doc.state_->heads);
     doc.state_->clock = std::move(parsed->clock);
 
     return doc;
@@ -1079,41 +1083,11 @@ auto Document::load_with_patches(std::span<const std::byte> data, Document& docu
 
 // -- Phase 5: Sync Protocol ---------------------------------------------------
 
-// SyncState encode/decode
-
-auto SyncState::encode() const -> std::vector<std::byte> {
-    auto s = storage::Serializer{};
-    s.write_u8(0x43);  // sync state marker
-    s.write_uleb128(shared_heads_.size());
-    for (const auto& h : shared_heads_) {
-        s.write_change_hash(h);
-    }
-    return s.take();
-}
-
-auto SyncState::decode(std::span<const std::byte> data) -> std::optional<SyncState> {
-    auto d = storage::Deserializer{data};
-    auto marker = d.read_u8();
-    if (!marker || *marker != 0x43) return std::nullopt;
-
-    auto num_heads = d.read_uleb128();
-    if (!num_heads) return std::nullopt;
-
-    auto state = SyncState{};
-    state.shared_heads_.reserve(static_cast<std::size_t>(*num_heads));
-    for (std::uint64_t i = 0; i < *num_heads; ++i) {
-        auto h = d.read_change_hash();
-        if (!h) return std::nullopt;
-        state.shared_heads_.push_back(*h);
-    }
-    return state;
-}
-
 // Determine which change hashes to send based on peer's bloom filter and needs.
-static auto get_hashes_to_send(
-    const detail::DocState& state,
-    const std::vector<Have>& their_have,
-    const std::vector<ChangeHash>& their_need) -> std::vector<ChangeHash> {
+static auto get_hashes_to_send(const detail::DocState& state,
+                               const std::vector<Have>& their_have,
+                               const std::vector<ChangeHash>& their_need)
+    -> std::vector<ChangeHash> {
 
     if (their_have.empty()) {
         return their_need;
@@ -1123,8 +1097,7 @@ static auto get_hashes_to_send(
     auto last_sync_heads = std::vector<ChangeHash>{};
     auto bloom_filters = std::vector<sync::BloomFilter>{};
     for (const auto& have : their_have) {
-        last_sync_heads.insert(last_sync_heads.end(),
-            have.last_sync.begin(), have.last_sync.end());
+        last_sync_heads.insert(last_sync_heads.end(), have.last_sync.begin(), have.last_sync.end());
         auto bf = sync::BloomFilter::from_bytes(have.bloom_bytes);
         bloom_filters.push_back(bf.value_or(sync::BloomFilter{}));
     }
@@ -1139,7 +1112,8 @@ static auto get_hashes_to_send(
 
     for (const auto& h : hashes) {
         auto it = hash_idx.find(h);
-        if (it == hash_idx.end()) continue;
+        if (it == hash_idx.end())
+            continue;
         for (const auto& dep : state.change_history[it->second].deps) {
             dependents[dep].push_back(h);
         }
@@ -1148,8 +1122,8 @@ static auto get_hashes_to_send(
     // Find hashes NOT in any bloom filter
     auto hashes_to_send = std::set<ChangeHash>{};
     for (const auto& h : hashes) {
-        auto in_any = std::ranges::any_of(bloom_filters,
-            [&](const auto& bf) { return bf.contains_hash(h); });
+        auto in_any =
+            std::ranges::any_of(bloom_filters, [&](const auto& bf) { return bf.contains_hash(h); });
         if (!in_any) {
             hashes_to_send.insert(h);
         }
@@ -1185,8 +1159,7 @@ static auto get_hashes_to_send(
     return result;
 }
 
-auto Document::generate_sync_message(SyncState& sync_state) const
-    -> std::optional<SyncMessage> {
+auto Document::generate_sync_message(SyncState& sync_state) const -> std::optional<SyncMessage> {
     auto guard = read_guard();
 
     auto our_heads = state_->heads;
@@ -1201,13 +1174,12 @@ auto Document::generate_sync_message(SyncState& sync_state) const
     auto our_have = std::vector<Have>{};
     auto their_heads_set = std::set<ChangeHash>{};
     if (sync_state.their_heads_) {
-        their_heads_set.insert(sync_state.their_heads_->begin(),
-                               sync_state.their_heads_->end());
+        their_heads_set.insert(sync_state.their_heads_->begin(), sync_state.their_heads_->end());
     }
 
     // Check if all our needs are in their heads (normal case)
-    auto all_needs_in_their_heads = std::ranges::all_of(our_need,
-        [&](const auto& h) { return their_heads_set.contains(h); });
+    auto all_needs_in_their_heads =
+        std::ranges::all_of(our_need, [&](const auto& h) { return their_heads_set.contains(h); });
 
     if (all_needs_in_their_heads) {
         auto changes_since = state_->get_changes_since(sync_state.shared_heads_);
@@ -1225,8 +1197,7 @@ auto Document::generate_sync_message(SyncState& sync_state) const
     // Determine changes to send
     auto changes_to_send = std::vector<Change>{};
     if (sync_state.their_have_ && sync_state.their_need_) {
-        auto hashes = get_hashes_to_send(*state_,
-            *sync_state.their_have_, *sync_state.their_need_);
+        auto hashes = get_hashes_to_send(*state_, *sync_state.their_have_, *sync_state.their_need_);
 
         // Deduplicate with sent_hashes
         auto unsent = std::vector<ChangeHash>{};
@@ -1246,15 +1217,15 @@ auto Document::generate_sync_message(SyncState& sync_state) const
 
     // Should we send a message?
     auto heads_unchanged = (sync_state.last_sent_heads_ == our_heads);
-    auto heads_equal = (sync_state.their_heads_.has_value() &&
-                        *sync_state.their_heads_ == our_heads);
+    auto heads_equal =
+        (sync_state.their_heads_.has_value() && *sync_state.their_heads_ == our_heads);
 
     if (heads_unchanged && sync_state.have_responded_) {
         if (heads_equal && changes_to_send.empty()) {
-            return std::nullopt;  // fully synced
+            return std::nullopt; // fully synced
         }
         if (sync_state.in_flight_) {
-            return std::nullopt;  // waiting for ack
+            return std::nullopt; // waiting for ack
         }
     }
 
@@ -1268,6 +1239,7 @@ auto Document::generate_sync_message(SyncState& sync_state) const
         .need = std::move(our_need),
         .have = std::move(our_have),
         .changes = std::move(changes_to_send),
+        .supported_capabilities = std::vector<std::uint8_t>{0x01},
     };
 }
 
@@ -1321,7 +1293,8 @@ void Document::update_sync_state_after_receive(SyncState& sync_state, const Sync
             auto h = queue.back();
             queue.pop_back();
             auto it = hash_idx.find(h);
-            if (it == hash_idx.end()) continue;
+            if (it == hash_idx.end())
+                continue;
             for (const auto& dep : state_->change_history[it->second].deps) {
                 if (ancestors.insert(dep).second) {
                     queue.push_back(dep);
@@ -1330,7 +1303,7 @@ void Document::update_sync_state_after_receive(SyncState& sync_state, const Sync
         }
 
         std::erase_if(sync_state.sent_hashes_,
-            [&](const auto& h) { return ancestors.contains(h); });
+                      [&](const auto& h) { return ancestors.contains(h); });
     }
 
     // Update shared_heads based on what we now know they have
@@ -1351,8 +1324,7 @@ void Document::update_sync_state_after_receive(SyncState& sync_state, const Sync
     } else {
         // Merge known heads into shared
         for (const auto& h : known_heads) {
-            if (std::ranges::find(sync_state.shared_heads_, h) ==
-                sync_state.shared_heads_.end()) {
+            if (std::ranges::find(sync_state.shared_heads_, h) == sync_state.shared_heads_.end()) {
                 sync_state.shared_heads_.push_back(h);
             }
         }
@@ -1380,8 +1352,7 @@ static auto ops_to_patches(const std::vector<Op>& ops) -> std::vector<Patch> {
             auto obj = op.obj;
             auto index = std::get<std::size_t>(op.key);
             std::size_t count = 1;
-            while (i + count < ops.size() &&
-                   ops[i + count].action == OpType::del &&
+            while (i + count < ops.size() && ops[i + count].action == OpType::del &&
                    ops[i + count].obj == obj &&
                    std::holds_alternative<std::size_t>(ops[i + count].key) &&
                    std::get<std::size_t>(ops[i + count].key) == index) {
@@ -1390,13 +1361,11 @@ static auto ops_to_patches(const std::vector<Op>& ops) -> std::vector<Patch> {
 
             // Check if followed by splice_text inserts (= splice_text call)
             auto splice_start = i + count;
-            if (splice_start < ops.size() &&
-                ops[splice_start].action == OpType::splice_text &&
+            if (splice_start < ops.size() && ops[splice_start].action == OpType::splice_text &&
                 ops[splice_start].obj == obj) {
                 auto text = std::string{};
                 auto j = splice_start;
-                while (j < ops.size() &&
-                       ops[j].action == OpType::splice_text &&
+                while (j < ops.size() && ops[j].action == OpType::splice_text &&
                        ops[j].obj == obj) {
                     if (const auto* sv = std::get_if<ScalarValue>(&ops[j].value)) {
                         if (const auto* s = std::get_if<std::string>(sv)) {
@@ -1428,9 +1397,7 @@ static auto ops_to_patches(const std::vector<Op>& ops) -> std::vector<Patch> {
             auto index = std::get<std::size_t>(op.key);
             auto text = std::string{};
             auto j = i;
-            while (j < ops.size() &&
-                   ops[j].action == OpType::splice_text &&
-                   ops[j].obj == obj) {
+            while (j < ops.size() && ops[j].action == OpType::splice_text && ops[j].obj == obj) {
                 if (const auto* sv = std::get_if<ScalarValue>(&ops[j].value)) {
                     if (const auto* s = std::get_if<std::string>(sv)) {
                         text += *s;
@@ -1505,53 +1472,56 @@ auto Document::transact_with_patches(const std::function<void(Transaction&)>& fn
 
 // -- Phase 6: Historical reads ------------------------------------------------
 
-auto Document::get_at(const ObjId& obj, std::string_view key,
+auto Document::get_at(const ObjId& obj,
+                      std::string_view key,
                       const std::vector<ChangeHash>& heads) const -> std::optional<Value> {
     auto guard = read_guard();
     auto snapshot = state_->rebuild_state_at(heads);
     return snapshot.map_get(obj, std::string{key});
 }
 
-auto Document::get_at(const ObjId& obj, std::size_t index,
+auto Document::get_at(const ObjId& obj,
+                      std::size_t index,
                       const std::vector<ChangeHash>& heads) const -> std::optional<Value> {
     auto guard = read_guard();
     auto snapshot = state_->rebuild_state_at(heads);
     return snapshot.list_get(obj, index);
 }
 
-auto Document::keys_at(const ObjId& obj,
-                       const std::vector<ChangeHash>& heads) const -> std::vector<std::string> {
+auto Document::keys_at(const ObjId& obj, const std::vector<ChangeHash>& heads) const
+    -> std::vector<std::string> {
     auto guard = read_guard();
     auto snapshot = state_->rebuild_state_at(heads);
     return snapshot.map_keys(obj);
 }
 
-auto Document::values_at(const ObjId& obj,
-                         const std::vector<ChangeHash>& heads) const -> std::vector<Value> {
+auto Document::values_at(const ObjId& obj, const std::vector<ChangeHash>& heads) const
+    -> std::vector<Value> {
     auto guard = read_guard();
     auto snapshot = state_->rebuild_state_at(heads);
     auto type = snapshot.object_type(obj);
-    if (!type) return {};
+    if (!type)
+        return {};
     switch (*type) {
-        case ObjType::map:
-        case ObjType::table:
-            return snapshot.map_values(obj);
-        case ObjType::list:
-        case ObjType::text:
-            return snapshot.list_values(obj);
+    case ObjType::map:
+    case ObjType::table:
+        return snapshot.map_values(obj);
+    case ObjType::list:
+    case ObjType::text:
+        return snapshot.list_values(obj);
     }
     return {};
 }
 
-auto Document::length_at(const ObjId& obj,
-                         const std::vector<ChangeHash>& heads) const -> std::size_t {
+auto Document::length_at(const ObjId& obj, const std::vector<ChangeHash>& heads) const
+    -> std::size_t {
     auto guard = read_guard();
     auto snapshot = state_->rebuild_state_at(heads);
     return snapshot.object_length(obj);
 }
 
-auto Document::text_at(const ObjId& obj,
-                       const std::vector<ChangeHash>& heads) const -> std::string {
+auto Document::text_at(const ObjId& obj, const std::vector<ChangeHash>& heads) const
+    -> std::string {
     auto guard = read_guard();
     auto snapshot = state_->rebuild_state_at(heads);
     return snapshot.text_content(obj);
@@ -1559,11 +1529,11 @@ auto Document::text_at(const ObjId& obj,
 
 // -- Phase 6: Cursors ---------------------------------------------------------
 
-auto Document::cursor(const ObjId& obj, std::size_t index) const
-    -> std::optional<Cursor> {
+auto Document::cursor(const ObjId& obj, std::size_t index) const -> std::optional<Cursor> {
     auto guard = read_guard();
     auto id = state_->list_element_id_at(obj, index);
-    if (!id) return std::nullopt;
+    if (!id)
+        return std::nullopt;
     return Cursor{*id};
 }
 
@@ -1575,15 +1545,16 @@ auto Document::resolve_cursor(const ObjId& obj, const Cursor& cur) const
 
 // -- Rich text marks ----------------------------------------------------------
 
-static auto collect_marks(const detail::DocState& state, const ObjId& obj)
-    -> std::vector<Mark> {
+static auto collect_marks(const detail::DocState& state, const ObjId& obj) -> std::vector<Mark> {
     const auto* obj_state = state.get_object(obj);
-    if (!obj_state) return {};
+    if (!obj_state)
+        return {};
 
     auto result = std::vector<Mark>{};
     for (const auto& entry : obj_state->marks) {
         auto indices = state.resolve_mark_indices(*obj_state, entry);
-        if (!indices) continue;
+        if (!indices)
+            continue;
         auto [start, end] = *indices;
         result.push_back(Mark{
             .start = start,
@@ -1600,8 +1571,8 @@ auto Document::marks(const ObjId& obj) const -> std::vector<Mark> {
     return collect_marks(*state_, obj);
 }
 
-auto Document::marks_at(const ObjId& obj,
-                        const std::vector<ChangeHash>& heads) const -> std::vector<Mark> {
+auto Document::marks_at(const ObjId& obj, const std::vector<ChangeHash>& heads) const
+    -> std::vector<Mark> {
     auto guard = read_guard();
     auto snapshot = state_->rebuild_state_at(heads);
     return collect_marks(snapshot, obj);
@@ -1615,35 +1586,42 @@ auto Document::ops_to_patches_internal(const std::vector<Op>& ops) -> std::vecto
 
 auto Document::get_path_impl(std::span<const Prop> path) const -> std::optional<Value> {
     auto guard = read_guard();
-    if (path.empty()) return std::nullopt;
+    if (path.empty())
+        return std::nullopt;
 
     auto current_obj = root;
 
     // Walk all but the last path element to resolve intermediate ObjIds.
     for (std::size_t i = 0; i + 1 < path.size(); ++i) {
-        auto val = std::visit(overload{
-            [&](const std::string& key) { return state_->map_get(current_obj, key); },
-            [&](std::size_t index) { return state_->list_get(current_obj, index); },
-        }, path[i]);
+        auto val = std::visit(
+            overload{
+                [&](const std::string& key) { return state_->map_get(current_obj, key); },
+                [&](std::size_t index) { return state_->list_get(current_obj, index); },
+            },
+            path[i]);
 
-        if (!val) return std::nullopt;
+        if (!val)
+            return std::nullopt;
 
         // The value must be an ObjType to continue navigating.
-        if (!is_object(*val)) return std::nullopt;
+        if (!is_object(*val))
+            return std::nullopt;
 
         // We need the ObjId, not the ObjType. For intermediate objects,
         // the ObjId is the OpId that created them. We look it up via
         // the internal state's object-at-key resolution.
         auto obj_id = state_->get_obj_id_at(current_obj, path[i]);
-        if (!obj_id) return std::nullopt;
+        if (!obj_id)
+            return std::nullopt;
         current_obj = *obj_id;
     }
 
     // Final element: return the value.
     return std::visit(overload{
-        [&](const std::string& key) { return state_->map_get(current_obj, key); },
-        [&](std::size_t index) { return state_->list_get(current_obj, index); },
-    }, path.back());
+                          [&](const std::string& key) { return state_->map_get(current_obj, key); },
+                          [&](std::size_t index) { return state_->list_get(current_obj, index); },
+                      },
+                      path.back());
 }
 
-}  // namespace automerge_cpp
+} // namespace automerge_cpp

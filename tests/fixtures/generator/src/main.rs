@@ -1,4 +1,8 @@
-use automerge::{transaction::Transactable, ActorId, AutoCommit, ObjType, ROOT};
+use automerge::{
+    sync::{Capability, Message, MessageVersion, State, SyncDoc},
+    transaction::Transactable,
+    ActorId, AutoCommit, ObjType, ROOT,
+};
 use std::fs;
 use std::path::Path;
 
@@ -98,10 +102,83 @@ fn write_incremental_fixture() {
     .unwrap();
 }
 
+fn write_sync_document(path: &Path, document: &mut AutoCommit) {
+    fs::write(path, document.save_after(&[])).unwrap();
+}
+
+fn encode_v1(message: Message) -> Vec<u8> {
+    let mut message = message;
+    message.version = MessageVersion::V1;
+    message.supported_capabilities = Some(vec![Capability::MessageV1]);
+    message.encode()
+}
+
+fn sync_exchange() {
+    let fixture_directory = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let exchange_directory = fixture_directory.join("sync_exchange");
+    if exchange_directory.exists() {
+        fs::remove_dir_all(&exchange_directory).unwrap();
+    }
+    fs::create_dir(&exchange_directory).unwrap();
+
+    let mut first = AutoCommit::new().with_actor(actor(0x66));
+    first.put(ROOT, "first", "one").unwrap();
+    first.commit();
+    first.put(ROOT, "second", 2).unwrap();
+    first.commit();
+
+    let mut second = AutoCommit::new().with_actor(actor(0x77));
+    second.put(ROOT, "remote", true).unwrap();
+    second.commit();
+
+    write_sync_document(&exchange_directory.join("first.am"), &mut first);
+    write_sync_document(&exchange_directory.join("second.am"), &mut second);
+
+    let mut first_state = State::new();
+    let mut second_state = State::new();
+    let mut message_number = 0;
+
+    loop {
+        let first_message = first.sync().generate_sync_message(&mut first_state);
+        let second_message = second.sync().generate_sync_message(&mut second_state);
+        if first_message.is_none() && second_message.is_none() {
+            break;
+        }
+        assert!(message_number < 20, "sync exchange did not converge");
+
+        if let Some(message) = first_message {
+            let bytes = encode_v1(message);
+            let decoded = Message::decode(&bytes).unwrap();
+            let filename = format!("{message_number:02}-first-to-second.sync");
+            fs::write(exchange_directory.join(filename), bytes).unwrap();
+            second
+                .sync()
+                .receive_sync_message(&mut second_state, decoded)
+                .unwrap();
+            message_number += 1;
+        }
+
+        if let Some(message) = second_message {
+            let bytes = encode_v1(message);
+            let decoded = Message::decode(&bytes).unwrap();
+            let filename = format!("{message_number:02}-second-to-first.sync");
+            fs::write(exchange_directory.join(filename), bytes).unwrap();
+            first
+                .sync()
+                .receive_sync_message(&mut first_state, decoded)
+                .unwrap();
+            message_number += 1;
+        }
+    }
+
+    assert_eq!(first.get_heads(), second.get_heads());
+}
+
 fn main() {
     write_fixture("map_puts", &mut map_puts());
     write_fixture("list_inserts", &mut list_inserts());
     write_fixture("text_splice", &mut text_splice());
     write_fixture("two_actor_merge", &mut two_actor_merge());
     write_incremental_fixture();
+    sync_exchange();
 }

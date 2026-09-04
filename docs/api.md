@@ -216,6 +216,10 @@ doc.generate_sync_message(SyncState&)       -> std::optional<SyncMessage>
 doc.receive_sync_message(SyncState&, const SyncMessage&) -> std::expected<void, Error>
 doc.receive_sync_message_with_patches(SyncState&, const SyncMessage&)
                                               -> std::expected<std::vector<Patch>, Error>
+SyncMessage::encode()                       -> std::vector<std::byte>
+SyncMessage::decode(std::span<const std::byte>) -> std::expected<SyncMessage, Error>
+SyncState::encode()                         -> std::vector<std::byte>
+SyncState::decode(std::span<const std::byte>) -> std::optional<SyncState>
 ```
 
 ### Historical Reads — Time Travel
@@ -731,8 +735,16 @@ struct SyncMessage {
     std::vector<ChangeHash> need;
     std::vector<Have> have;
     std::vector<Change> changes;
+    std::optional<std::vector<std::uint8_t>> supported_capabilities;
+
+    auto encode() const -> std::vector<std::byte>;
+    static auto decode(std::span<const std::byte>)
+        -> std::expected<SyncMessage, Error>;
 };
 ```
+
+The codec uses Automerge's v1 sync format with complete change chunks. See
+[Sync wire format](sync-wire-format.md) for the byte layout and compatibility fixtures.
 
 ### Have
 

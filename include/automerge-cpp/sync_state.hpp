@@ -4,10 +4,12 @@
 #pragma once
 
 #include <automerge-cpp/change.hpp>
+#include <automerge-cpp/error.hpp>
 #include <automerge-cpp/types.hpp>
 
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <optional>
 #include <set>
 #include <span>
@@ -34,6 +36,14 @@ struct SyncMessage {
     std::vector<ChangeHash> need;     ///< Hashes the sender explicitly needs.
     std::vector<Have> have;           ///< Bloom filter summaries of what the sender has.
     std::vector<Change> changes;      ///< Changes for the recipient to apply.
+    /// Optional upstream capability identifiers appended to a v1 message.
+    std::optional<std::vector<std::uint8_t>> supported_capabilities;
+
+    /// Encode this message in Automerge's v1 sync wire format.
+    auto encode() const -> std::vector<std::byte>;
+
+    /// Decode one Automerge v1 sync message.
+    static auto decode(std::span<const std::byte> data) -> std::expected<SyncMessage, Error>;
 
     auto operator==(const SyncMessage&) const -> bool = default;
 };
@@ -59,7 +69,7 @@ public:
         return last_sent_heads_;
     }
 
-    /// Encode persistent state (shared_heads only) for storage.
+    /// Encode the connection-independent state that upstream persists.
     auto encode() const -> std::vector<std::byte>;
 
     /// Decode persistent state from storage.

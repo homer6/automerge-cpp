@@ -24,6 +24,7 @@ add_executable(automerge_cpp_tests
     chunk_test.cpp
     change_op_columns_test.cpp
     change_hash_fixture_test.cpp
+    sync_wire_format_test.cpp
 )
 
 target_link_libraries(automerge_cpp_tests

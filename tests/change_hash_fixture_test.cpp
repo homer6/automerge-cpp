@@ -85,6 +85,7 @@ TEST(ChangeHashFixture, matches_automerge_rs_change_chunks) {
                 std::erase(expected_heads, dependency);
             }
             expected_heads.push_back(change->hash);
+            std::ranges::sort(expected_heads);
             const auto original_chunk = std::vector<std::byte>{
                 remaining.begin(), remaining.begin() + static_cast<std::ptrdiff_t>(chunk_size)};
             const auto encoded_chunk =

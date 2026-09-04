@@ -30,6 +30,7 @@ automerge-cpp/
 │   ├── document.cpp                        #   Document methods (core, save/load, sync, patches, time travel, cursors, marks)
 │   ├── transaction.cpp                     #   Transaction methods
 │   ├── json.cpp                            #   nlohmann/json interop implementation
+│   ├── sync_state.cpp                      #   sync message and persistent-state wire formats
 │   ├── crypto/                             #   Cryptographic primitives
 │   │   └── sha256.hpp                      #     vendored header-only SHA-256
 │   ├── encoding/                           #   Columnar format codecs
@@ -51,7 +52,7 @@ automerge-cpp/
 │   │       └── change_op_columns.hpp       #       op column encoding/decoding (14 parallel columns)
 │   └── sync/                               #   Sync protocol internals
 │       └── bloom_filter.hpp                #     bloom filter (10 bits/entry, 7 probes)
-├── tests/                                  # TESTS (Google Test) — 621 tests
+├── tests/                                  # TESTS (Google Test) — 626 tests
 │   ├── CMakeLists.txt
 │   ├── error_test.cpp
 │   ├── types_test.cpp
@@ -60,6 +61,7 @@ automerge-cpp/
 │   ├── change_test.cpp
 │   ├── document_test.cpp                   #   core, merge, serialization, sync, patches, time travel, cursors, marks
 │   ├── change_hash_fixture_test.cpp        #   automerge-rs change hash fixtures
+│   ├── sync_wire_format_test.cpp           #   automerge-rs sync message and state fixtures
 │   ├── leb128_test.cpp
 │   ├── rle_test.cpp                        #   RLE encoder/decoder round-trips
 │   ├── delta_encoder_test.cpp              #   delta encoder/decoder round-trips
@@ -230,7 +232,7 @@ See [docs/plans/architecture.md](docs/plans/architecture.md) for the full design
 
 ## Testing
 
-621 tests across 15 test files. Uses Google Test (fetched via CMake FetchContent).
+626 tests across 16 test files. Uses Google Test (fetched via CMake FetchContent).
 
 | Test File | Count | Covers |
 |-----------|-------|--------|
@@ -241,6 +243,7 @@ See [docs/plans/architecture.md](docs/plans/architecture.md) for the full design
 | `change_test.cpp` | 4 | Change |
 | `change_hash_fixture_test.cpp` | 3 | automerge-rs change hashes, document chunks, and incremental saves |
 | `document_test.cpp` | 315 | Document core, merge, serialization, incremental save/load, change queries, sync, patches, time travel, cursors, marks, thread safety, conflict resolution, list concurrency, counters, save/load edge cases, large data stress, text/marks, sync protocol, typed get<T>(), scalar overloads, batch ops, operator[], get_path, get_scalar, overload helper, List/Map initializers, bare initializer lists, STL containers, external change application, transaction rollback |
+| `sync_wire_format_test.cpp` | 5 | automerge-rs sync bytes, change delivery, peer replacement, state resume |
 | `leb128_test.cpp` | 22 | LEB128 encode/decode |
 | `rle_test.cpp` | 69 | RLE encoder/decoder round-trips |
 | `delta_encoder_test.cpp` | 12 | Delta encoder/decoder round-trips |
@@ -311,6 +314,7 @@ See [docs/benchmark-results.md](docs/benchmark-results.md) for full results.
 | Profiling Analysis | [docs/plans/profiling-analysis.md](docs/plans/profiling-analysis.md) | v0.3.0 bottleneck profiling (sample/perf), parallelization opportunities |
 | v0.4.0 Performance Plan | [docs/plans/v0.4.0-performance.md](docs/plans/v0.4.0-performance.md) | Phase 11 performance release plan (Fenwick tree, hash cache, thread pool, ARM SHA-256) |
 | Change Hashes | [docs/change-hashes.md](docs/change-hashes.md) | Upstream-compatible change hash definition and fixtures |
+| Sync Wire Format | [docs/sync-wire-format.md](docs/sync-wire-format.md) | Upstream-compatible messages, bloom filters, persisted state, and fixtures |
 
 ## Dependencies
 

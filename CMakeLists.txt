@@ -43,6 +43,7 @@ target_sources(automerge-cpp PRIVATE
     src/document.cpp
     src/transaction.cpp
     src/json.cpp
+    src/sync_state.cpp
 )
 
 target_link_libraries(automerge-cpp
