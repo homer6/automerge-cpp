@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.28)
 
 project(automerge-cpp
-    VERSION 0.6.0
+    VERSION 0.7.0
     DESCRIPTION "A modern C++23 implementation of Automerge"
     HOMEPAGE_URL "https://github.com/homer6/automerge-cpp"
     LANGUAGES CXX
@@ -43,12 +43,17 @@ target_sources(automerge-cpp PRIVATE
     src/document.cpp
     src/transaction.cpp
     src/json.cpp
+    src/sync_state.cpp
 )
 
 target_link_libraries(automerge-cpp
     PUBLIC Threads::Threads nlohmann_json::nlohmann_json
     PRIVATE ZLIB::ZLIB
 )
+
+if(WIN32)
+    target_link_libraries(automerge-cpp PRIVATE bcrypt)
+endif()
 
 # Subdirectories
 if(AUTOMERGE_CPP_BUILD_TESTS)

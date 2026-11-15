@@ -71,6 +71,11 @@ json j = am::ScalarValue{am::Counter{42}};
 The `nlohmann_json` library is linked as a PUBLIC dependency of `automerge-cpp`,
 so no additional CMake configuration is needed.
 
+All document-facing functions in `am::json` return `std::expected<..., am::Error>`. Missing map
+paths remain normal optional absence. Invalid object IDs, historical heads, pointer syntax, patch
+documents, target types, keys, values, and indices return an error. Document mutations are atomic:
+an error leaves the document unchanged.
+
 ---
 
 ## Import and Export
@@ -125,7 +130,7 @@ am::json::import_json(doc, json{{"timeout", 30}}, *config_id);
 `nlohmann::json` value:
 
 ```cpp
-auto exported = am::json::export_json(doc);
+auto exported = *am::json::export_json(doc);
 std::cout << exported.dump(2) << std::endl;
 ```
 
@@ -171,7 +176,7 @@ Export a specific subtree by passing its `ObjId`:
 
 ```cpp
 auto config_id = doc.get_obj_id(am::root, "config");
-auto config_json = am::json::export_json(doc, *config_id);
+auto config_json = *am::json::export_json(doc, *config_id);
 // {"host": "localhost", "port": 8080}
 ```
 
@@ -182,7 +187,7 @@ Export the document as it was at a specific point in time:
 ```cpp
 auto heads = doc.get_heads();
 // ... more changes happen ...
-auto snapshot = am::json::export_json_at(doc, heads);
+auto snapshot = *am::json::export_json_at(doc, heads);
 ```
 
 ### Round-Trip Fidelity
@@ -194,7 +199,7 @@ import and export are lossless:
 auto input = json::parse(R"({"key": "value", "nums": [1, 2, 3]})");
 auto doc = am::Document{};
 am::json::import_json(doc, input);
-auto output = am::json::export_json(doc);
+auto output = *am::json::export_json(doc);
 assert(input == output);  // true
 ```
 
@@ -219,19 +224,19 @@ am::json::import_json(doc, json{
 });
 
 // Nested map access
-auto port = am::json::get_pointer(doc, "/config/database/port");
+auto port = *am::json::get_pointer(doc, "/config/database/port");
 // port has value: ScalarValue{int64_t{5432}}
 
 // List index access
-auto first = am::json::get_pointer(doc, "/items/0");
+auto first = *am::json::get_pointer(doc, "/items/0");
 // first has value: ScalarValue{int64_t{1}}
 
 // Empty pointer returns the root
-auto root_val = am::json::get_pointer(doc, "");
+auto root_val = *am::json::get_pointer(doc, "");
 // root_val has value: ObjType::map
 
 // Missing paths return nullopt
-auto missing = am::json::get_pointer(doc, "/nonexistent/key");
+auto missing = *am::json::get_pointer(doc, "/nonexistent/key");
 // missing == std::nullopt
 ```
 
@@ -274,7 +279,7 @@ Per RFC 6901, `~` and `/` in key names are escaped:
 doc.transact([](auto& tx) {
     tx.put(am::root, "a/b", 42);
 });
-auto val = am::json::get_pointer(doc, "/a~1b");  // 42
+auto val = *am::json::get_pointer(doc, "/a~1b");  // 42
 ```
 
 ### List Access
@@ -287,7 +292,7 @@ auto doc = am::Document{};
 am::json::import_json(doc, json{{"items", {10, 20, 30}}});
 
 // Read by index
-auto second = am::json::get_pointer(doc, "/items/1");  // 20
+auto second = *am::json::get_pointer(doc, "/items/1");  // 20
 
 // Append to list with "-"
 am::json::put_pointer(doc, "/items/-", am::ScalarValue{std::int64_t{40}});
@@ -347,12 +352,12 @@ am::json::apply_json_patch(doc, json::parse(R"([
 ])"));
 ```
 
-**test** asserts that a value matches, throwing `std::runtime_error` on mismatch:
+**test** asserts that a value matches, returning `ErrorKind::invalid_operation` on mismatch:
 ```cpp
-am::json::apply_json_patch(doc, json::parse(R"([
+auto result = am::json::apply_json_patch(doc, json::parse(R"([
     {"op": "test", "path": "/version", "value": "2.0.0"}
 ])"));
-// Throws if /version is not "2.0.0"
+// result contains an error if /version is not "2.0.0"
 ```
 
 ### Generating a Diff
@@ -370,7 +375,7 @@ doc2.transact([](am::Transaction& tx) {
     tx.delete_key(am::root, "y");
 });
 
-auto diff = am::json::diff_json_patch(doc1, doc2);
+auto diff = *am::json::diff_json_patch(doc1, doc2);
 // [
 //   {"op": "replace", "path": "/x", "value": 99},
 //   {"op": "remove", "path": "/y"}
@@ -381,17 +386,14 @@ auto diff = am::json::diff_json_patch(doc1, doc2);
 
 All operations in a patch are applied within a single Automerge transaction.
 If any operation fails (e.g., a `test` assertion), the entire patch is rolled back
-and an exception is thrown:
+and the function returns an error:
 
 ```cpp
-try {
-    am::json::apply_json_patch(doc, json::parse(R"([
-        {"op": "replace", "path": "/version", "value": "3.0.0"},
-        {"op": "test", "path": "/name", "value": "wrong-name"}
-    ])"));
-} catch (const std::runtime_error& e) {
-    // "test: value mismatch" — version was NOT changed to 3.0.0
-}
+auto result = am::json::apply_json_patch(doc, json::parse(R"([
+    {"op": "replace", "path": "/version", "value": "3.0.0"},
+    {"op": "test", "path": "/name", "value": "wrong-name"}
+])"));
+// result.error().message is "test: value mismatch" and version was not changed.
 ```
 
 ---
@@ -423,7 +425,7 @@ am::json::apply_merge_patch(doc, json{
     {"config", {{"theme", "light"}}}, // merge into nested object
 });
 
-auto result = am::json::export_json(doc);
+auto result = *am::json::export_json(doc);
 // {
 //   "name": "Alice",          ← unchanged (not in patch)
 //   "age": 31,                ← replaced
@@ -462,7 +464,7 @@ doc2.transact([](am::Transaction& tx) {
     tx.delete_key(am::root, "y");
 });
 
-auto patch = am::json::generate_merge_patch(doc1, doc2);
+auto patch = *am::json::generate_merge_patch(doc1, doc2);
 // {"x": 99, "y": null}
 ```
 
@@ -497,7 +499,7 @@ am::json::import_json(doc, json{
     {"config", {{"theme", "dark"}}}
 });
 
-auto flat = am::json::flatten(doc);
+auto flat = *am::json::flatten(doc);
 for (const auto& [path, value] : flat) {
     std::printf("  %s = %s\n", path.c_str(), value.dump().c_str());
 }
@@ -520,7 +522,7 @@ You can flatten a subtree:
 
 ```cpp
 auto config_id = doc.get_obj_id(am::root, "config");
-auto config_flat = am::json::flatten(doc, *config_id);
+auto config_flat = *am::json::flatten(doc, *config_id);
 // {"/theme": "dark"}
 ```
 
@@ -535,7 +537,7 @@ auto flat = std::map<std::string, json>{
 
 auto doc = am::Document{};
 am::json::unflatten(doc, flat);
-auto result = am::json::export_json(doc);
+auto result = *am::json::export_json(doc);
 // {"name": "Bob", "settings": {"color": "blue", "size": 12}}
 ```
 
@@ -545,11 +547,11 @@ preserve the document structure:
 ```cpp
 auto original = am::Document{};
 am::json::import_json(original, json{{"a", {{"b", 1}}}, {"c", 2}});
-auto flat = am::json::flatten(original);
+auto flat = *am::json::flatten(original);
 
 auto restored = am::Document{};
 am::json::unflatten(restored, flat);
-assert(am::json::export_json(original) == am::json::export_json(restored));
+assert(*am::json::export_json(original) == *am::json::export_json(restored));
 ```
 
 ---
@@ -687,7 +689,7 @@ bob.transact([](am::Transaction& tx) {
 });
 
 // See what Bob changed (as RFC 6902 patch)
-auto diff = am::json::diff_json_patch(doc, bob);
+auto diff = *am::json::diff_json_patch(doc, bob);
 std::cout << diff.dump(2) << std::endl;
 // [
 //   {"op": "replace", "path": "/active", "value": false},
@@ -721,7 +723,7 @@ am::json::apply_json_patch(alice, json::parse(R"([
 
 // Merge — all items are preserved
 alice.merge(bob);
-auto result = am::json::export_json(alice);
+auto result = *am::json::export_json(alice);
 // items contains all three entries (order depends on actor IDs)
 ```
 
@@ -737,8 +739,8 @@ auto bytes = doc.save();
 auto loaded = am::Document::load(bytes);
 
 // Verify with JSON comparison
-auto original_json = am::json::export_json(doc);
-auto loaded_json = am::json::export_json(*loaded);
+auto original_json = *am::json::export_json(doc);
+auto loaded_json = *am::json::export_json(*loaded);
 assert(original_json == loaded_json);
 ```
 
@@ -797,41 +799,41 @@ Include `<automerge-cpp/json.hpp>`. Functions are split across two namespaces:
 
 ### Import/Export (`automerge_cpp::json`)
 
-| Function | Description |
-|----------|-------------|
-| `export_json(doc, obj)` | Export document (or subtree) as JSON |
-| `export_json_at(doc, heads, obj)` | Export at historical point |
-| `import_json(doc, j, target)` | Import JSON into document (new transaction) |
-| `import_json(tx, j, target)` | Import JSON within existing transaction |
+| Function | Return type | Description |
+|----------|-------------|-------------|
+| `export_json(doc, obj)` | `expected<json, Error>` | Export document (or subtree) as JSON |
+| `export_json_at(doc, heads, obj)` | `expected<json, Error>` | Export at historical point |
+| `import_json(doc, j, target)` | `expected<void, Error>` | Import JSON into document (new transaction) |
+| `import_json(tx, j, target)` | `expected<void, Error>` | Import JSON within existing transaction |
 
 ### JSON Pointer (RFC 6901) (`automerge_cpp::json`)
 
-| Function | Description |
-|----------|-------------|
-| `get_pointer(doc, ptr)` | Read value at pointer path |
-| `put_pointer(doc, ptr, val)` | Write scalar at pointer path |
-| `delete_pointer(doc, ptr)` | Delete value at pointer path |
+| Function | Return type | Description |
+|----------|-------------|-------------|
+| `get_pointer(doc, ptr)` | `expected<optional<Value>, Error>` | Read value at pointer path |
+| `put_pointer(doc, ptr, val)` | `expected<void, Error>` | Write scalar at pointer path |
+| `delete_pointer(doc, ptr)` | `expected<void, Error>` | Delete value at pointer path |
 
 ### JSON Patch (RFC 6902) (`automerge_cpp::json`)
 
-| Function | Description |
-|----------|-------------|
-| `apply_json_patch(doc, patch)` | Apply array of patch operations |
-| `diff_json_patch(before, after)` | Generate diff between two documents |
+| Function | Return type | Description |
+|----------|-------------|-------------|
+| `apply_json_patch(doc, patch)` | `expected<void, Error>` | Apply array of patch operations |
+| `diff_json_patch(before, after)` | `expected<json, Error>` | Generate diff between two documents |
 
 ### JSON Merge Patch (RFC 7386) (`automerge_cpp::json`)
 
-| Function | Description |
-|----------|-------------|
-| `apply_merge_patch(doc, patch, target)` | Apply merge patch |
-| `generate_merge_patch(before, after)` | Generate merge patch from diff |
+| Function | Return type | Description |
+|----------|-------------|-------------|
+| `apply_merge_patch(doc, patch, target)` | `expected<void, Error>` | Apply merge patch |
+| `generate_merge_patch(before, after)` | `expected<json, Error>` | Generate merge patch from diff |
 
 ### Flatten/Unflatten (`automerge_cpp::json`)
 
-| Function | Description |
-|----------|-------------|
-| `flatten(doc, obj)` | Flatten to map of pointer paths |
-| `unflatten(doc, flat, target)` | Unflatten from pointer path map |
+| Function | Return type | Description |
+|----------|-------------|-------------|
+| `flatten(doc, obj)` | `expected<map<string, json>, Error>` | Flatten to map of pointer paths |
+| `unflatten(doc, flat, target)` | `expected<void, Error>` | Unflatten from pointer path map |
 
 ### ADL Serialization (`automerge_cpp`)
 

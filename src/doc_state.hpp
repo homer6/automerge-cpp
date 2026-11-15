@@ -7,11 +7,11 @@
 #include <automerge-cpp/types.hpp>
 #include <automerge-cpp/value.hpp>
 
-#include "crypto/sha256.hpp"
+#include "storage/change_chunk.hpp"
 
 #include <algorithm>
 #include <cassert>
-#include <cstring>
+#include <iterator>
 #include <map>
 #include <optional>
 #include <ranges>
@@ -46,12 +46,25 @@ struct MarkEntry {
     ScalarValue value;
 };
 
+struct PendingMark {
+    ObjId obj;
+    OpId mark_id;
+    std::optional<OpId> start_after;
+    std::string name;
+    ScalarValue value;
+};
+
 // The state of a single CRDT object in the document tree.
 struct ObjectState {
     ObjType type;
-    std::map<std::string, std::vector<MapEntry>> map_entries;  // map/table
-    std::vector<ListElement> list_elements;                     // list/text
-    std::vector<MarkEntry> marks;                               // rich-text marks
+    std::map<std::string, std::vector<MapEntry>> map_entries; // map/table
+    std::vector<ListElement> list_elements;                   // list/text
+    std::vector<MarkEntry> marks;                             // rich-text marks
+};
+
+struct StateCheckpoint {
+    std::vector<ChangeHash> heads;
+    std::unordered_map<ObjId, ObjectState> objects;
 };
 
 // The complete internal state of a Document.
@@ -62,20 +75,37 @@ struct DocState {
 
     // Change tracking (Phase 3)
     std::vector<Change> change_history;
+    std::unordered_map<ChangeHash, Change> pending_changes;
+    std::unordered_map<ChangeHash, storage::EncodedChange> pending_change_encodings;
+    std::unordered_map<ChangeHash, std::unordered_set<ChangeHash>> pending_dependents;
+    std::unordered_map<ActorId, std::unordered_map<std::uint64_t, ChangeHash>> pending_sequences;
     std::vector<ChangeHash> heads;
-    std::map<ActorId, std::uint64_t> clock;  // actor -> max seq seen
+    std::map<ActorId, std::uint64_t> clock; // actor -> max seq seen
     std::uint64_t local_seq = 0;
+    std::unordered_map<ActorId, PendingMark> pending_marks;
 
-    // Cached change hash index (11A.3) — incrementally maintained.
-    // Only recomputes hashes for newly appended changes (append-only data).
-    mutable std::vector<ChangeHash> cached_hashes_;                        // parallel to change_history
-    mutable std::unordered_map<ChangeHash, std::size_t> cached_hash_index_; // hash → index
+    // Encoded changes form a materialized prefix of change_history. Local commits after that
+    // prefix retain their parent by history index until a hash-bearing API needs the bytes.
+    std::vector<storage::EncodedChange> encoded_changes_;
+    std::vector<std::optional<std::size_t>> deferred_change_parents_;
+    std::optional<std::size_t> deferred_head_index_;
+    std::unordered_map<ChangeHash, std::size_t> cached_hash_index_; // hash → index
+
+    // A shallow document retains the materialized checkpoint and its heads, but not the
+    // changes that precede it. The original compact bytes allow save_compact() to rebuild a
+    // complete upstream document on demand without keeping that history resident.
+    std::optional<StateCheckpoint> compaction_checkpoint;
+    std::vector<std::byte> compaction_bytes;
+
+    // Historical reads reuse the last materialized state when the next requested heads descend
+    // from it. Access is serialized by Document's mutex.
+    mutable std::optional<StateCheckpoint> historical_checkpoint;
 
     // Cached actor table (11A.3b) — incrementally maintained.
     // Invalidated by tracking how many changes have been scanned.
     mutable std::vector<ActorId> cached_actor_table_;
     mutable std::unordered_set<ActorId> cached_actor_set_;
-    mutable std::size_t cached_actor_table_size_ = 0;  // changes scanned so far
+    mutable std::size_t cached_actor_table_size_ = 0; // changes scanned so far
     mutable bool cached_actor_table_has_local_ = false;
 
     DocState() {
@@ -84,6 +114,51 @@ struct DocState {
 
     auto next_op_id() -> OpId {
         return OpId{next_counter++, actor};
+    }
+
+    void append_local_change(Change change) {
+        const auto index = change_history.size();
+        change_history.push_back(std::move(change));
+        deferred_change_parents_.push_back(deferred_head_index_);
+        heads.clear();
+        deferred_head_index_ = index;
+    }
+
+    void append_materialized_change(Change change, storage::EncodedChange encoded) {
+        assert(encoded_changes_.size() == change_history.size());
+        const auto index = change_history.size();
+        cached_hash_index_.emplace(encoded.hash, index);
+        change_history.push_back(std::move(change));
+        encoded_changes_.push_back(std::move(encoded));
+        deferred_change_parents_.push_back(std::nullopt);
+    }
+
+    void materialize_changes() {
+        if (encoded_changes_.size() == change_history.size()) {
+            return;
+        }
+        encoded_changes_.reserve(change_history.size());
+        deferred_change_parents_.resize(change_history.size());
+        cached_hash_index_.reserve(change_history.size());
+        for (auto index = encoded_changes_.size(); index < change_history.size(); ++index) {
+            auto resolved = change_history[index];
+            const auto parent = deferred_change_parents_[index];
+            if (parent) {
+                assert(*parent < encoded_changes_.size());
+                resolved.deps.push_back(encoded_changes_[*parent].hash);
+            }
+            auto encoded = storage::encode_change(resolved);
+            const auto [entry, inserted] = cached_hash_index_.emplace(encoded.hash, index);
+            assert(inserted);
+            static_cast<void>(entry);
+            change_history[index] = std::move(resolved);
+            deferred_change_parents_[index] = std::nullopt;
+            encoded_changes_.push_back(std::move(encoded));
+        }
+        if (deferred_head_index_) {
+            heads = {encoded_changes_[*deferred_head_index_].hash};
+            deferred_head_index_.reset();
+        }
     }
 
     auto get_object(const ObjId& id) -> ObjectState* {
@@ -475,6 +550,41 @@ struct DocState {
         return pos;
     }
 
+    static auto first_visible_after(const ObjectState& state, const std::optional<OpId>& after)
+        -> std::optional<OpId> {
+        auto begin = state.list_elements.begin();
+        if (after) {
+            const auto anchor =
+                std::ranges::find(state.list_elements, *after, &ListElement::insert_id);
+            if (anchor == state.list_elements.end()) {
+                return std::nullopt;
+            }
+            begin = std::next(anchor);
+        }
+        const auto element = std::find_if(
+            begin, state.list_elements.end(), [](const auto& entry) { return entry.visible; });
+        return element == state.list_elements.end() ? std::nullopt
+                                                    : std::optional{element->insert_id};
+    }
+
+    static auto last_visible_at_or_before(const ObjectState& state,
+                                          const std::optional<OpId>& before)
+        -> std::optional<OpId> {
+        if (!before) {
+            return std::nullopt;
+        }
+        const auto anchor =
+            std::ranges::find(state.list_elements, *before, &ListElement::insert_id);
+        if (anchor == state.list_elements.end()) {
+            return std::nullopt;
+        }
+        const auto element = std::find_if(std::make_reverse_iterator(std::next(anchor)),
+                                          state.list_elements.rend(),
+                                          [](const auto& entry) { return entry.visible; });
+        return element == state.list_elements.rend() ? std::nullopt
+                                                     : std::optional{element->insert_id};
+    }
+
     // -- Remote operation application (Phase 3) -------------------------------
 
     void apply_op(const Op& op) {
@@ -576,21 +686,39 @@ struct DocState {
                 break;
             }
             case OpType::mark: {
-                // Mark ops use: key=mark name, value=mark value,
-                // pred[0]=start element, pred[1]=end element
-                if (!is_map) break;  // name is stored as string key
-                if (op.pred.size() < 2) break;
                 auto* obj_state = get_object(op.obj);
                 if (!obj_state) break;
-                obj_state->marks.push_back(MarkEntry{
-                    .mark_id = op.id,
-                    .start_elem = op.pred[0],
-                    .end_elem = op.pred[1],
-                    .name = *key_str,
-                    .value = std::get_if<ScalarValue>(&op.value)
-                        ? *std::get_if<ScalarValue>(&op.value)
-                        : ScalarValue{Null{}},
-                });
+                if (op.mark_name) {
+                    const auto* value = std::get_if<ScalarValue>(&op.value);
+                    if (!value)
+                        break;
+                    pending_marks.insert_or_assign(op.id.actor,
+                                                   PendingMark{
+                                                       .obj = op.obj,
+                                                       .mark_id = op.id,
+                                                       .start_after = op.insert_after,
+                                                       .name = *op.mark_name,
+                                                       .value = *value,
+                                                   });
+                    break;
+                }
+
+                const auto pending = pending_marks.find(op.id.actor);
+                if (pending == pending_marks.end() || pending->second.obj != op.obj)
+                    break;
+                const auto start_elem =
+                    first_visible_after(*obj_state, pending->second.start_after);
+                const auto end_elem = last_visible_at_or_before(*obj_state, op.insert_after);
+                if (start_elem && end_elem) {
+                    obj_state->marks.push_back(MarkEntry{
+                        .mark_id = pending->second.mark_id,
+                        .start_elem = *start_elem,
+                        .end_elem = *end_elem,
+                        .name = pending->second.name,
+                        .value = pending->second.value,
+                    });
+                }
+                pending_marks.erase(pending);
                 break;
             }
         }
@@ -644,15 +772,8 @@ struct DocState {
 
     // -- Sync helpers (Phase 5) -------------------------------------------------
 
-    // Ensure the cached hash index is up to date. Only computes hashes for
-    // newly appended changes (changes are append-only).
     void ensure_hash_index() const {
-        if (cached_hashes_.size() == change_history.size()) return;
-        for (auto i = cached_hashes_.size(); i < change_history.size(); ++i) {
-            auto hash = compute_change_hash(change_history[i]);
-            cached_hash_index_[hash] = i;
-            cached_hashes_.push_back(hash);
-        }
+        assert(encoded_changes_.size() == change_history.size());
     }
 
     // Get the cached hash index (read-only reference).
@@ -664,13 +785,21 @@ struct DocState {
     // Check if we have a change with the given hash. O(1) via cached index.
     auto has_change_hash(const ChangeHash& hash) const -> bool {
         ensure_hash_index();
-        return cached_hash_index_.contains(hash);
+        const auto is_compaction_head =
+            compaction_checkpoint && std::ranges::find(compaction_checkpoint->heads, hash) !=
+                                         compaction_checkpoint->heads.end();
+        return cached_hash_index_.contains(hash) || is_compaction_head;
     }
 
     // Get all change hashes in change_history order (cached, no recomputation).
     auto all_change_hashes() const -> std::vector<ChangeHash> {
         ensure_hash_index();
-        return cached_hashes_;
+        auto hashes = std::vector<ChangeHash>{};
+        hashes.reserve(encoded_changes_.size());
+        std::ranges::transform(encoded_changes_,
+                               std::back_inserter(hashes),
+                               [](const storage::EncodedChange& encoded) { return encoded.hash; });
+        return hashes;
     }
 
     // Get change hashes that are NOT ancestors of the given set of hashes.
@@ -706,7 +835,8 @@ struct DocState {
 
         // Return hashes not in ancestors, in change_history order
         auto result = std::vector<ChangeHash>{};
-        for (const auto& hash : cached_hashes_) {
+        for (const auto& encoded : encoded_changes_) {
+            const auto& hash = encoded.hash;
             if (!ancestors.contains(hash)) {
                 result.push_back(hash);
             }
@@ -719,12 +849,16 @@ struct DocState {
         -> std::vector<ChangeHash> {
         ensure_hash_index();
         auto result = std::vector<ChangeHash>{};
-        for (const auto& h : their_heads) {
-            if (!cached_hash_index_.contains(h) &&
-                std::ranges::find(result, h) == result.end()) {
-                result.push_back(h);
+        auto add_if_missing = [&](const ChangeHash& hash) {
+            if (!has_change_hash(hash) && !pending_changes.contains(hash) &&
+                std::ranges::find(result, hash) == result.end()) {
+                result.push_back(hash);
             }
-        }
+        };
+        std::ranges::for_each(their_heads, add_if_missing);
+        std::ranges::for_each(pending_changes, [&](const auto& entry) {
+            std::ranges::for_each(entry.second.deps, add_if_missing);
+        });
         return result;
     }
 
@@ -782,17 +916,96 @@ struct DocState {
         return indices;
     }
 
+    auto changes_after_checkpoint(const std::vector<ChangeHash>& target_heads,
+                                  const std::vector<ChangeHash>& checkpoint_heads) const
+        -> std::optional<std::vector<std::size_t>> {
+        ensure_hash_index();
+        auto remaining_checkpoint_heads =
+            std::set<ChangeHash>{checkpoint_heads.begin(), checkpoint_heads.end()};
+        auto visited = std::set<ChangeHash>{};
+        auto queue = target_heads;
+        auto queued = std::set<ChangeHash>{target_heads.begin(), target_heads.end()};
+        auto indices = std::vector<std::size_t>{};
+        auto has_unknown_ancestor = false;
+
+        const auto traversal = std::views::iota(std::size_t{0},
+                                                change_history.size() + target_heads.size() +
+                                                    checkpoint_heads.size()) |
+                               std::views::take_while([&](const auto) { return !queue.empty(); });
+        std::ranges::for_each(traversal, [&](const auto) {
+            const auto hash = queue.back();
+            queue.pop_back();
+            if (!visited.insert(hash).second) {
+                return;
+            }
+            if (remaining_checkpoint_heads.erase(hash) != 0) {
+                return;
+            }
+            const auto change = cached_hash_index_.find(hash);
+            if (change == cached_hash_index_.end()) {
+                has_unknown_ancestor = true;
+                return;
+            }
+            indices.push_back(change->second);
+            std::ranges::copy_if(
+                change_history[change->second].deps,
+                std::back_inserter(queue),
+                [&](const ChangeHash& dependency) { return queued.insert(dependency).second; });
+        });
+
+        if (has_unknown_ancestor || !remaining_checkpoint_heads.empty()) {
+            return std::nullopt;
+        }
+        std::ranges::sort(indices);
+        return indices;
+    }
+
+    auto checkpoint_snapshot(const StateCheckpoint& checkpoint,
+                             const std::vector<ChangeHash>& target_heads,
+                             const std::vector<std::size_t>& changes) const -> DocState {
+        auto snapshot = DocState{};
+        snapshot.actor = actor;
+        snapshot.objects = checkpoint.objects;
+        std::ranges::for_each(changes, [&](const std::size_t index) {
+            std::ranges::for_each(change_history[index].operations,
+                                  [&](const Op& operation) { snapshot.apply_op(operation); });
+        });
+        historical_checkpoint = StateCheckpoint{
+            .heads = target_heads,
+            .objects = snapshot.objects,
+        };
+        return snapshot;
+    }
+
     // Rebuild a fresh DocState by replaying only the changes visible at given heads.
     auto rebuild_state_at(const std::vector<ChangeHash>& target_heads) const -> DocState {
-        auto indices = changes_visible_at(target_heads);
+        if (historical_checkpoint) {
+            const auto changes =
+                changes_after_checkpoint(target_heads, historical_checkpoint->heads);
+            if (changes) {
+                return checkpoint_snapshot(*historical_checkpoint, target_heads, *changes);
+            }
+        }
+        if (compaction_checkpoint) {
+            const auto changes =
+                changes_after_checkpoint(target_heads, compaction_checkpoint->heads);
+            if (changes) {
+                return checkpoint_snapshot(*compaction_checkpoint, target_heads, *changes);
+            }
+        }
+
+        const auto indices = changes_visible_at(target_heads);
         auto snapshot = DocState{};
         snapshot.actor = actor;
 
-        for (auto idx : indices) {
-            for (const auto& op : change_history[idx].operations) {
-                snapshot.apply_op(op);
-            }
-        }
+        std::ranges::for_each(indices, [&](const std::size_t index) {
+            std::ranges::for_each(change_history[index].operations,
+                                  [&](const Op& operation) { snapshot.apply_op(operation); });
+        });
+        historical_checkpoint = StateCheckpoint{
+            .heads = target_heads,
+            .objects = snapshot.objects,
+        };
         return snapshot;
     }
 
@@ -824,48 +1037,10 @@ struct DocState {
         return std::nullopt;
     }
 
-    // -- Change hash computation (SHA-256 based) --------------------------------
+    // -- Change hash computation (SHA-256 based) ---------------------------
 
     static auto compute_change_hash(const Change& change) -> ChangeHash {
-        // Build a deterministic byte representation of the change
-        // Size: 16 (actor) + 8 (seq) + 8 (start_op) + 8 (ts) + 8 (num_ops) + deps*32
-        auto input = std::vector<std::byte>{};
-        input.reserve(48 + change.deps.size() * 32);
-
-        // Actor ID
-        input.insert(input.end(), change.actor.bytes.begin(), change.actor.bytes.end());
-
-        // Seq (little-endian 8 bytes)
-        for (int i = 0; i < 8; ++i) {
-            input.push_back(static_cast<std::byte>(change.seq >> (i * 8)));
-        }
-
-        // Start op
-        for (int i = 0; i < 8; ++i) {
-            input.push_back(static_cast<std::byte>(change.start_op >> (i * 8)));
-        }
-
-        // Timestamp
-        auto ts = static_cast<std::uint64_t>(change.timestamp);
-        for (int i = 0; i < 8; ++i) {
-            input.push_back(static_cast<std::byte>(ts >> (i * 8)));
-        }
-
-        // Number of operations
-        auto num_ops = static_cast<std::uint64_t>(change.operations.size());
-        for (int i = 0; i < 8; ++i) {
-            input.push_back(static_cast<std::byte>(num_ops >> (i * 8)));
-        }
-
-        // Dependency hashes
-        for (const auto& dep : change.deps) {
-            input.insert(input.end(), dep.bytes.begin(), dep.bytes.end());
-        }
-
-        auto digest = crypto::sha256(input);
-        ChangeHash result{};
-        std::memcpy(result.bytes.data(), digest.data(), 32);
-        return result;
+        return storage::encode_change(change).hash;
     }
 };
 

@@ -17,22 +17,21 @@ int main() {
     doc.set_actor_id(am::ActorId{actor1});
 
     // Create a text object — transact returns the ObjId directly
-    auto text_id = doc.transact([](am::Transaction& tx) {
-        auto id = tx.put(am::root, "content", am::ObjType::text);
+    auto text_id = *doc.transact([](am::Transaction& tx) {
+        auto id = *tx.put(am::root, "content", am::ObjType::text);
         tx.splice_text(id, 0, 0, "Hello World");
         return id;
     });
-    std::printf("Initial: \"%s\"\n", doc.text(text_id).c_str());
+    std::printf("Initial: \"%s\"\n", (*doc.text(text_id)).c_str());
 
     // Save a snapshot for time travel
     auto v1_heads = doc.get_heads();
 
     // transact_with_patches to see what changed
-    auto patches = doc.transact_with_patches([&](auto& tx) {
-        tx.splice_text(text_id, 5, 6, " C++23");
-    });
+    auto patches =
+        *doc.transact_with_patches([&](auto& tx) { tx.splice_text(text_id, 5, 6, " C++23"); });
 
-    std::printf("After edit: \"%s\"\n", doc.text(text_id).c_str());
+    std::printf("After edit: \"%s\"\n", (*doc.text(text_id)).c_str());
     std::printf("Patches generated: %zu\n", patches.size());
 
     for (const auto& patch : patches) {
@@ -51,32 +50,29 @@ int main() {
         tx.splice_text(text_id, 0, 0, ">>> ");
     });
 
-    std::printf("After prepend: \"%s\"\n", doc.text(text_id).c_str());
+    std::printf("After prepend: \"%s\"\n", (*doc.text(text_id)).c_str());
 
     // Cursor should have moved with the content
     if (cursor) {
-        if (auto idx = doc.resolve_cursor(text_id, *cursor)) {
+        if (auto idx = *doc.resolve_cursor(text_id, *cursor)) {
             std::printf("Cursor now at index %zu (still pointing to 'C')\n", *idx);
         }
     }
 
     // Time travel — read the original text
-    std::printf("\nTime travel to v1: \"%s\"\n",
-                doc.text_at(text_id, v1_heads).c_str());
+    std::printf("\nTime travel to v1: \"%s\"\n", (*doc.text_at(text_id, v1_heads)).c_str());
 
     // Concurrent editing with merge
     auto doc2 = doc.fork();
+    const auto text_length = *doc.length(text_id);
 
-    doc.transact([&](auto& tx) {
-        tx.splice_text(text_id, doc.length(text_id), 0, " rocks!");
-    });
+    doc.transact([&](auto& tx) { tx.splice_text(text_id, text_length, 0, " rocks!"); });
     doc2.transact([&](auto& tx) {
         tx.splice_text(text_id, 0, 4, "");  // remove ">>> "
     });
 
     doc.merge(doc2);
-    std::printf("\nAfter concurrent edits + merge: \"%s\"\n",
-                doc.text(text_id).c_str());
+    std::printf("\nAfter concurrent edits + merge: \"%s\"\n", (*doc.text(text_id)).c_str());
 
     return 0;
 }

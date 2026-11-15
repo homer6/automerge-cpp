@@ -22,10 +22,10 @@ int main() {
     auto doc = am::Document{};
 
     // -- Bare initializer list: creates a list automatically ------------------
-    auto list_id = doc.transact([](am::Transaction& tx) {
+    auto list_id = *doc.transact([](am::Transaction& tx) {
         tx.put(am::root, "title", "Shopping List");
         tx.put(am::root, "created_by", "Alice");
-        return tx.put(am::root, "items", {"Milk", "Eggs", "Bread"});
+        return *tx.put(am::root, "items", {"Milk", "Eggs", "Bread"});
     });
 
     // -- Map{} wrapper: create a populated map --------------------------------
@@ -48,7 +48,7 @@ int main() {
     });
 
     // -- Typed get<T>() — no manual variant unwrapping ------------------------
-    if (auto title = doc.get<std::string>(am::root, "title")) {
+    if (auto title = *doc.get<std::string>(am::root, "title")) {
         std::printf("Title: %s\n", title->c_str());
     }
 
@@ -60,25 +60,25 @@ int main() {
     }
 
     // -- Read list values -----------------------------------------------------
-    std::printf("Items (%zu):\n", doc.length(list_id));
-    for (auto& val : doc.values(list_id)) {
+    std::printf("Items (%zu):\n", *doc.length(list_id));
+    for (auto& val : *doc.values(list_id)) {
         if (auto s = am::get_scalar<std::string>(val)) {
             std::printf("  - %s\n", s->c_str());
         }
     }
 
     // -- get_path() for nested access -----------------------------------------
-    if (auto theme = doc.get_path("config", "theme")) {
+    if (auto theme = *doc.get_path("config", "theme")) {
         if (auto s = am::get_scalar<std::string>(*theme)) {
             std::printf("Config theme: %s\n", s->c_str());
         }
     }
-    if (auto email = doc.get_path("author", "email")) {
+    if (auto email = *doc.get_path("author", "email")) {
         if (auto s = am::get_scalar<std::string>(*email)) {
             std::printf("Author email: %s\n", s->c_str());
         }
     }
-    if (auto first = doc.get_path("items", std::size_t{0})) {
+    if (auto first = *doc.get_path("items", std::size_t{0})) {
         if (auto s = am::get_scalar<std::string>(*first)) {
             std::printf("First item: %s\n", s->c_str());
         }
@@ -96,12 +96,12 @@ int main() {
         };
         tx.put(am::root, "dims", dims);
     });
-    if (auto w = doc.get_path("dims", "w")) {
+    if (auto w = *doc.get_path("dims", "w")) {
         if (auto i = am::get_scalar<std::int64_t>(*w)) {
-            std::printf("Dims width: %ld\n", *i);
+            std::printf("Dims width: %lld\n", static_cast<long long>(*i));
         }
     }
-    if (auto tag = doc.get_path("tags", std::size_t{0})) {
+    if (auto tag = *doc.get_path("tags", std::size_t{0})) {
         if (auto s = am::get_scalar<std::string>(*tag)) {
             std::printf("First tag: %s\n", s->c_str());
         }
@@ -116,8 +116,8 @@ int main() {
         tx.increment(am::root, "views", 1);
         tx.increment(am::root, "views", 1);
     });
-    if (auto views = doc.get<am::Counter>(am::root, "views")) {
-        std::printf("Views: %ld\n", views->value);
+    if (auto views = *doc.get<am::Counter>(am::root, "views")) {
+        std::printf("Views: %lld\n", static_cast<long long>(views->value));
     }
 
     // -- Save to binary and load back -----------------------------------------
@@ -125,7 +125,7 @@ int main() {
     std::printf("Saved document: %zu bytes\n", bytes.size());
 
     if (auto loaded = am::Document::load(bytes)) {
-        if (auto title = loaded->get<std::string>(am::root, "title")) {
+        if (auto title = *loaded->get<std::string>(am::root, "title")) {
             std::printf("Loaded title: %s\n", title->c_str());
         }
     }

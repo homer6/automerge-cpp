@@ -64,7 +64,7 @@ static void bm_map_get(benchmark::State& state) {
     });
 
     for (auto _ : state) {
-        auto val = doc.get(root, "key50");
+        auto val = *doc.get(root, "key50");
         benchmark::DoNotOptimize(val);
     }
     state.SetItemsProcessed(state.iterations());
@@ -80,7 +80,7 @@ static void bm_map_keys(benchmark::State& state) {
     });
 
     for (auto _ : state) {
-        auto keys = doc.keys(root);
+        auto keys = *doc.keys(root);
         benchmark::DoNotOptimize(keys);
     }
     state.SetItemsProcessed(state.iterations());
@@ -94,9 +94,7 @@ BENCHMARK(bm_map_keys);
 static void bm_list_insert_append(benchmark::State& state) {
     auto doc = make_doc();
     ObjId list_id;
-    doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "list", ObjType::list);
-    });
+    doc.transact([&](auto& tx) { list_id = *tx.put_object(root, "list", ObjType::list); });
 
     std::size_t idx = 0;
     for (auto _ : state) {
@@ -111,9 +109,7 @@ BENCHMARK(bm_list_insert_append);
 static void bm_list_insert_front(benchmark::State& state) {
     auto doc = make_doc();
     ObjId list_id;
-    doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "list", ObjType::list);
-    });
+    doc.transact([&](auto& tx) { list_id = *tx.put_object(root, "list", ObjType::list); });
 
     for (auto _ : state) {
         doc.transact([&](auto& tx) {
@@ -128,14 +124,14 @@ static void bm_list_get(benchmark::State& state) {
     auto doc = make_doc();
     ObjId list_id;
     doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "list", ObjType::list);
+        list_id = *tx.put_object(root, "list", ObjType::list);
         for (int i = 0; i < 1000; ++i) {
             tx.insert(list_id, static_cast<std::size_t>(i), std::int64_t{i});
         }
     });
 
     for (auto _ : state) {
-        auto val = doc.get(list_id, std::size_t{500});
+        auto val = *doc.get(list_id, std::size_t{500});
         benchmark::DoNotOptimize(val);
     }
     state.SetItemsProcessed(state.iterations());
@@ -149,9 +145,7 @@ BENCHMARK(bm_list_get);
 static void bm_text_splice_append(benchmark::State& state) {
     auto doc = make_doc();
     ObjId text_id;
-    doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "text", ObjType::text);
-    });
+    doc.transact([&](auto& tx) { text_id = *tx.put_object(root, "text", ObjType::text); });
 
     std::size_t pos = 0;
     for (auto _ : state) {
@@ -167,9 +161,7 @@ BENCHMARK(bm_text_splice_append);
 static void bm_text_splice_bulk(benchmark::State& state) {
     auto doc = make_doc();
     ObjId text_id;
-    doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "text", ObjType::text);
-    });
+    doc.transact([&](auto& tx) { text_id = *tx.put_object(root, "text", ObjType::text); });
 
     const auto chunk = std::string(100, 'a');
     std::size_t pos = 0;
@@ -187,12 +179,12 @@ static void bm_text_read(benchmark::State& state) {
     auto doc = make_doc();
     ObjId text_id;
     doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "text", ObjType::text);
+        text_id = *tx.put_object(root, "text", ObjType::text);
         tx.splice_text(text_id, 0, 0, std::string(1000, 'x'));
     });
 
     for (auto _ : state) {
-        auto text = doc.text(text_id);
+        auto text = *doc.text(text_id);
         benchmark::DoNotOptimize(text);
     }
     state.SetItemsProcessed(state.iterations());
@@ -240,7 +232,7 @@ static void bm_save_large(benchmark::State& state) {
     auto doc = make_doc();
     ObjId list_id;
     doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "data", ObjType::list);
+        list_id = *tx.put_object(root, "data", ObjType::list);
         for (int i = 0; i < 1000; ++i) {
             tx.insert(list_id, static_cast<std::size_t>(i), std::int64_t{i});
         }
@@ -374,13 +366,47 @@ BENCHMARK(bm_sync_full_round_trip);
 // Patches
 // =============================================================================
 
+static auto make_remote_changes() -> std::vector<Change> {
+    auto source = make_doc();
+    source.transact([](auto& tx) {
+        for (auto index = 0; index < 100; ++index) {
+            tx.put(root, "remote" + std::to_string(index), std::int64_t{index});
+        }
+    });
+    return source.get_changes();
+}
+
+static void bm_apply_changes_without_patches(benchmark::State& state) {
+    const auto changes = make_remote_changes();
+    for (auto _ : state) {
+        state.PauseTiming();
+        auto target = make_doc();
+        state.ResumeTiming();
+        auto result = target.apply_changes(changes);
+        benchmark::DoNotOptimize(result);
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(bm_apply_changes_without_patches);
+
+static void bm_apply_changes_with_patches(benchmark::State& state) {
+    const auto changes = make_remote_changes();
+    for (auto _ : state) {
+        state.PauseTiming();
+        auto target = make_doc();
+        state.ResumeTiming();
+        auto result = target.apply_changes_with_patches(changes);
+        benchmark::DoNotOptimize(result);
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(bm_apply_changes_with_patches);
+
 static void bm_transact_with_patches(benchmark::State& state) {
     auto doc = make_doc();
     std::int64_t val = 0;
     for (auto _ : state) {
-        auto patches = doc.transact_with_patches([&](auto& tx) {
-            tx.put(root, "key", val++);
-        });
+        auto patches = *doc.transact_with_patches([&](auto& tx) { tx.put(root, "key", val++); });
         benchmark::DoNotOptimize(patches);
     }
     state.SetItemsProcessed(state.iterations());
@@ -390,13 +416,11 @@ BENCHMARK(bm_transact_with_patches);
 static void bm_transact_with_patches_text(benchmark::State& state) {
     auto doc = make_doc();
     ObjId text_id;
-    doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "text", ObjType::text);
-    });
+    doc.transact([&](auto& tx) { text_id = *tx.put_object(root, "text", ObjType::text); });
 
     std::size_t pos = 0;
     for (auto _ : state) {
-        auto patches = doc.transact_with_patches([&](auto& tx) {
+        auto patches = *doc.transact_with_patches([&](auto& tx) {
             tx.splice_text(text_id, pos, 0, "hello");
             pos += 5;
         });
@@ -425,7 +449,7 @@ static void bm_get_at(benchmark::State& state) {
     }
 
     for (auto _ : state) {
-        auto val = doc.get_at(root, "x", heads_v1);
+        auto val = *doc.get_at(root, "x", heads_v1);
         benchmark::DoNotOptimize(val);
     }
     state.SetItemsProcessed(state.iterations());
@@ -436,7 +460,7 @@ static void bm_text_at(benchmark::State& state) {
     auto doc = make_doc();
     ObjId text_id;
     doc.transact([&](auto& tx) {
-        text_id = tx.put_object(root, "text", ObjType::text);
+        text_id = *tx.put_object(root, "text", ObjType::text);
         tx.splice_text(text_id, 0, 0, "Hello");
     });
     auto heads_v1 = doc.get_heads();
@@ -446,7 +470,7 @@ static void bm_text_at(benchmark::State& state) {
     });
 
     for (auto _ : state) {
-        auto text = doc.text_at(text_id, heads_v1);
+        auto text = *doc.text_at(text_id, heads_v1);
         benchmark::DoNotOptimize(text);
     }
     state.SetItemsProcessed(state.iterations());
@@ -461,7 +485,7 @@ static void bm_cursor_create(benchmark::State& state) {
     auto doc = make_doc();
     ObjId list_id;
     doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "list", ObjType::list);
+        list_id = *tx.put_object(root, "list", ObjType::list);
         for (int i = 0; i < 1000; ++i) {
             tx.insert(list_id, static_cast<std::size_t>(i), std::int64_t{i});
         }
@@ -479,7 +503,7 @@ static void bm_cursor_resolve(benchmark::State& state) {
     auto doc = make_doc();
     ObjId list_id;
     doc.transact([&](auto& tx) {
-        list_id = tx.put_object(root, "list", ObjType::list);
+        list_id = *tx.put_object(root, "list", ObjType::list);
         for (int i = 0; i < 1000; ++i) {
             tx.insert(list_id, static_cast<std::size_t>(i), std::int64_t{i});
         }
@@ -488,7 +512,7 @@ static void bm_cursor_resolve(benchmark::State& state) {
     auto cur = doc.cursor(list_id, 500);
 
     for (auto _ : state) {
-        auto idx = doc.resolve_cursor(list_id, *cur);
+        auto idx = *doc.resolve_cursor(list_id, *cur);
         benchmark::DoNotOptimize(idx);
     }
     state.SetItemsProcessed(state.iterations());
@@ -613,12 +637,18 @@ static void bm_load_docs(benchmark::State& state) {
         auto loaded = std::vector<std::optional<Document>>(doc_count);
         if (!parallel) {
             for (int i = 0; i < doc_count; ++i) {
-                loaded[i] = Document::load(saved[i]);
+                auto decoded = Document::load(saved[i]);
+                if (decoded) {
+                    loaded[i] = std::move(*decoded);
+                }
             }
         } else {
             g_pool->parallelize_loop(0, doc_count, [&](int start, int end) {
                 for (int i = start; i < end; ++i) {
-                    loaded[i] = Document::load(saved[i]);
+                    auto decoded = Document::load(saved[i]);
+                    if (decoded) {
+                        loaded[i] = std::move(*decoded);
+                    }
                 }
             });
         }
@@ -653,13 +683,13 @@ static void bm_concurrent_reads(benchmark::State& state) {
     for (auto _ : state) {
         if (!parallel) {
             for (int i = 0; i < total_reads; ++i) {
-                auto val = doc.get(root, "key_" + std::to_string(i));
+                auto val = *doc.get(root, "key_" + std::to_string(i));
                 benchmark::DoNotOptimize(val);
             }
         } else {
             g_pool->parallelize_loop(0, total_reads, [&](int start, int end) {
                 for (int i = start; i < end; ++i) {
-                    auto val = doc.get(root, "key_" + std::to_string(i));
+                    auto val = *doc.get(root, "key_" + std::to_string(i));
                     benchmark::DoNotOptimize(val);
                 }
             });
@@ -826,13 +856,13 @@ static void bm_get_scale(benchmark::State& state) {
     for (auto _ : state) {
         if (!parallel) {
             for (int i = 0; i < total_keys; ++i) {
-                auto val = doc.get(root, keys[i]);
+                auto val = *doc.get(root, keys[i]);
                 benchmark::DoNotOptimize(val);
             }
         } else {
             g_pool->parallelize_loop(0, total_keys, [&](int s, int e) {
                 for (int i = s; i < e; ++i) {
-                    auto val = doc.get(root, keys[i]);
+                    auto val = *doc.get(root, keys[i]);
                     benchmark::DoNotOptimize(val);
                 }
             });
