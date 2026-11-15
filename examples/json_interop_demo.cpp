@@ -50,7 +50,7 @@ int main() {
     std::printf("Imported into Automerge:\n");
     std::printf("  name:    %s\n", (**doc.get<std::string>(am::root, "name")).c_str());
     std::printf("  version: %s\n", (**doc.get<std::string>(am::root, "version")).c_str());
-    std::printf("  stars:   %ld\n", **doc.get<std::int64_t>(am::root, "stars"));
+    std::printf("  stars:   %lld\n", static_cast<long long>(**doc.get<std::int64_t>(am::root, "stars")));
     std::printf("  active:  %s\n", **doc.get<bool>(am::root, "active") ? "true" : "false");
 
     // =========================================================================
@@ -72,7 +72,7 @@ int main() {
     std::printf("\n=== 3. JSON Pointer (RFC 6901) ===\n");
 
     if (auto val = *am::json::get_pointer(doc, "/config/port")) {
-        std::printf("  /config/port = %ld\n", *am::get_scalar<std::int64_t>(*val));
+        std::printf("  /config/port = %lld\n", static_cast<long long>(*am::get_scalar<std::int64_t>(*val)));
     }
     if (auto val = *am::json::get_pointer(doc, "/tags/0")) {
         std::printf("  /tags/0 = %s\n", am::get_scalar<std::string>(*val)->c_str());
@@ -103,8 +103,8 @@ int main() {
     std::printf("  Diff (RFC 6902):\n%s\n", diff.dump(2).c_str());
 
     doc.merge(bob);
-    std::printf("  After merge: stars=%ld, active=%s\n",
-                **doc.get<std::int64_t>(am::root, "stars"),
+    std::printf("  After merge: stars=%lld, active=%s\n",
+                static_cast<long long>(**doc.get<std::int64_t>(am::root, "stars")),
                 **doc.get<bool>(am::root, "active") ? "true" : "false");
 
     // =========================================================================
