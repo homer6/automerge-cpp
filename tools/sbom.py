@@ -48,7 +48,7 @@ import uuid
 REPOSITORY = "automerge-cpp"
 LICENSE = "MIT"                                   # SPDX expression of this repository
 COPYRIGHT = "Copyright (c) 2026 Steve Sperandeo"
-SUPPLIER = "Organization: OramaSearch, Inc."      # who distributes it (and creates this SBOM)
+SUPPLIER = "Person: Steve Sperandeo"                 # who distributes it (and creates this SBOM)
 ORIGINATOR = "Person: Steve Sperandeo"                             # a fork names its upstream here
 HOME = "https://github.com/homer6/automerge-cpp"
 # Components neither a lock file nor tools/third-party-licenses.* lists (a base model, for example),

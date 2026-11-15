@@ -2,17 +2,17 @@
   "spdxVersion": "SPDX-2.3",
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
-  "name": "automerge-cpp-24cc4dfb8829",
-  "documentNamespace": "https://github.com/homer6/automerge-cpp/sbom/24cc4dfb8829ca593e91c4a3f14a65700080ead3",
+  "name": "automerge-cpp-a702a52018f1",
+  "documentNamespace": "https://github.com/homer6/automerge-cpp/sbom/a702a52018f153d8a75eca3fb732ff472d8d09c1",
   "creationInfo": {
-    "created": "2026-09-04T10:46:57Z",
+    "created": "2026-11-15T19:26:06Z",
     "creators": [
-      "Organization: OramaSearch, Inc.",
+      "Person: Steve Sperandeo",
       "Tool: tools/sbom.py",
       "Tool: syft"
     ],
     "licenseListVersion": "3.29",
-    "comment": "Made from source commit 24cc4dfb8829ca593e91c4a3f14a65700080ead3 by tools/sbom.py."
+    "comment": "Made from source commit a702a52018f153d8a75eca3fb732ff472d8d09c1 by tools/sbom.py."
   },
   "documentDescribes": [
     "SPDXRef-DocumentRoot"
@@ -92,11 +92,11 @@
     {
       "name": "automerge-cpp",
       "SPDXID": "SPDXRef-DocumentRoot",
-      "versionInfo": "24cc4dfb8829",
+      "versionInfo": "a702a52018f1",
       "downloadLocation": "git+https://github.com/homer6/automerge-cpp.git",
       "homepage": "https://github.com/homer6/automerge-cpp",
       "filesAnalyzed": false,
-      "supplier": "Organization: OramaSearch, Inc.",
+      "supplier": "Person: Steve Sperandeo",
       "originator": "Person: Steve Sperandeo",
       "licenseConcluded": "MIT",
       "licenseDeclared": "MIT",
