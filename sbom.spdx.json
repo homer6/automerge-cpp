@@ -2,17 +2,17 @@
   "spdxVersion": "SPDX-2.3",
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
-  "name": "automerge-cpp-a702a52018f1",
-  "documentNamespace": "https://github.com/homer6/automerge-cpp/sbom/a702a52018f153d8a75eca3fb732ff472d8d09c1",
+  "name": "automerge-cpp-v0.7.0",
+  "documentNamespace": "https://github.com/homer6/automerge-cpp/sbom/c8f8977fcf9bb37cb952d59487d065da7c917b8b",
   "creationInfo": {
-    "created": "2026-11-15T19:26:06Z",
+    "created": "2026-11-15T23:32:17Z",
     "creators": [
       "Person: Steve Sperandeo",
       "Tool: tools/sbom.py",
       "Tool: syft"
     ],
     "licenseListVersion": "3.29",
-    "comment": "Made from source commit a702a52018f153d8a75eca3fb732ff472d8d09c1 by tools/sbom.py."
+    "comment": "Made from source commit c8f8977fcf9bb37cb952d59487d065da7c917b8b by tools/sbom.py."
   },
   "documentDescribes": [
     "SPDXRef-DocumentRoot"
@@ -92,7 +92,7 @@
     {
       "name": "automerge-cpp",
       "SPDXID": "SPDXRef-DocumentRoot",
-      "versionInfo": "a702a52018f1",
+      "versionInfo": "v0.7.0",
       "downloadLocation": "git+https://github.com/homer6/automerge-cpp.git",
       "homepage": "https://github.com/homer6/automerge-cpp",
       "filesAnalyzed": false,
