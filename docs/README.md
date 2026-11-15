@@ -26,3 +26,7 @@ One file per subject. A page says what exists, why, how to verify it, and how to
 This is oramasearch's private copy; what liquid needs from it is tracked at
 https://github.com/oramasearch/automerge-cpp/issues/13. Each change under that epic adds or
 updates a page here in the same commit.
+
+## Releases
+
+[Release notes](releases/README.md), one page per version from v0.7.0.

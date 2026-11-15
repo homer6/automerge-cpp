@@ -74,3 +74,9 @@ if(AUTOMERGE_CPP_CARGO_EXECUTABLE)
             LABELS "compatibility;cargo"
     )
 endif()
+
+# The project version has release notes (docs/releases/vX.Y.Z.md).
+add_test(
+    NAME automerge_cpp_release_notes_exist
+    COMMAND "${CMAKE_COMMAND}" -E cat "${CMAKE_SOURCE_DIR}/docs/releases/v${PROJECT_VERSION}.md"
+)
