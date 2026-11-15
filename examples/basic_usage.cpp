@@ -98,7 +98,7 @@ int main() {
     });
     if (auto w = *doc.get_path("dims", "w")) {
         if (auto i = am::get_scalar<std::int64_t>(*w)) {
-            std::printf("Dims width: %ld\n", *i);
+            std::printf("Dims width: %lld\n", static_cast<long long>(*i));
         }
     }
     if (auto tag = *doc.get_path("tags", std::size_t{0})) {
@@ -117,7 +117,7 @@ int main() {
         tx.increment(am::root, "views", 1);
     });
     if (auto views = *doc.get<am::Counter>(am::root, "views")) {
-        std::printf("Views: %ld\n", views->value);
+        std::printf("Views: %lld\n", static_cast<long long>(views->value));
     }
 
     // -- Save to binary and load back -----------------------------------------
