@@ -1,0 +1,2249 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.7.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.7",
+  "serialNumber": "urn:uuid:52a94dbf-b89e-5b6d-a64d-7952ca3c1121",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-11-15T19:26:06Z",
+    "tools": {
+      "components": [
+        {
+          "type": "application",
+          "name": "tools/sbom.py"
+        },
+        {
+          "type": "application",
+          "name": "syft"
+        }
+      ]
+    },
+    "supplier": {
+      "name": "Steve Sperandeo"
+    }
+  },
+  "components": [
+    {
+      "bom-ref": "pkg:cargo/adler2@2.0.1?package-id=Package-rust-crate-adler2-0b9e137c05e5afff",
+      "type": "library",
+      "name": "adler2",
+      "version": "2.0.1",
+      "cpe": "cpe:2.3:a:adler2_project:adler2:2.0.1:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/adler2@2.0.1",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:adler2:adler2:2.0.1:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/automerge@0.7.4?package-id=Package-rust-crate-automerge-61fbb0397fe32702",
+      "type": "library",
+      "name": "automerge",
+      "version": "0.7.4",
+      "cpe": "cpe:2.3:a:automerge_project:automerge:0.7.4:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/automerge@0.7.4",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:automerge:automerge:0.7.4:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "Submodule-automerge-deac13e1287262a0",
+      "type": "library",
+      "name": "automerge",
+      "version": "900c3f061ecaa515d9be8ea0792b4384fec948cb"
+    },
+    {
+      "bom-ref": "DocumentRoot",
+      "type": "library",
+      "name": "automerge-cpp",
+      "version": "a702a52018f1",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "Package-rust-crate-automerge-cpp-fixture-generator-1074cb1fcadf6e54",
+      "type": "library",
+      "name": "automerge-cpp-fixture-generator",
+      "version": "0.1.0",
+      "cpe": "cpe:2.3:a:automerge-cpp-fixture-generator_project:automerge-cpp-fixture-generator:0.1.0:*:*:*:*:rust:*:*",
+      "properties": [
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:automerge-cpp-fixture-generator_project:automerge_cpp_fixture_generator:0.1.0:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:automerge-cpp-fixture-generator:automerge-cpp-fixture-generator:0.1.0:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:automerge-cpp-fixture-generator:automerge_cpp_fixture_generator:0.1.0:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:automerge_cpp_fixture_generator:automerge-cpp-fixture-generator:0.1.0:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:automerge_cpp_fixture_generator:automerge_cpp_fixture_generator:0.1.0:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:automerge-cpp-fixture:automerge-cpp-fixture-generator:0.1.0:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:automerge-cpp-fixture:automerge_cpp_fixture_generator:0.1.0:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:automerge_cpp_fixture:automerge-cpp-fixture-generator:0.1.0:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:automerge_cpp_fixture:automerge_cpp_fixture_generator:0.1.0:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:automerge-cpp:automerge-cpp-fixture-generator:0.1.0:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:automerge-cpp:automerge_cpp_fixture_generator:0.1.0:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:automerge_cpp:automerge-cpp-fixture-generator:0.1.0:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:automerge_cpp:automerge_cpp_fixture_generator:0.1.0:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:automerge:automerge-cpp-fixture-generator:0.1.0:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:automerge:automerge_cpp_fixture_generator:0.1.0:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/block-buffer@0.12.1?package-id=Package-rust-crate-block-buffer-f98e6b103239a03f",
+      "type": "library",
+      "name": "block-buffer",
+      "version": "0.12.1",
+      "cpe": "cpe:2.3:a:block-buffer_project:block-buffer:0.12.1:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/block-buffer@0.12.1",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:block-buffer_project:block_buffer:0.12.1:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:block-buffer:block-buffer:0.12.1:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:block-buffer:block_buffer:0.12.1:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:block_buffer:block-buffer:0.12.1:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:block_buffer:block_buffer:0.12.1:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:block:block-buffer:0.12.1:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:block:block_buffer:0.12.1:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/borsh@1.8.1?package-id=Package-rust-crate-borsh-02f239869d561266",
+      "type": "library",
+      "name": "borsh",
+      "version": "1.8.1",
+      "cpe": "cpe:2.3:a:borsh_project:borsh:1.8.1:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/borsh@1.8.1",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:borsh:borsh:1.8.1:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/bytes@1.12.1?package-id=Package-rust-crate-bytes-f86e16e8d835d86a",
+      "type": "library",
+      "name": "bytes",
+      "version": "1.12.1",
+      "cpe": "cpe:2.3:a:bytes_project:bytes:1.12.1:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/bytes@1.12.1",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:bytes:bytes:1.12.1:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/cfg-if@1.0.4?package-id=Package-rust-crate-cfg-if-06417b91538f0181",
+      "type": "library",
+      "name": "cfg-if",
+      "version": "1.0.4",
+      "cpe": "cpe:2.3:a:cfg-if_project:cfg-if:1.0.4:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/cfg-if@1.0.4",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:cfg-if_project:cfg_if:1.0.4:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:cfg-if:cfg-if:1.0.4:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:cfg-if:cfg_if:1.0.4:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:cfg_if:cfg-if:1.0.4:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:cfg_if:cfg_if:1.0.4:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:cfg:cfg-if:1.0.4:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:cfg:cfg_if:1.0.4:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/cfg_aliases@0.2.2?package-id=Package-rust-crate-cfg-aliases-05d813de3d0d6a95",
+      "type": "library",
+      "name": "cfg_aliases",
+      "version": "0.2.2",
+      "cpe": "cpe:2.3:a:cfg_aliases_project:cfg-aliases:0.2.2:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/cfg_aliases@0.2.2",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:cfg_aliases_project:cfg_aliases:0.2.2:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:cfg-aliases:cfg-aliases:0.2.2:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:cfg-aliases:cfg_aliases:0.2.2:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:cfg_aliases:cfg-aliases:0.2.2:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:cfg_aliases:cfg_aliases:0.2.2:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:cfg:cfg-aliases:0.2.2:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:cfg:cfg_aliases:0.2.2:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/const-oid@0.10.2?package-id=Package-rust-crate-const-oid-adc825bea82595e0",
+      "type": "library",
+      "name": "const-oid",
+      "version": "0.10.2",
+      "cpe": "cpe:2.3:a:const-oid_project:const-oid:0.10.2:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/const-oid@0.10.2",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:const-oid_project:const_oid:0.10.2:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:const-oid:const-oid:0.10.2:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:const-oid:const_oid:0.10.2:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:const_oid:const-oid:0.10.2:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:const_oid:const_oid:0.10.2:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:const:const-oid:0.10.2:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:const:const_oid:0.10.2:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/cpufeatures@0.3.1?package-id=Package-rust-crate-cpufeatures-3923bac52f9a5950",
+      "type": "library",
+      "name": "cpufeatures",
+      "version": "0.3.1",
+      "cpe": "cpe:2.3:a:cpufeatures_project:cpufeatures:0.3.1:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/cpufeatures@0.3.1",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:cpufeatures:cpufeatures:0.3.1:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/crc32fast@1.5.1?package-id=Package-rust-crate-crc32fast-71ba54c3b257f610",
+      "type": "library",
+      "name": "crc32fast",
+      "version": "1.5.1",
+      "cpe": "cpe:2.3:a:crc32fast_project:crc32fast:1.5.1:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/crc32fast@1.5.1",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:crc32fast:crc32fast:1.5.1:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/crypto-common@0.2.2?package-id=Package-rust-crate-crypto-common-d3da871fc18d32d1",
+      "type": "library",
+      "name": "crypto-common",
+      "version": "0.2.2",
+      "cpe": "cpe:2.3:a:crypto-common_project:crypto-common:0.2.2:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/crypto-common@0.2.2",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:crypto-common_project:crypto_common:0.2.2:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:crypto-common:crypto-common:0.2.2:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:crypto-common:crypto_common:0.2.2:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:crypto_common:crypto-common:0.2.2:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:crypto_common:crypto_common:0.2.2:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:crypto:crypto-common:0.2.2:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:crypto:crypto_common:0.2.2:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/digest@0.11.3?package-id=Package-rust-crate-digest-b67671bf21d0afc1",
+      "type": "library",
+      "name": "digest",
+      "version": "0.11.3",
+      "cpe": "cpe:2.3:a:digest_project:digest:0.11.3:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/digest@0.11.3",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:digest:digest:0.11.3:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/either@1.18.0?package-id=Package-rust-crate-either-90ea77fbb34b13fd",
+      "type": "library",
+      "name": "either",
+      "version": "1.18.0",
+      "cpe": "cpe:2.3:a:either_project:either:1.18.0:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/either@1.18.0",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:either:either:1.18.0:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/flate2@1.1.10?package-id=Package-rust-crate-flate2-eafa4e4fdc3823fe",
+      "type": "library",
+      "name": "flate2",
+      "version": "1.1.10",
+      "cpe": "cpe:2.3:a:flate2_project:flate2:1.1.10:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/flate2@1.1.10",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:flate2:flate2:1.1.10:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/getrandom@0.3.4?package-id=Package-rust-crate-getrandom-0bfb63e586bed71a",
+      "type": "library",
+      "name": "getrandom",
+      "version": "0.3.4",
+      "cpe": "cpe:2.3:a:getrandom_project:getrandom:0.3.4:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/getrandom@0.3.4",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/hex@0.4.3?package-id=Package-rust-crate-hex-cd420206a23e1c12",
+      "type": "library",
+      "name": "hex",
+      "version": "0.4.3",
+      "cpe": "cpe:2.3:a:hex_project:hex:0.4.3:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/hex@0.4.3",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:hex:hex:0.4.3:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/hexane@0.1.7?package-id=Package-rust-crate-hexane-4660c97b9a6c67fd",
+      "type": "library",
+      "name": "hexane",
+      "version": "0.1.7",
+      "cpe": "cpe:2.3:a:hexane_project:hexane:0.1.7:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/hexane@0.1.7",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:hexane:hexane:0.1.7:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/hybrid-array@0.4.14?package-id=Package-rust-crate-hybrid-array-fd953e774a91a208",
+      "type": "library",
+      "name": "hybrid-array",
+      "version": "0.4.14",
+      "cpe": "cpe:2.3:a:hybrid-array_project:hybrid-array:0.4.14:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/hybrid-array@0.4.14",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:hybrid-array_project:hybrid_array:0.4.14:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:hybrid-array:hybrid-array:0.4.14:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:hybrid-array:hybrid_array:0.4.14:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:hybrid_array:hybrid-array:0.4.14:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:hybrid_array:hybrid_array:0.4.14:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:hybrid:hybrid-array:0.4.14:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:hybrid:hybrid_array:0.4.14:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/itertools@0.14.0?package-id=Package-rust-crate-itertools-38bcb360d4efc0e4",
+      "type": "library",
+      "name": "itertools",
+      "version": "0.14.0",
+      "cpe": "cpe:2.3:a:itertools_project:itertools:0.14.0:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/itertools@0.14.0",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:itertools:itertools:0.14.0:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "Submodule-json-db4d8df8e1f02e7f",
+      "type": "library",
+      "name": "json",
+      "version": "8167d2f64122c3ef7e5a0d9cab239fdba37aa54c"
+    },
+    {
+      "bom-ref": "pkg:cargo/leb128@0.2.7?package-id=Package-rust-crate-leb128-001debe4370a79d4",
+      "type": "library",
+      "name": "leb128",
+      "version": "0.2.7",
+      "cpe": "cpe:2.3:a:leb128_project:leb128:0.2.7:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/leb128@0.2.7",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:leb128:leb128:0.2.7:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/libc@0.2.189?package-id=Package-rust-crate-libc-0479cee825c3f00a",
+      "type": "library",
+      "name": "libc",
+      "version": "0.2.189",
+      "cpe": "cpe:2.3:a:libc_project:libc:0.2.189:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/libc@0.2.189",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:libc:libc:0.2.189:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/miniz_oxide@0.9.1?package-id=Package-rust-crate-miniz-oxide-3e454fbe39bcfaae",
+      "type": "library",
+      "name": "miniz_oxide",
+      "version": "0.9.1",
+      "cpe": "cpe:2.3:a:miniz_oxide_project:miniz-oxide:0.9.1:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/miniz_oxide@0.9.1",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:miniz_oxide_project:miniz_oxide:0.9.1:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:miniz-oxide:miniz-oxide:0.9.1:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:miniz-oxide:miniz_oxide:0.9.1:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:miniz_oxide:miniz-oxide:0.9.1:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:miniz_oxide:miniz_oxide:0.9.1:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:miniz:miniz-oxide:0.9.1:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:miniz:miniz_oxide:0.9.1:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/once_cell@1.21.4?package-id=Package-rust-crate-once-cell-dca60674b6caefdd",
+      "type": "library",
+      "name": "once_cell",
+      "version": "1.21.4",
+      "cpe": "cpe:2.3:a:once_cell_project:once-cell:1.21.4:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/once_cell@1.21.4",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:once_cell_project:once_cell:1.21.4:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:once-cell:once-cell:1.21.4:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:once-cell:once_cell:1.21.4:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:once_cell:once-cell:1.21.4:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:once_cell:once_cell:1.21.4:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:once:once-cell:1.21.4:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:once:once_cell:1.21.4:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/pin-project-lite@0.2.17?package-id=Package-rust-crate-pin-project-lite-212d2b070ab1852c",
+      "type": "library",
+      "name": "pin-project-lite",
+      "version": "0.2.17",
+      "cpe": "cpe:2.3:a:pin-project-lite_project:pin-project-lite:0.2.17:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/pin-project-lite@0.2.17",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:pin-project-lite_project:pin_project_lite:0.2.17:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:pin-project-lite:pin-project-lite:0.2.17:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:pin-project-lite:pin_project_lite:0.2.17:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:pin_project_lite:pin-project-lite:0.2.17:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:pin_project_lite:pin_project_lite:0.2.17:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:pin-project:pin-project-lite:0.2.17:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:pin-project:pin_project_lite:0.2.17:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:pin_project:pin-project-lite:0.2.17:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:pin_project:pin_project_lite:0.2.17:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:pin:pin-project-lite:0.2.17:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:pin:pin_project_lite:0.2.17:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/ppv-lite86@0.2.21?package-id=Package-rust-crate-ppv-lite86-ce7e7b04dc67dba8",
+      "type": "library",
+      "name": "ppv-lite86",
+      "version": "0.2.21",
+      "cpe": "cpe:2.3:a:ppv-lite86_project:ppv-lite86:0.2.21:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/ppv-lite86@0.2.21",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:ppv-lite86_project:ppv_lite86:0.2.21:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:ppv-lite86:ppv-lite86:0.2.21:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:ppv-lite86:ppv_lite86:0.2.21:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:ppv_lite86:ppv-lite86:0.2.21:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:ppv_lite86:ppv_lite86:0.2.21:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:ppv:ppv-lite86:0.2.21:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:ppv:ppv_lite86:0.2.21:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/proc-macro2@1.0.107?package-id=Package-rust-crate-proc-macro2-b384ab14ff2d28d0",
+      "type": "library",
+      "name": "proc-macro2",
+      "version": "1.0.107",
+      "cpe": "cpe:2.3:a:proc-macro2_project:proc-macro2:1.0.107:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/proc-macro2@1.0.107",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:proc-macro2_project:proc_macro2:1.0.107:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:proc-macro2:proc-macro2:1.0.107:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:proc-macro2:proc_macro2:1.0.107:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:proc_macro2:proc-macro2:1.0.107:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:proc_macro2:proc_macro2:1.0.107:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:proc:proc-macro2:1.0.107:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:proc:proc_macro2:1.0.107:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/quote@1.0.47?package-id=Package-rust-crate-quote-3d0af18bbb021ea0",
+      "type": "library",
+      "name": "quote",
+      "version": "1.0.47",
+      "cpe": "cpe:2.3:a:dtolnay:quote:1.0.47:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/quote@1.0.47",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/r-efi@5.3.0?package-id=Package-rust-crate-r-efi-114d1521c56dcc7a",
+      "type": "library",
+      "name": "r-efi",
+      "version": "5.3.0",
+      "cpe": "cpe:2.3:a:r-efi_project:r-efi:5.3.0:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/r-efi@5.3.0",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:r-efi_project:r_efi:5.3.0:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:r-efi:r-efi:5.3.0:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:r-efi:r_efi:5.3.0:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:r_efi:r-efi:5.3.0:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:r_efi:r_efi:5.3.0:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:r:r-efi:5.3.0:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:r:r_efi:5.3.0:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/rand@0.9.5?package-id=Package-rust-crate-rand-3d322e4f3655c576",
+      "type": "library",
+      "name": "rand",
+      "version": "0.9.5",
+      "cpe": "cpe:2.3:a:rust-random:rand:0.9.5:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/rand@0.9.5",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/rand_chacha@0.9.0?package-id=Package-rust-crate-rand-chacha-85e4546b275dfd9f",
+      "type": "library",
+      "name": "rand_chacha",
+      "version": "0.9.0",
+      "cpe": "cpe:2.3:a:rand_chacha_project:rand-chacha:0.9.0:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/rand_chacha@0.9.0",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:rand_chacha_project:rand_chacha:0.9.0:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:rand-chacha:rand-chacha:0.9.0:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:rand-chacha:rand_chacha:0.9.0:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:rand_chacha:rand-chacha:0.9.0:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:rand_chacha:rand_chacha:0.9.0:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:rand:rand-chacha:0.9.0:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:rand:rand_chacha:0.9.0:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/rand_core@0.9.5?package-id=Package-rust-crate-rand-core-34e4ac45599fb052",
+      "type": "library",
+      "name": "rand_core",
+      "version": "0.9.5",
+      "cpe": "cpe:2.3:a:rand_core_project:rand_core:0.9.5:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/rand_core@0.9.5",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/rustc-hash@2.1.3?package-id=Package-rust-crate-rustc-hash-9e2c1bd827b6b25a",
+      "type": "library",
+      "name": "rustc-hash",
+      "version": "2.1.3",
+      "cpe": "cpe:2.3:a:rustc-hash_project:rustc-hash:2.1.3:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/rustc-hash@2.1.3",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:rustc-hash_project:rustc_hash:2.1.3:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:rustc-hash:rustc-hash:2.1.3:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:rustc-hash:rustc_hash:2.1.3:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:rustc_hash:rustc-hash:2.1.3:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:rustc_hash:rustc_hash:2.1.3:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:rustc:rustc-hash:2.1.3:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:rustc:rustc_hash:2.1.3:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/serde@1.0.229?package-id=Package-rust-crate-serde-85cb88ead6f04e82",
+      "type": "library",
+      "name": "serde",
+      "version": "1.0.229",
+      "cpe": "cpe:2.3:a:serde_project:serde:1.0.229:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/serde@1.0.229",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:serde:serde:1.0.229:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/serde_core@1.0.229?package-id=Package-rust-crate-serde-core-473938291f01eb8b",
+      "type": "library",
+      "name": "serde_core",
+      "version": "1.0.229",
+      "cpe": "cpe:2.3:a:serde_core_project:serde-core:1.0.229:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/serde_core@1.0.229",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:serde_core_project:serde_core:1.0.229:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:serde-core:serde-core:1.0.229:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:serde-core:serde_core:1.0.229:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:serde_core:serde-core:1.0.229:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:serde_core:serde_core:1.0.229:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:serde:serde-core:1.0.229:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:serde:serde_core:1.0.229:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/serde_derive@1.0.229?package-id=Package-rust-crate-serde-derive-148a764e4bee5880",
+      "type": "library",
+      "name": "serde_derive",
+      "version": "1.0.229",
+      "cpe": "cpe:2.3:a:serde_derive_project:serde-derive:1.0.229:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/serde_derive@1.0.229",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:serde_derive_project:serde_derive:1.0.229:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:serde-derive:serde-derive:1.0.229:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:serde-derive:serde_derive:1.0.229:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:serde_derive:serde-derive:1.0.229:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:serde_derive:serde_derive:1.0.229:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:serde:serde-derive:1.0.229:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:serde:serde_derive:1.0.229:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/sha2@0.11.0?package-id=Package-rust-crate-sha2-5352fb551a70e9c5",
+      "type": "library",
+      "name": "sha2",
+      "version": "0.11.0",
+      "cpe": "cpe:2.3:a:sha2_project:sha2:0.11.0:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/sha2@0.11.0",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/simd-adler32@0.3.10?package-id=Package-rust-crate-simd-adler32-2aa8db3fd6716f4d",
+      "type": "library",
+      "name": "simd-adler32",
+      "version": "0.3.10",
+      "cpe": "cpe:2.3:a:simd-adler32_project:simd-adler32:0.3.10:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/simd-adler32@0.3.10",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:simd-adler32_project:simd_adler32:0.3.10:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:simd-adler32:simd-adler32:0.3.10:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:simd-adler32:simd_adler32:0.3.10:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:simd_adler32:simd-adler32:0.3.10:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:simd_adler32:simd_adler32:0.3.10:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:simd:simd-adler32:0.3.10:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:simd:simd_adler32:0.3.10:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/smol_str@0.3.6?package-id=Package-rust-crate-smol-str-103c9c016cad1464",
+      "type": "library",
+      "name": "smol_str",
+      "version": "0.3.6",
+      "cpe": "cpe:2.3:a:smol_str_project:smol-str:0.3.6:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/smol_str@0.3.6",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:smol_str_project:smol_str:0.3.6:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:smol-str:smol-str:0.3.6:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:smol-str:smol_str:0.3.6:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:smol_str:smol-str:0.3.6:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:smol_str:smol_str:0.3.6:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:smol:smol-str:0.3.6:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:smol:smol_str:0.3.6:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/syn@2.0.119?package-id=Package-rust-crate-syn-1b1dff22ce1a82bc",
+      "type": "library",
+      "name": "syn",
+      "version": "2.0.119",
+      "cpe": "cpe:2.3:a:syn_project:syn:2.0.119:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/syn@2.0.119",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:syn:syn:2.0.119:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/syn@3.0.4?package-id=Package-rust-crate-syn-94cdfa93e25c7159",
+      "type": "library",
+      "name": "syn",
+      "version": "3.0.4",
+      "cpe": "cpe:2.3:a:syn_project:syn:3.0.4:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/syn@3.0.4",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:syn:syn:3.0.4:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/thiserror@2.0.20?package-id=Package-rust-crate-thiserror-33e2e521e01b9d87",
+      "type": "library",
+      "name": "thiserror",
+      "version": "2.0.20",
+      "cpe": "cpe:2.3:a:thiserror_project:thiserror:2.0.20:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/thiserror@2.0.20",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:thiserror:thiserror:2.0.20:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/thiserror-impl@2.0.20?package-id=Package-rust-crate-thiserror-impl-11acf64e5d611e3d",
+      "type": "library",
+      "name": "thiserror-impl",
+      "version": "2.0.20",
+      "cpe": "cpe:2.3:a:thiserror-impl_project:thiserror-impl:2.0.20:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/thiserror-impl@2.0.20",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:thiserror-impl_project:thiserror_impl:2.0.20:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:thiserror-impl:thiserror-impl:2.0.20:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:thiserror-impl:thiserror_impl:2.0.20:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:thiserror_impl:thiserror-impl:2.0.20:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:thiserror_impl:thiserror_impl:2.0.20:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:thiserror:thiserror-impl:2.0.20:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:thiserror:thiserror_impl:2.0.20:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/tinyvec@1.13.2?package-id=Package-rust-crate-tinyvec-fb2616173351e40e",
+      "type": "library",
+      "name": "tinyvec",
+      "version": "1.13.2",
+      "cpe": "cpe:2.3:a:tinyvec_project:tinyvec:1.13.2:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/tinyvec@1.13.2",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:tinyvec:tinyvec:1.13.2:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/tinyvec_macros@0.1.1?package-id=Package-rust-crate-tinyvec-macros-7117298927bb29a5",
+      "type": "library",
+      "name": "tinyvec_macros",
+      "version": "0.1.1",
+      "cpe": "cpe:2.3:a:tinyvec_macros_project:tinyvec-macros:0.1.1:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/tinyvec_macros@0.1.1",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:tinyvec_macros_project:tinyvec_macros:0.1.1:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:tinyvec-macros:tinyvec-macros:0.1.1:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:tinyvec-macros:tinyvec_macros:0.1.1:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:tinyvec_macros:tinyvec-macros:0.1.1:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:tinyvec_macros:tinyvec_macros:0.1.1:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:tinyvec:tinyvec-macros:0.1.1:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:tinyvec:tinyvec_macros:0.1.1:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/tracing@0.1.44?package-id=Package-rust-crate-tracing-c8bed3f2d39c5555",
+      "type": "library",
+      "name": "tracing",
+      "version": "0.1.44",
+      "cpe": "cpe:2.3:a:tracing_project:tracing:0.1.44:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/tracing@0.1.44",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:tracing:tracing:0.1.44:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/tracing-attributes@0.1.31?package-id=Package-rust-crate-tracing-attributes-3060a9de067cdd73",
+      "type": "library",
+      "name": "tracing-attributes",
+      "version": "0.1.31",
+      "cpe": "cpe:2.3:a:tracing-attributes_project:tracing-attributes:0.1.31:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/tracing-attributes@0.1.31",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:tracing-attributes_project:tracing_attributes:0.1.31:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:tracing-attributes:tracing-attributes:0.1.31:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:tracing-attributes:tracing_attributes:0.1.31:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:tracing_attributes:tracing-attributes:0.1.31:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:tracing_attributes:tracing_attributes:0.1.31:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:tracing:tracing-attributes:0.1.31:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:tracing:tracing_attributes:0.1.31:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/tracing-core@0.1.36?package-id=Package-rust-crate-tracing-core-9c122b82604e524f",
+      "type": "library",
+      "name": "tracing-core",
+      "version": "0.1.36",
+      "cpe": "cpe:2.3:a:tracing-core_project:tracing-core:0.1.36:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/tracing-core@0.1.36",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:tracing-core_project:tracing_core:0.1.36:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:tracing-core:tracing-core:0.1.36:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:tracing-core:tracing_core:0.1.36:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:tracing_core:tracing-core:0.1.36:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:tracing_core:tracing_core:0.1.36:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:tracing:tracing-core:0.1.36:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:tracing:tracing_core:0.1.36:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/typenum@1.20.1?package-id=Package-rust-crate-typenum-ef266355c0000d1f",
+      "type": "library",
+      "name": "typenum",
+      "version": "1.20.1",
+      "cpe": "cpe:2.3:a:typenum_project:typenum:1.20.1:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/typenum@1.20.1",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:typenum:typenum:1.20.1:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/unicode-ident@1.0.24?package-id=Package-rust-crate-unicode-ident-8780037d90edf0a3",
+      "type": "library",
+      "name": "unicode-ident",
+      "version": "1.0.24",
+      "cpe": "cpe:2.3:a:unicode-ident_project:unicode-ident:1.0.24:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/unicode-ident@1.0.24",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:unicode-ident_project:unicode_ident:1.0.24:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:unicode-ident:unicode-ident:1.0.24:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:unicode-ident:unicode_ident:1.0.24:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:unicode_ident:unicode-ident:1.0.24:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:unicode_ident:unicode_ident:1.0.24:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:unicode:unicode-ident:1.0.24:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:unicode:unicode_ident:1.0.24:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/unicode-segmentation@1.13.3?package-id=Package-rust-crate-unicode-segmentation-01be419a21ab0884",
+      "type": "library",
+      "name": "unicode-segmentation",
+      "version": "1.13.3",
+      "cpe": "cpe:2.3:a:unicode-segmentation_project:unicode-segmentation:1.13.3:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/unicode-segmentation@1.13.3",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:unicode-segmentation_project:unicode_segmentation:1.13.3:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:unicode-segmentation:unicode-segmentation:1.13.3:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:unicode-segmentation:unicode_segmentation:1.13.3:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:unicode_segmentation:unicode-segmentation:1.13.3:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:unicode_segmentation:unicode_segmentation:1.13.3:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:unicode:unicode-segmentation:1.13.3:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:unicode:unicode_segmentation:1.13.3:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/wasip2@1.0.4%2Bwasi-0.2.12?package-id=Package-rust-crate-wasip2-5e9674c566fa809f",
+      "type": "library",
+      "name": "wasip2",
+      "version": "1.0.4+wasi-0.2.12",
+      "cpe": "cpe:2.3:a:wasip2_project:wasip2:1.0.4\\+wasi-0.2.12:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/wasip2@1.0.4%2Bwasi-0.2.12",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:wasip2:wasip2:1.0.4\\+wasi-0.2.12:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/wit-bindgen@0.57.1?package-id=Package-rust-crate-wit-bindgen-7ecd7944ae388498",
+      "type": "library",
+      "name": "wit-bindgen",
+      "version": "0.57.1",
+      "cpe": "cpe:2.3:a:wit-bindgen_project:wit-bindgen:0.57.1:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/wit-bindgen@0.57.1",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:wit-bindgen_project:wit_bindgen:0.57.1:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:wit-bindgen:wit-bindgen:0.57.1:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:wit-bindgen:wit_bindgen:0.57.1:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:wit_bindgen:wit-bindgen:0.57.1:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:wit_bindgen:wit_bindgen:0.57.1:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:wit:wit-bindgen:0.57.1:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:wit:wit_bindgen:0.57.1:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/zerocopy@0.8.56?package-id=Package-rust-crate-zerocopy-b85f585e48517afa",
+      "type": "library",
+      "name": "zerocopy",
+      "version": "0.8.56",
+      "cpe": "cpe:2.3:a:zerocopy_project:zerocopy:0.8.56:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/zerocopy@0.8.56",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:zerocopy:zerocopy:0.8.56:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/zerocopy-derive@0.8.56?package-id=Package-rust-crate-zerocopy-derive-a96a9564a308f65c",
+      "type": "library",
+      "name": "zerocopy-derive",
+      "version": "0.8.56",
+      "cpe": "cpe:2.3:a:zerocopy-derive_project:zerocopy-derive:0.8.56:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/zerocopy-derive@0.8.56",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:zerocopy-derive_project:zerocopy_derive:0.8.56:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:zerocopy-derive:zerocopy-derive:0.8.56:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:zerocopy-derive:zerocopy_derive:0.8.56:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:zerocopy_derive:zerocopy-derive:0.8.56:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:zerocopy_derive:zerocopy_derive:0.8.56:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:zerocopy:zerocopy-derive:0.8.56:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:zerocopy:zerocopy_derive:0.8.56:*:*:*:*:rust:*:*"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:cargo/zlib-rs@0.6.7?package-id=Package-rust-crate-zlib-rs-070a1633966cc524",
+      "type": "library",
+      "name": "zlib-rs",
+      "version": "0.6.7",
+      "cpe": "cpe:2.3:a:zlib-rs_project:zlib-rs:0.6.7:*:*:*:*:rust:*:*",
+      "purl": "pkg:cargo/zlib-rs@0.6.7",
+      "properties": [
+        {
+          "name": "syft:package:language",
+          "value": "rust"
+        },
+        {
+          "name": "syft:package:type",
+          "value": "rust-crate"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:zlib-rs_project:zlib_rs:0.6.7:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:zlib-rs:zlib-rs:0.6.7:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:zlib-rs:zlib_rs:0.6.7:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:zlib_rs:zlib-rs:0.6.7:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:zlib_rs:zlib_rs:0.6.7:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:zlib:zlib-rs:0.6.7:*:*:*:*:rust:*:*"
+        },
+        {
+          "name": "syft:cpe23",
+          "value": "cpe:2.3:a:zlib:zlib_rs:0.6.7:*:*:*:*:rust:*:*"
+        }
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "DocumentRoot",
+      "dependsOn": [
+        "Submodule-automerge-deac13e1287262a0",
+        "Submodule-json-db4d8df8e1f02e7f"
+      ]
+    },
+    {
+      "ref": "Package-rust-crate-automerge-cpp-fixture-generator-1074cb1fcadf6e54",
+      "dependsOn": [
+        "pkg:cargo/automerge@0.7.4?package-id=Package-rust-crate-automerge-61fbb0397fe32702"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/automerge@0.7.4?package-id=Package-rust-crate-automerge-61fbb0397fe32702",
+      "dependsOn": [
+        "pkg:cargo/cfg-if@1.0.4?package-id=Package-rust-crate-cfg-if-06417b91538f0181",
+        "pkg:cargo/flate2@1.1.10?package-id=Package-rust-crate-flate2-eafa4e4fdc3823fe",
+        "pkg:cargo/getrandom@0.3.4?package-id=Package-rust-crate-getrandom-0bfb63e586bed71a",
+        "pkg:cargo/hex@0.4.3?package-id=Package-rust-crate-hex-cd420206a23e1c12",
+        "pkg:cargo/hexane@0.1.7?package-id=Package-rust-crate-hexane-4660c97b9a6c67fd",
+        "pkg:cargo/itertools@0.14.0?package-id=Package-rust-crate-itertools-38bcb360d4efc0e4",
+        "pkg:cargo/leb128@0.2.7?package-id=Package-rust-crate-leb128-001debe4370a79d4",
+        "pkg:cargo/rand@0.9.5?package-id=Package-rust-crate-rand-3d322e4f3655c576",
+        "pkg:cargo/rustc-hash@2.1.3?package-id=Package-rust-crate-rustc-hash-9e2c1bd827b6b25a",
+        "pkg:cargo/serde@1.0.229?package-id=Package-rust-crate-serde-85cb88ead6f04e82",
+        "pkg:cargo/sha2@0.11.0?package-id=Package-rust-crate-sha2-5352fb551a70e9c5",
+        "pkg:cargo/smol_str@0.3.6?package-id=Package-rust-crate-smol-str-103c9c016cad1464",
+        "pkg:cargo/thiserror@2.0.20?package-id=Package-rust-crate-thiserror-33e2e521e01b9d87",
+        "pkg:cargo/tinyvec@1.13.2?package-id=Package-rust-crate-tinyvec-fb2616173351e40e",
+        "pkg:cargo/tracing@0.1.44?package-id=Package-rust-crate-tracing-c8bed3f2d39c5555",
+        "pkg:cargo/unicode-segmentation@1.13.3?package-id=Package-rust-crate-unicode-segmentation-01be419a21ab0884"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/block-buffer@0.12.1?package-id=Package-rust-crate-block-buffer-f98e6b103239a03f",
+      "dependsOn": [
+        "pkg:cargo/hybrid-array@0.4.14?package-id=Package-rust-crate-hybrid-array-fd953e774a91a208"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/borsh@1.8.1?package-id=Package-rust-crate-borsh-02f239869d561266",
+      "dependsOn": [
+        "pkg:cargo/bytes@1.12.1?package-id=Package-rust-crate-bytes-f86e16e8d835d86a",
+        "pkg:cargo/cfg_aliases@0.2.2?package-id=Package-rust-crate-cfg-aliases-05d813de3d0d6a95"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/cpufeatures@0.3.1?package-id=Package-rust-crate-cpufeatures-3923bac52f9a5950",
+      "dependsOn": [
+        "pkg:cargo/libc@0.2.189?package-id=Package-rust-crate-libc-0479cee825c3f00a"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/crc32fast@1.5.1?package-id=Package-rust-crate-crc32fast-71ba54c3b257f610",
+      "dependsOn": [
+        "pkg:cargo/cfg-if@1.0.4?package-id=Package-rust-crate-cfg-if-06417b91538f0181"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/crypto-common@0.2.2?package-id=Package-rust-crate-crypto-common-d3da871fc18d32d1",
+      "dependsOn": [
+        "pkg:cargo/hybrid-array@0.4.14?package-id=Package-rust-crate-hybrid-array-fd953e774a91a208"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/digest@0.11.3?package-id=Package-rust-crate-digest-b67671bf21d0afc1",
+      "dependsOn": [
+        "pkg:cargo/block-buffer@0.12.1?package-id=Package-rust-crate-block-buffer-f98e6b103239a03f",
+        "pkg:cargo/const-oid@0.10.2?package-id=Package-rust-crate-const-oid-adc825bea82595e0",
+        "pkg:cargo/crypto-common@0.2.2?package-id=Package-rust-crate-crypto-common-d3da871fc18d32d1"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/flate2@1.1.10?package-id=Package-rust-crate-flate2-eafa4e4fdc3823fe",
+      "dependsOn": [
+        "pkg:cargo/crc32fast@1.5.1?package-id=Package-rust-crate-crc32fast-71ba54c3b257f610",
+        "pkg:cargo/miniz_oxide@0.9.1?package-id=Package-rust-crate-miniz-oxide-3e454fbe39bcfaae",
+        "pkg:cargo/zlib-rs@0.6.7?package-id=Package-rust-crate-zlib-rs-070a1633966cc524"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/getrandom@0.3.4?package-id=Package-rust-crate-getrandom-0bfb63e586bed71a",
+      "dependsOn": [
+        "pkg:cargo/cfg-if@1.0.4?package-id=Package-rust-crate-cfg-if-06417b91538f0181",
+        "pkg:cargo/libc@0.2.189?package-id=Package-rust-crate-libc-0479cee825c3f00a",
+        "pkg:cargo/r-efi@5.3.0?package-id=Package-rust-crate-r-efi-114d1521c56dcc7a",
+        "pkg:cargo/wasip2@1.0.4%2Bwasi-0.2.12?package-id=Package-rust-crate-wasip2-5e9674c566fa809f"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/hexane@0.1.7?package-id=Package-rust-crate-hexane-4660c97b9a6c67fd",
+      "dependsOn": [
+        "pkg:cargo/leb128@0.2.7?package-id=Package-rust-crate-leb128-001debe4370a79d4",
+        "pkg:cargo/thiserror@2.0.20?package-id=Package-rust-crate-thiserror-33e2e521e01b9d87"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/hybrid-array@0.4.14?package-id=Package-rust-crate-hybrid-array-fd953e774a91a208",
+      "dependsOn": [
+        "pkg:cargo/typenum@1.20.1?package-id=Package-rust-crate-typenum-ef266355c0000d1f"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/itertools@0.14.0?package-id=Package-rust-crate-itertools-38bcb360d4efc0e4",
+      "dependsOn": [
+        "pkg:cargo/either@1.18.0?package-id=Package-rust-crate-either-90ea77fbb34b13fd"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/miniz_oxide@0.9.1?package-id=Package-rust-crate-miniz-oxide-3e454fbe39bcfaae",
+      "dependsOn": [
+        "pkg:cargo/adler2@2.0.1?package-id=Package-rust-crate-adler2-0b9e137c05e5afff",
+        "pkg:cargo/simd-adler32@0.3.10?package-id=Package-rust-crate-simd-adler32-2aa8db3fd6716f4d"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/ppv-lite86@0.2.21?package-id=Package-rust-crate-ppv-lite86-ce7e7b04dc67dba8",
+      "dependsOn": [
+        "pkg:cargo/zerocopy@0.8.56?package-id=Package-rust-crate-zerocopy-b85f585e48517afa"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/proc-macro2@1.0.107?package-id=Package-rust-crate-proc-macro2-b384ab14ff2d28d0",
+      "dependsOn": [
+        "pkg:cargo/unicode-ident@1.0.24?package-id=Package-rust-crate-unicode-ident-8780037d90edf0a3"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/quote@1.0.47?package-id=Package-rust-crate-quote-3d0af18bbb021ea0",
+      "dependsOn": [
+        "pkg:cargo/proc-macro2@1.0.107?package-id=Package-rust-crate-proc-macro2-b384ab14ff2d28d0"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/rand@0.9.5?package-id=Package-rust-crate-rand-3d322e4f3655c576",
+      "dependsOn": [
+        "pkg:cargo/rand_chacha@0.9.0?package-id=Package-rust-crate-rand-chacha-85e4546b275dfd9f",
+        "pkg:cargo/rand_core@0.9.5?package-id=Package-rust-crate-rand-core-34e4ac45599fb052"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/rand_chacha@0.9.0?package-id=Package-rust-crate-rand-chacha-85e4546b275dfd9f",
+      "dependsOn": [
+        "pkg:cargo/ppv-lite86@0.2.21?package-id=Package-rust-crate-ppv-lite86-ce7e7b04dc67dba8",
+        "pkg:cargo/rand_core@0.9.5?package-id=Package-rust-crate-rand-core-34e4ac45599fb052"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/rand_core@0.9.5?package-id=Package-rust-crate-rand-core-34e4ac45599fb052",
+      "dependsOn": [
+        "pkg:cargo/getrandom@0.3.4?package-id=Package-rust-crate-getrandom-0bfb63e586bed71a"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/serde@1.0.229?package-id=Package-rust-crate-serde-85cb88ead6f04e82",
+      "dependsOn": [
+        "pkg:cargo/serde_core@1.0.229?package-id=Package-rust-crate-serde-core-473938291f01eb8b",
+        "pkg:cargo/serde_derive@1.0.229?package-id=Package-rust-crate-serde-derive-148a764e4bee5880"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/serde_core@1.0.229?package-id=Package-rust-crate-serde-core-473938291f01eb8b",
+      "dependsOn": [
+        "pkg:cargo/serde_derive@1.0.229?package-id=Package-rust-crate-serde-derive-148a764e4bee5880"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/serde_derive@1.0.229?package-id=Package-rust-crate-serde-derive-148a764e4bee5880",
+      "dependsOn": [
+        "pkg:cargo/proc-macro2@1.0.107?package-id=Package-rust-crate-proc-macro2-b384ab14ff2d28d0",
+        "pkg:cargo/quote@1.0.47?package-id=Package-rust-crate-quote-3d0af18bbb021ea0",
+        "pkg:cargo/syn@3.0.4?package-id=Package-rust-crate-syn-94cdfa93e25c7159"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/sha2@0.11.0?package-id=Package-rust-crate-sha2-5352fb551a70e9c5",
+      "dependsOn": [
+        "pkg:cargo/cfg-if@1.0.4?package-id=Package-rust-crate-cfg-if-06417b91538f0181",
+        "pkg:cargo/cpufeatures@0.3.1?package-id=Package-rust-crate-cpufeatures-3923bac52f9a5950",
+        "pkg:cargo/digest@0.11.3?package-id=Package-rust-crate-digest-b67671bf21d0afc1"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/smol_str@0.3.6?package-id=Package-rust-crate-smol-str-103c9c016cad1464",
+      "dependsOn": [
+        "pkg:cargo/borsh@1.8.1?package-id=Package-rust-crate-borsh-02f239869d561266",
+        "pkg:cargo/serde_core@1.0.229?package-id=Package-rust-crate-serde-core-473938291f01eb8b"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/syn@2.0.119?package-id=Package-rust-crate-syn-1b1dff22ce1a82bc",
+      "dependsOn": [
+        "pkg:cargo/proc-macro2@1.0.107?package-id=Package-rust-crate-proc-macro2-b384ab14ff2d28d0",
+        "pkg:cargo/quote@1.0.47?package-id=Package-rust-crate-quote-3d0af18bbb021ea0",
+        "pkg:cargo/unicode-ident@1.0.24?package-id=Package-rust-crate-unicode-ident-8780037d90edf0a3"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/syn@3.0.4?package-id=Package-rust-crate-syn-94cdfa93e25c7159",
+      "dependsOn": [
+        "pkg:cargo/proc-macro2@1.0.107?package-id=Package-rust-crate-proc-macro2-b384ab14ff2d28d0",
+        "pkg:cargo/quote@1.0.47?package-id=Package-rust-crate-quote-3d0af18bbb021ea0",
+        "pkg:cargo/unicode-ident@1.0.24?package-id=Package-rust-crate-unicode-ident-8780037d90edf0a3"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/thiserror-impl@2.0.20?package-id=Package-rust-crate-thiserror-impl-11acf64e5d611e3d",
+      "dependsOn": [
+        "pkg:cargo/proc-macro2@1.0.107?package-id=Package-rust-crate-proc-macro2-b384ab14ff2d28d0",
+        "pkg:cargo/quote@1.0.47?package-id=Package-rust-crate-quote-3d0af18bbb021ea0",
+        "pkg:cargo/syn@3.0.4?package-id=Package-rust-crate-syn-94cdfa93e25c7159"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/thiserror@2.0.20?package-id=Package-rust-crate-thiserror-33e2e521e01b9d87",
+      "dependsOn": [
+        "pkg:cargo/thiserror-impl@2.0.20?package-id=Package-rust-crate-thiserror-impl-11acf64e5d611e3d"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/tinyvec@1.13.2?package-id=Package-rust-crate-tinyvec-fb2616173351e40e",
+      "dependsOn": [
+        "pkg:cargo/tinyvec_macros@0.1.1?package-id=Package-rust-crate-tinyvec-macros-7117298927bb29a5"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/tracing-attributes@0.1.31?package-id=Package-rust-crate-tracing-attributes-3060a9de067cdd73",
+      "dependsOn": [
+        "pkg:cargo/proc-macro2@1.0.107?package-id=Package-rust-crate-proc-macro2-b384ab14ff2d28d0",
+        "pkg:cargo/quote@1.0.47?package-id=Package-rust-crate-quote-3d0af18bbb021ea0",
+        "pkg:cargo/syn@2.0.119?package-id=Package-rust-crate-syn-1b1dff22ce1a82bc"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/tracing-core@0.1.36?package-id=Package-rust-crate-tracing-core-9c122b82604e524f",
+      "dependsOn": [
+        "pkg:cargo/once_cell@1.21.4?package-id=Package-rust-crate-once-cell-dca60674b6caefdd"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/tracing@0.1.44?package-id=Package-rust-crate-tracing-c8bed3f2d39c5555",
+      "dependsOn": [
+        "pkg:cargo/pin-project-lite@0.2.17?package-id=Package-rust-crate-pin-project-lite-212d2b070ab1852c",
+        "pkg:cargo/tracing-attributes@0.1.31?package-id=Package-rust-crate-tracing-attributes-3060a9de067cdd73",
+        "pkg:cargo/tracing-core@0.1.36?package-id=Package-rust-crate-tracing-core-9c122b82604e524f"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/wasip2@1.0.4%2Bwasi-0.2.12?package-id=Package-rust-crate-wasip2-5e9674c566fa809f",
+      "dependsOn": [
+        "pkg:cargo/wit-bindgen@0.57.1?package-id=Package-rust-crate-wit-bindgen-7ecd7944ae388498"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/zerocopy-derive@0.8.56?package-id=Package-rust-crate-zerocopy-derive-a96a9564a308f65c",
+      "dependsOn": [
+        "pkg:cargo/proc-macro2@1.0.107?package-id=Package-rust-crate-proc-macro2-b384ab14ff2d28d0",
+        "pkg:cargo/quote@1.0.47?package-id=Package-rust-crate-quote-3d0af18bbb021ea0",
+        "pkg:cargo/syn@2.0.119?package-id=Package-rust-crate-syn-1b1dff22ce1a82bc"
+      ]
+    },
+    {
+      "ref": "pkg:cargo/zerocopy@0.8.56?package-id=Package-rust-crate-zerocopy-b85f585e48517afa",
+      "dependsOn": [
+        "pkg:cargo/zerocopy-derive@0.8.56?package-id=Package-rust-crate-zerocopy-derive-a96a9564a308f65c"
+      ]
+    }
+  ]
+}
