@@ -111,78 +111,76 @@ inline void encode_value(const Value& val,
     }
 }
 
-// Decode a value from meta and raw column data at given positions.
-inline auto decode_value_from_columns(
-    std::span<const std::byte> meta_data, std::size_t& meta_pos,
-    std::span<const std::byte> raw_data, std::size_t& raw_pos)
-    -> std::optional<Value> {
+// Decode a value from its metadata and raw column data.
+inline auto decode_value_from_metadata(std::uint64_t metadata,
+                                       std::span<const std::byte> raw_data,
+                                       std::size_t& raw_pos) -> std::optional<Value> {
 
-    auto meta_result = encoding::decode_uleb128(meta_data.subspan(meta_pos));
-    if (!meta_result) return std::nullopt;
-    meta_pos += meta_result->bytes_read;
+    const auto tag = static_cast<ValueTag>(metadata & 0x0F);
+    const auto raw_len = static_cast<std::size_t>(metadata >> 4);
 
-    auto tag = static_cast<ValueTag>(meta_result->value & 0x0F);
-    auto raw_len = static_cast<std::size_t>(meta_result->value >> 4);
-
-    if (raw_pos + raw_len > raw_data.size()) return std::nullopt;
+    if (raw_pos + raw_len > raw_data.size())
+        return std::nullopt;
 
     auto raw_span = raw_data.subspan(raw_pos, raw_len);
 
     switch (tag) {
-        case ValueTag::null_tag:
-            raw_pos += raw_len;
-            return Value{ScalarValue{Null{}}};
-        case ValueTag::false_tag:
-            raw_pos += raw_len;
-            return Value{ScalarValue{false}};
-        case ValueTag::true_tag:
-            raw_pos += raw_len;
-            return Value{ScalarValue{true}};
-        case ValueTag::uint_tag: {
-            auto r = encoding::decode_uleb128(raw_span);
-            if (!r) return std::nullopt;
-            raw_pos += raw_len;
-            return Value{ScalarValue{r->value}};
-        }
-        case ValueTag::int_tag: {
-            auto r = encoding::decode_sleb128(raw_span);
-            if (!r) return std::nullopt;
-            raw_pos += raw_len;
-            return Value{ScalarValue{r->value}};
-        }
-        case ValueTag::f64_tag: {
-            if (raw_len != 8) return std::nullopt;
-            double v{};
-            std::memcpy(&v, &raw_data[raw_pos], 8);
-            raw_pos += 8;
-            return Value{ScalarValue{v}};
-        }
-        case ValueTag::utf8_tag: {
-            auto s = raw_len > 0
-                ? std::string{reinterpret_cast<const char*>(raw_span.data()), raw_len}
-                : std::string{};
-            raw_pos += raw_len;
-            return Value{ScalarValue{std::move(s)}};
-        }
-        case ValueTag::bytes_tag: {
-            auto b = raw_len > 0
-                ? Bytes{raw_span.begin(), raw_span.end()}
-                : Bytes{};
-            raw_pos += raw_len;
-            return Value{ScalarValue{std::move(b)}};
-        }
-        case ValueTag::counter_tag: {
-            auto r = encoding::decode_sleb128(raw_span);
-            if (!r) return std::nullopt;
-            raw_pos += raw_len;
-            return Value{ScalarValue{Counter{r->value}}};
-        }
-        case ValueTag::timestamp_tag: {
-            auto r = encoding::decode_sleb128(raw_span);
-            if (!r) return std::nullopt;
-            raw_pos += raw_len;
-            return Value{ScalarValue{Timestamp{r->value}}};
-        }
+    case ValueTag::null_tag:
+        raw_pos += raw_len;
+        return Value{ScalarValue{Null{}}};
+    case ValueTag::false_tag:
+        raw_pos += raw_len;
+        return Value{ScalarValue{false}};
+    case ValueTag::true_tag:
+        raw_pos += raw_len;
+        return Value{ScalarValue{true}};
+    case ValueTag::uint_tag: {
+        auto r = encoding::decode_uleb128(raw_span);
+        if (!r)
+            return std::nullopt;
+        raw_pos += raw_len;
+        return Value{ScalarValue{r->value}};
+    }
+    case ValueTag::int_tag: {
+        auto r = encoding::decode_sleb128(raw_span);
+        if (!r)
+            return std::nullopt;
+        raw_pos += raw_len;
+        return Value{ScalarValue{r->value}};
+    }
+    case ValueTag::f64_tag: {
+        if (raw_len != 8)
+            return std::nullopt;
+        double v{};
+        std::memcpy(&v, &raw_data[raw_pos], 8);
+        raw_pos += 8;
+        return Value{ScalarValue{v}};
+    }
+    case ValueTag::utf8_tag: {
+        auto s = raw_len > 0 ? std::string{reinterpret_cast<const char*>(raw_span.data()), raw_len}
+                             : std::string{};
+        raw_pos += raw_len;
+        return Value{ScalarValue{std::move(s)}};
+    }
+    case ValueTag::bytes_tag: {
+        auto b = raw_len > 0 ? Bytes{raw_span.begin(), raw_span.end()} : Bytes{};
+        raw_pos += raw_len;
+        return Value{ScalarValue{std::move(b)}};
+    }
+    case ValueTag::counter_tag: {
+        auto r = encoding::decode_sleb128(raw_span);
+        if (!r)
+            return std::nullopt;
+        raw_pos += raw_len;
+        return Value{ScalarValue{Counter{r->value}}};
+    }
+    case ValueTag::timestamp_tag: {
+        auto r = encoding::decode_sleb128(raw_span);
+        if (!r)
+            return std::nullopt;
+        raw_pos += raw_len;
+        return Value{ScalarValue{Timestamp{r->value}}};
+    }
     }
     return std::nullopt;
 }

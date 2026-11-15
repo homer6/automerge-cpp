@@ -61,3 +61,6 @@ fuzz/corpus/*.bin
 
 # macOS
 .DS_Store
+
+# Rust fixture generator build output
+tests/fixtures/generator/target/

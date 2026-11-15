@@ -15,8 +15,8 @@ namespace am = automerge_cpp;
 
 static void print_todos(const am::Document& doc, const am::ObjId& list_id,
                         const char* label) {
-    std::printf("\n=== %s (%zu items) ===\n", label, doc.length(list_id));
-    auto values = doc.values(list_id);
+    std::printf("\n=== %s (%zu items) ===\n", label, *doc.length(list_id));
+    auto values = *doc.values(list_id);
     for (std::size_t i = 0; i < values.size(); ++i) {
         if (auto s = am::get_scalar<std::string>(values[i])) {
             std::printf("  %zu. %s\n", i + 1, s->c_str());
@@ -31,9 +31,9 @@ int main() {
     alice_doc.set_actor_id(am::ActorId{alice_id});
 
     // Bare initializer list — creates the todos list in one call
-    auto todo_list = alice_doc.transact([](am::Transaction& tx) {
+    auto todo_list = *alice_doc.transact([](am::Transaction& tx) {
         tx.put(am::root, "title", "Team Tasks");
-        return tx.put(am::root, "todos", {"Set up CI pipeline", "Write unit tests"});
+        return *tx.put(am::root, "todos", {"Set up CI pipeline", "Write unit tests"});
     });
 
     // Map{} wrapper — create a metadata map with explicit wrapper
@@ -68,18 +68,17 @@ int main() {
     });
 
     // get_path() into nested map
-    if (auto owner = alice_doc.get_path("meta", "owner")) {
+    if (auto owner = *alice_doc.get_path("meta", "owner")) {
         if (auto s = am::get_scalar<std::string>(*owner)) {
             std::printf("\nMeta owner: %s\n", s->c_str());
         }
     }
-    if (auto label = alice_doc.get_path("labels", std::size_t{0})) {
+    if (auto label = *alice_doc.get_path("labels", std::size_t{0})) {
         if (auto s = am::get_scalar<std::string>(*label)) {
             std::printf("First label: %s\n", s->c_str());
         }
     }
 
-    std::printf("All %zu todos preserved after merge.\n",
-                alice_doc.length(todo_list));
+    std::printf("All %zu todos preserved after merge.\n", *alice_doc.length(todo_list));
     return 0;
 }

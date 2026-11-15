@@ -87,7 +87,10 @@ int main() {
         for (auto& f : forks) doc.merge(f);
 
         std::printf("  Parallel %d puts (%d forks): %.1f ms, %zu keys\n",
-                    total_keys, num_forks, t.ms(), doc.length(am::root));
+                    total_keys,
+                    num_forks,
+                    t.ms(),
+                    *doc.length(am::root));
     }
 
     // =========================================================================
@@ -124,8 +127,12 @@ int main() {
         auto loaded = std::vector<std::optional<am::Document>>(doc_count);
         auto t = Timer{};
         pool->parallelize_loop(0, doc_count, [&](int start, int end) {
-            for (int i = start; i < end; ++i)
-                loaded[i] = am::Document::load(saved[i]);
+            for (int i = start; i < end; ++i) {
+                auto decoded = am::Document::load(saved[i]);
+                if (decoded) {
+                    loaded[i] = std::move(*decoded);
+                }
+            }
         });
         auto ok = 0;
         for (const auto& d : loaded) ok += d.has_value();
@@ -149,7 +156,7 @@ int main() {
         {
             auto t = Timer{};
             for (int i = 0; i < num_keys; ++i) {
-                auto v = doc.get<std::int64_t>(am::root, "k" + std::to_string(i));
+                auto v = *doc.get<std::int64_t>(am::root, "k" + std::to_string(i));
                 (void)v;
             }
             std::printf("  Sequential %d gets: %.1f ms\n", num_keys, t.ms());
@@ -161,7 +168,7 @@ int main() {
             auto t = Timer{};
             pool->parallelize_loop(0, num_keys, [&](int start, int end) {
                 for (int i = start; i < end; ++i) {
-                    auto v = doc.get<std::int64_t>(am::root, "k" + std::to_string(i));
+                    auto v = *doc.get<std::int64_t>(am::root, "k" + std::to_string(i));
                     (void)v;
                 }
             });
@@ -196,8 +203,7 @@ int main() {
         auto t = Timer{};
         auto result = am::Document{1u};
         for (const auto& peer : peers) result.merge(peer);
-        std::printf("  Sequential merge: %.1f ms, %zu keys\n",
-                    t.ms(), result.length(am::root));
+        std::printf("  Sequential merge: %.1f ms, %zu keys\n", t.ms(), *result.length(am::root));
     }
 
     // Parallel tree reduce via pool
@@ -228,8 +234,7 @@ int main() {
             work = std::move(next);
         }
 
-        std::printf("  Tree reduce merge: %.1f ms, %zu keys\n",
-                    t.ms(), work[0].length(am::root));
+        std::printf("  Tree reduce merge: %.1f ms, %zu keys\n", t.ms(), *work[0].length(am::root));
     }
 
     // =========================================================================

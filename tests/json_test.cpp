@@ -20,28 +20,27 @@ using json = nlohmann::json;
 
 TEST(GetObjId, map_child) {
     auto doc = am::Document{};
-    auto child_id = doc.transact([](am::Transaction& tx) {
-        return tx.put_object(am::root, "nested", am::ObjType::map);
-    });
-    auto result = doc.get_obj_id(am::root, "nested");
+    auto child_id = *doc.transact(
+        [](am::Transaction& tx) { return *tx.put_object(am::root, "nested", am::ObjType::map); });
+    auto result = *doc.get_obj_id(am::root, "nested");
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(*result, child_id);
 }
 
 TEST(GetObjId, list_child) {
     auto doc = am::Document{};
-    auto list_id = doc.transact([](am::Transaction& tx) {
-        auto list = tx.put_object(am::root, "items", am::ObjType::list);
+    auto list_id = *doc.transact([](am::Transaction& tx) {
+        auto list = *tx.put_object(am::root, "items", am::ObjType::list);
         tx.insert_object(list, 0, am::ObjType::map);
         return list;
     });
-    auto child = doc.get_obj_id(list_id, std::size_t{0});
+    auto child = *doc.get_obj_id(list_id, std::size_t{0});
     ASSERT_TRUE(child.has_value());
 }
 
 TEST(GetObjId, nonexistent_key_returns_nullopt) {
     auto doc = am::Document{};
-    EXPECT_FALSE(doc.get_obj_id(am::root, "nope").has_value());
+    EXPECT_FALSE((*doc.get_obj_id(am::root, "nope")).has_value());
 }
 
 TEST(GetObjId, scalar_value_returns_nullopt) {
@@ -49,17 +48,23 @@ TEST(GetObjId, scalar_value_returns_nullopt) {
     doc.transact([](am::Transaction& tx) {
         tx.put(am::root, "x", 42);
     });
-    EXPECT_FALSE(doc.get_obj_id(am::root, "x").has_value());
+    EXPECT_FALSE((*doc.get_obj_id(am::root, "x")).has_value());
 }
 
-TEST(GetObjId, out_of_bounds_index_returns_nullopt) {
+TEST(GetObjId, out_of_bounds_index_returns_error) {
     auto doc = am::Document{};
     doc.transact([](am::Transaction& tx) {
         tx.put_object(am::root, "list", am::ObjType::list);
     });
-    auto list = doc.get_obj_id(am::root, "list");
+    auto list = *doc.get_obj_id(am::root, "list");
     ASSERT_TRUE(list.has_value());
-    EXPECT_FALSE(doc.get_obj_id(*list, std::size_t{0}).has_value());
+    const auto before = doc.save();
+
+    const auto result = doc.get_obj_id(*list, std::size_t{0});
+
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().kind, am::ErrorKind::index_out_of_bounds);
+    EXPECT_EQ(doc.save(), before);
 }
 
 // =============================================================================
@@ -248,7 +253,7 @@ TEST(JsonAdl, from_json_infers_int_for_small_unsigned) {
 
 TEST(JsonExport, empty_document) {
     auto doc = am::Document{};
-    auto j = am::json::export_json(doc);
+    auto j = *am::json::export_json(doc);
     EXPECT_TRUE(j.is_object());
     EXPECT_TRUE(j.empty());
 }
@@ -260,7 +265,7 @@ TEST(JsonExport, flat_map) {
         tx.put(am::root, "age", 30);
         tx.put(am::root, "active", true);
     });
-    auto j = am::json::export_json(doc);
+    auto j = *am::json::export_json(doc);
     EXPECT_EQ(j["name"], "Alice");
     EXPECT_EQ(j["age"], 30);
     EXPECT_EQ(j["active"], true);
@@ -271,7 +276,7 @@ TEST(JsonExport, nested_map) {
     doc.transact([](am::Transaction& tx) {
         tx.put(am::root, "config", am::Map{{"port", 8080}, {"host", "localhost"}});
     });
-    auto j = am::json::export_json(doc);
+    auto j = *am::json::export_json(doc);
     EXPECT_EQ(j["config"]["port"], 8080);
     EXPECT_EQ(j["config"]["host"], "localhost");
 }
@@ -281,7 +286,7 @@ TEST(JsonExport, list) {
     doc.transact([](am::Transaction& tx) {
         tx.put(am::root, "items", am::List{"Milk", "Eggs", "Bread"});
     });
-    auto j = am::json::export_json(doc);
+    auto j = *am::json::export_json(doc);
     EXPECT_EQ(j["items"].size(), 3u);
     EXPECT_EQ(j["items"][0], "Milk");
     EXPECT_EQ(j["items"][1], "Eggs");
@@ -297,7 +302,7 @@ TEST(JsonExport, mixed_types) {
         tx.put(am::root, "b", true);
         tx.put(am::root, "n", am::Null{});
     });
-    auto j = am::json::export_json(doc);
+    auto j = *am::json::export_json(doc);
     EXPECT_EQ(j["s"], "hello");
     EXPECT_EQ(j["i"], 42);
     EXPECT_DOUBLE_EQ(j["d"].get<double>(), 3.14);
@@ -308,44 +313,43 @@ TEST(JsonExport, mixed_types) {
 TEST(JsonExport, text_object_as_string) {
     auto doc = am::Document{};
     doc.transact([](am::Transaction& tx) {
-        auto text = tx.put_object(am::root, "content", am::ObjType::text);
+        auto text = *tx.put_object(am::root, "content", am::ObjType::text);
         tx.splice_text(text, 0, 0, "hello world");
     });
-    auto j = am::json::export_json(doc);
+    auto j = *am::json::export_json(doc);
     EXPECT_EQ(j["content"], "hello world");
 }
 
 TEST(JsonExport, deeply_nested) {
     auto doc = am::Document{};
     doc.transact([](am::Transaction& tx) {
-        auto a = tx.put_object(am::root, "a", am::ObjType::map);
-        auto b = tx.put_object(a, "b", am::ObjType::map);
+        auto a = *tx.put_object(am::root, "a", am::ObjType::map);
+        auto b = *tx.put_object(a, "b", am::ObjType::map);
         tx.put(b, "c", 42);
     });
-    auto j = am::json::export_json(doc);
+    auto j = *am::json::export_json(doc);
     EXPECT_EQ(j["a"]["b"]["c"], 42);
 }
 
 TEST(JsonExport, list_of_maps) {
     auto doc = am::Document{};
     doc.transact([](am::Transaction& tx) {
-        auto list = tx.put_object(am::root, "users", am::ObjType::list);
-        auto u0 = tx.insert_object(list, 0, am::ObjType::map);
+        auto list = *tx.put_object(am::root, "users", am::ObjType::list);
+        auto u0 = *tx.insert_object(list, 0, am::ObjType::map);
         tx.put(u0, "name", "Alice");
-        auto u1 = tx.insert_object(list, 1, am::ObjType::map);
+        auto u1 = *tx.insert_object(list, 1, am::ObjType::map);
         tx.put(u1, "name", "Bob");
     });
-    auto j = am::json::export_json(doc);
+    auto j = *am::json::export_json(doc);
     EXPECT_EQ(j["users"][0]["name"], "Alice");
     EXPECT_EQ(j["users"][1]["name"], "Bob");
 }
 
 TEST(JsonExport, subtree_export) {
     auto doc = am::Document{};
-    auto config = doc.transact([](am::Transaction& tx) {
-        return tx.put(am::root, "config", am::Map{{"port", 8080}});
-    });
-    auto j = am::json::export_json(doc, config);
+    auto config = *doc.transact(
+        [](am::Transaction& tx) { return *tx.put(am::root, "config", am::Map{{"port", 8080}}); });
+    auto j = *am::json::export_json(doc, config);
     EXPECT_EQ(j["port"], 8080);
 }
 
@@ -355,7 +359,7 @@ TEST(JsonExport, after_merge) {
     auto fork = doc.fork();
     fork.transact([](am::Transaction& tx) { tx.put(am::root, "y", 2); });
     doc.merge(fork);
-    auto j = am::json::export_json(doc);
+    auto j = *am::json::export_json(doc);
     EXPECT_EQ(j["x"], 1);
     EXPECT_EQ(j["y"], 2);
 }
@@ -365,7 +369,7 @@ TEST(JsonExport, counter_as_number) {
     doc.transact([](am::Transaction& tx) {
         tx.put(am::root, "views", am::Counter{100});
     });
-    auto j = am::json::export_json(doc);
+    auto j = *am::json::export_json(doc);
     EXPECT_EQ(j["views"], 100);
 }
 
@@ -375,10 +379,10 @@ TEST(JsonExportAt, historical_export) {
     auto heads1 = doc.get_heads();
     doc.transact([](am::Transaction& tx) { tx.put(am::root, "x", 2); });
 
-    auto j_now = am::json::export_json(doc);
+    auto j_now = *am::json::export_json(doc);
     EXPECT_EQ(j_now["x"], 2);
 
-    auto j_then = am::json::export_json_at(doc, heads1);
+    auto j_then = *am::json::export_json_at(doc, heads1);
     EXPECT_EQ(j_then["x"], 1);
 }
 
@@ -396,7 +400,7 @@ TEST(JsonImport, flat_json) {
 TEST(JsonImport, nested_objects) {
     auto doc = am::Document{};
     am::json::import_json(doc, json{{"config", {{"port", 8080}}}});
-    auto val = doc.get_path("config", "port");
+    auto val = *doc.get_path("config", "port");
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(*am::get_scalar<std::int64_t>(*val), 8080);
 }
@@ -404,20 +408,20 @@ TEST(JsonImport, nested_objects) {
 TEST(JsonImport, arrays) {
     auto doc = am::Document{};
     am::json::import_json(doc, json{{"items", {"a", "b", "c"}}});
-    auto items = doc.get_obj_id(am::root, "items");
+    auto items = *doc.get_obj_id(am::root, "items");
     ASSERT_TRUE(items.has_value());
-    EXPECT_EQ(doc.length(*items), 3u);
+    EXPECT_EQ(*doc.length(*items), 3u);
     EXPECT_EQ(*doc.get<std::string>(*items, std::size_t{0}), "a");
 }
 
 TEST(JsonImport, null_bool_float) {
     auto doc = am::Document{};
     am::json::import_json(doc, json{{"n", nullptr}, {"b", true}, {"f", 3.14}});
-    auto n = doc.get(am::root, "n");
+    auto n = *doc.get(am::root, "n");
     ASSERT_TRUE(n.has_value());
     EXPECT_TRUE(std::holds_alternative<am::Null>(std::get<am::ScalarValue>(*n)));
     EXPECT_EQ(*doc.get<bool>(am::root, "b"), true);
-    EXPECT_DOUBLE_EQ(*doc.get<double>(am::root, "f"), 3.14);
+    EXPECT_DOUBLE_EQ(**doc.get<double>(am::root, "f"), 3.14);
 }
 
 TEST(JsonImport, with_transaction) {
@@ -433,7 +437,7 @@ TEST(JsonImport, round_trip_flat) {
     auto input = json{{"name", "Alice"}, {"age", 30}, {"active", true}};
     auto doc = am::Document{};
     am::json::import_json(doc, input);
-    auto output = am::json::export_json(doc);
+    auto output = *am::json::export_json(doc);
     EXPECT_EQ(output, input);
 }
 
@@ -444,7 +448,7 @@ TEST(JsonImport, round_trip_nested) {
     };
     auto doc = am::Document{};
     am::json::import_json(doc, input);
-    auto output = am::json::export_json(doc);
+    auto output = *am::json::export_json(doc);
     EXPECT_EQ(output, input);
 }
 
@@ -455,7 +459,7 @@ TEST(JsonImport, round_trip_deeply_nested) {
     };
     auto doc = am::Document{};
     am::json::import_json(doc, input);
-    auto output = am::json::export_json(doc);
+    auto output = *am::json::export_json(doc);
     EXPECT_EQ(output, input);
 }
 
@@ -463,7 +467,7 @@ TEST(JsonImport, round_trip_empty_containers) {
     auto input = json{{"obj", json::object()}, {"arr", json::array()}};
     auto doc = am::Document{};
     am::json::import_json(doc, input);
-    auto output = am::json::export_json(doc);
+    auto output = *am::json::export_json(doc);
     EXPECT_EQ(output, input);
 }
 
@@ -474,7 +478,7 @@ TEST(JsonImport, array_of_objects) {
     })}};
     auto doc = am::Document{};
     am::json::import_json(doc, input);
-    auto output = am::json::export_json(doc);
+    auto output = *am::json::export_json(doc);
     EXPECT_EQ(output, input);
 }
 
@@ -485,7 +489,7 @@ TEST(JsonImport, array_of_objects) {
 TEST(JsonPointer, get_root_key) {
     auto doc = am::Document{};
     doc.transact([](am::Transaction& tx) { tx.put(am::root, "x", 42); });
-    auto val = am::json::get_pointer(doc, "/x");
+    auto val = *am::json::get_pointer(doc, "/x");
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(*am::get_scalar<std::int64_t>(*val), 42);
 }
@@ -495,7 +499,7 @@ TEST(JsonPointer, get_nested_key) {
     doc.transact([](am::Transaction& tx) {
         tx.put(am::root, "config", am::Map{{"port", 8080}});
     });
-    auto val = am::json::get_pointer(doc, "/config/port");
+    auto val = *am::json::get_pointer(doc, "/config/port");
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(*am::get_scalar<std::int64_t>(*val), 8080);
 }
@@ -505,27 +509,29 @@ TEST(JsonPointer, get_list_index) {
     doc.transact([](am::Transaction& tx) {
         tx.put(am::root, "items", am::List{"a", "b", "c"});
     });
-    auto val = am::json::get_pointer(doc, "/items/1");
+    auto val = *am::json::get_pointer(doc, "/items/1");
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(*am::get_scalar<std::string>(*val), "b");
 }
 
 TEST(JsonPointer, get_missing_returns_nullopt) {
     auto doc = am::Document{};
-    EXPECT_FALSE(am::json::get_pointer(doc, "/nope").has_value());
+    EXPECT_FALSE(am::json::get_pointer(doc, "/nope")->has_value());
 }
 
-TEST(JsonPointer, get_out_of_bounds_returns_nullopt) {
+TEST(JsonPointer, get_out_of_bounds_returns_error) {
     auto doc = am::Document{};
     doc.transact([](am::Transaction& tx) {
         tx.put(am::root, "list", am::List{"a"});
     });
-    EXPECT_FALSE(am::json::get_pointer(doc, "/list/5").has_value());
+    const auto result = am::json::get_pointer(doc, "/list/5");
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().kind, am::ErrorKind::index_out_of_bounds);
 }
 
 TEST(JsonPointer, empty_pointer_returns_root) {
     auto doc = am::Document{};
-    auto val = am::json::get_pointer(doc, "");
+    auto val = *am::json::get_pointer(doc, "");
     ASSERT_TRUE(val.has_value());
     EXPECT_TRUE(std::holds_alternative<am::ObjType>(*val));
 }
@@ -536,11 +542,11 @@ TEST(JsonPointer, escaped_tilde) {
         tx.put(am::root, "a/b", 1);
         tx.put(am::root, "c~d", 2);
     });
-    auto v1 = am::json::get_pointer(doc, "/a~1b");
+    auto v1 = *am::json::get_pointer(doc, "/a~1b");
     ASSERT_TRUE(v1.has_value());
     EXPECT_EQ(*am::get_scalar<std::int64_t>(*v1), 1);
 
-    auto v2 = am::json::get_pointer(doc, "/c~0d");
+    auto v2 = *am::json::get_pointer(doc, "/c~0d");
     ASSERT_TRUE(v2.has_value());
     EXPECT_EQ(*am::get_scalar<std::int64_t>(*v2), 2);
 }
@@ -554,7 +560,7 @@ TEST(JsonPointer, put_creates_value) {
 TEST(JsonPointer, put_nested_creates_intermediates) {
     auto doc = am::Document{};
     am::json::put_pointer(doc, "/a/b", am::ScalarValue{std::int64_t{42}});
-    auto val = doc.get_path("a", "b");
+    auto val = *doc.get_path("a", "b");
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(*am::get_scalar<std::int64_t>(*val), 42);
 }
@@ -565,9 +571,9 @@ TEST(JsonPointer, put_list_append_with_dash) {
         tx.put(am::root, "items", am::List{"a"});
     });
     am::json::put_pointer(doc, "/items/-", am::ScalarValue{std::string{"b"}});
-    auto items = doc.get_obj_id(am::root, "items");
+    auto items = *doc.get_obj_id(am::root, "items");
     ASSERT_TRUE(items.has_value());
-    EXPECT_EQ(doc.length(*items), 2u);
+    EXPECT_EQ(*doc.length(*items), 2u);
     EXPECT_EQ(*doc.get<std::string>(*items, std::size_t{1}), "b");
 }
 
@@ -578,8 +584,8 @@ TEST(JsonPointer, delete_map_key) {
         tx.put(am::root, "y", 2);
     });
     am::json::delete_pointer(doc, "/x");
-    EXPECT_FALSE(doc.get(am::root, "x").has_value());
-    EXPECT_TRUE(doc.get(am::root, "y").has_value());
+    EXPECT_FALSE((*doc.get(am::root, "x")).has_value());
+    EXPECT_TRUE((*doc.get(am::root, "y")).has_value());
 }
 
 TEST(JsonPointer, delete_list_index) {
@@ -588,16 +594,18 @@ TEST(JsonPointer, delete_list_index) {
         tx.put(am::root, "items", am::List{"a", "b", "c"});
     });
     am::json::delete_pointer(doc, "/items/1");
-    auto items = doc.get_obj_id(am::root, "items");
+    auto items = *doc.get_obj_id(am::root, "items");
     ASSERT_TRUE(items.has_value());
-    EXPECT_EQ(doc.length(*items), 2u);
+    EXPECT_EQ(*doc.length(*items), 2u);
     EXPECT_EQ(*doc.get<std::string>(*items, std::size_t{0}), "a");
     EXPECT_EQ(*doc.get<std::string>(*items, std::size_t{1}), "c");
 }
 
-TEST(JsonPointer, invalid_pointer_throws) {
+TEST(JsonPointer, invalid_pointer_returns_error) {
     auto doc = am::Document{};
-    EXPECT_THROW(am::json::get_pointer(doc, "no-slash"), std::runtime_error);
+    const auto result = am::json::get_pointer(doc, "no-slash");
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().kind, am::ErrorKind::invalid_operation);
 }
 
 // =============================================================================
@@ -620,8 +628,8 @@ TEST(JsonPatch, add_to_list) {
     am::json::apply_json_patch(doc, json::parse(R"([
         {"op": "add", "path": "/items/1", "value": "b"}
     ])"));
-    auto items = doc.get_obj_id(am::root, "items");
-    EXPECT_EQ(doc.length(*items), 3u);
+    auto items = *doc.get_obj_id(am::root, "items");
+    EXPECT_EQ(*doc.length(*items), 3u);
     EXPECT_EQ(*doc.get<std::string>(*items, std::size_t{1}), "b");
 }
 
@@ -633,8 +641,8 @@ TEST(JsonPatch, add_list_append_with_dash) {
     am::json::apply_json_patch(doc, json::parse(R"([
         {"op": "add", "path": "/items/-", "value": "b"}
     ])"));
-    auto items = doc.get_obj_id(am::root, "items");
-    EXPECT_EQ(doc.length(*items), 2u);
+    auto items = *doc.get_obj_id(am::root, "items");
+    EXPECT_EQ(*doc.length(*items), 2u);
     EXPECT_EQ(*doc.get<std::string>(*items, std::size_t{1}), "b");
 }
 
@@ -647,8 +655,8 @@ TEST(JsonPatch, remove_from_map) {
     am::json::apply_json_patch(doc, json::parse(R"([
         {"op": "remove", "path": "/x"}
     ])"));
-    EXPECT_FALSE(doc.get(am::root, "x").has_value());
-    EXPECT_TRUE(doc.get(am::root, "y").has_value());
+    EXPECT_FALSE((*doc.get(am::root, "x")).has_value());
+    EXPECT_TRUE((*doc.get(am::root, "y")).has_value());
 }
 
 TEST(JsonPatch, remove_from_list) {
@@ -659,8 +667,8 @@ TEST(JsonPatch, remove_from_list) {
     am::json::apply_json_patch(doc, json::parse(R"([
         {"op": "remove", "path": "/items/1"}
     ])"));
-    auto items = doc.get_obj_id(am::root, "items");
-    EXPECT_EQ(doc.length(*items), 2u);
+    auto items = *doc.get_obj_id(am::root, "items");
+    EXPECT_EQ(*doc.length(*items), 2u);
 }
 
 TEST(JsonPatch, replace) {
@@ -680,7 +688,7 @@ TEST(JsonPatch, move_between_keys) {
     am::json::apply_json_patch(doc, json::parse(R"([
         {"op": "move", "from": "/old", "path": "/new"}
     ])"));
-    EXPECT_FALSE(doc.get(am::root, "old").has_value());
+    EXPECT_FALSE((*doc.get(am::root, "old")).has_value());
     EXPECT_EQ(*doc.get<std::string>(am::root, "new"), "value");
 }
 
@@ -697,22 +705,26 @@ TEST(JsonPatch, copy_value) {
 TEST(JsonPatch, test_passes) {
     auto doc = am::Document{};
     doc.transact([](am::Transaction& tx) { tx.put(am::root, "x", 42); });
-    EXPECT_NO_THROW(am::json::apply_json_patch(doc, json::parse(R"([
+    EXPECT_TRUE(am::json::apply_json_patch(doc, json::parse(R"([
         {"op": "test", "path": "/x", "value": 42}
     ])")));
 }
 
-TEST(JsonPatch, test_fails_throws) {
+TEST(JsonPatch, test_failure_returns_error) {
     auto doc = am::Document{};
     doc.transact([](am::Transaction& tx) { tx.put(am::root, "x", 42); });
-    EXPECT_THROW(am::json::apply_json_patch(doc, json::parse(R"([
+    const auto result = am::json::apply_json_patch(doc, json::parse(R"([
         {"op": "test", "path": "/x", "value": 99}
-    ])")), std::runtime_error);
+    ])"));
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().kind, am::ErrorKind::invalid_operation);
 }
 
-TEST(JsonPatch, not_array_throws) {
+TEST(JsonPatch, non_array_returns_error) {
     auto doc = am::Document{};
-    EXPECT_THROW(am::json::apply_json_patch(doc, json{{"op", "add"}}), std::runtime_error);
+    const auto result = am::json::apply_json_patch(doc, json{{"op", "add"}});
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().kind, am::ErrorKind::invalid_operation);
 }
 
 TEST(JsonPatch, add_nested_object) {
@@ -720,7 +732,7 @@ TEST(JsonPatch, add_nested_object) {
     am::json::apply_json_patch(doc, json::parse(R"([
         {"op": "add", "path": "/config", "value": {"port": 8080}}
     ])"));
-    auto val = doc.get_path("config", "port");
+    auto val = *doc.get_path("config", "port");
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(*am::get_scalar<std::int64_t>(*val), 8080);
 }
@@ -749,7 +761,7 @@ TEST(JsonPatch, diff_generates_patch) {
         tx.put(am::root, "z", 3);
     });
 
-    auto patch = am::json::diff_json_patch(doc1, doc2);
+    auto patch = *am::json::diff_json_patch(doc1, doc2);
     EXPECT_TRUE(patch.is_array());
     EXPECT_GT(patch.size(), 0u);
 }
@@ -763,9 +775,9 @@ TEST(JsonPatch, diff_round_trip) {
         tx.put(am::root, "x", 99);
     });
 
-    auto patch = am::json::diff_json_patch(doc1, doc2);
+    auto patch = *am::json::diff_json_patch(doc1, doc2);
     am::json::apply_json_patch(doc1, patch);
-    EXPECT_EQ(am::json::export_json(doc1), am::json::export_json(doc2));
+    EXPECT_EQ(*am::json::export_json(doc1), *am::json::export_json(doc2));
 }
 
 // =============================================================================
@@ -792,8 +804,8 @@ TEST(JsonMergePatch, delete_with_null) {
         tx.put(am::root, "y", 2);
     });
     am::json::apply_merge_patch(doc, json{{"x", nullptr}});
-    EXPECT_FALSE(doc.get(am::root, "x").has_value());
-    EXPECT_TRUE(doc.get(am::root, "y").has_value());
+    EXPECT_FALSE((*doc.get(am::root, "x")).has_value());
+    EXPECT_TRUE((*doc.get(am::root, "y")).has_value());
 }
 
 TEST(JsonMergePatch, recursive_merge) {
@@ -802,7 +814,7 @@ TEST(JsonMergePatch, recursive_merge) {
         tx.put(am::root, "config", am::Map{{"port", 8080}, {"host", "localhost"}});
     });
     am::json::apply_merge_patch(doc, json{{"config", {{"port", 9090}}}});
-    auto j = am::json::export_json(doc);
+    auto j = *am::json::export_json(doc);
     EXPECT_EQ(j["config"]["port"], 9090);
     EXPECT_EQ(j["config"]["host"], "localhost");
 }
@@ -820,7 +832,7 @@ TEST(JsonMergePatch, replace_with_array) {
     auto doc = am::Document{};
     doc.transact([](am::Transaction& tx) { tx.put(am::root, "items", "old"); });
     am::json::apply_merge_patch(doc, json{{"items", {1, 2, 3}}});
-    auto j = am::json::export_json(doc);
+    auto j = *am::json::export_json(doc);
     EXPECT_EQ(j["items"], json({1, 2, 3}));
 }
 
@@ -833,7 +845,7 @@ TEST(JsonMergePatch, generate_patch) {
         tx.put(am::root, "x", 99);
     });
 
-    auto patch = am::json::generate_merge_patch(doc1, doc2);
+    auto patch = *am::json::generate_merge_patch(doc1, doc2);
     EXPECT_TRUE(patch.is_object());
     EXPECT_EQ(patch["x"], 99);
 }
@@ -848,7 +860,7 @@ TEST(JsonMergePatch, multiple_changes) {
     am::json::apply_merge_patch(doc, json{
         {"a", 10}, {"b", nullptr}, {"d", 4}
     });
-    auto j = am::json::export_json(doc);
+    auto j = *am::json::export_json(doc);
     EXPECT_EQ(j["a"], 10);
     EXPECT_FALSE(j.contains("b"));
     EXPECT_EQ(j["c"], 3);
@@ -865,7 +877,7 @@ TEST(JsonFlatten, flat_map) {
         tx.put(am::root, "x", 1);
         tx.put(am::root, "y", 2);
     });
-    auto flat = am::json::flatten(doc);
+    auto flat = *am::json::flatten(doc);
     EXPECT_EQ(flat["/x"], 1);
     EXPECT_EQ(flat["/y"], 2);
 }
@@ -875,7 +887,7 @@ TEST(JsonFlatten, nested_map) {
     doc.transact([](am::Transaction& tx) {
         tx.put(am::root, "a", am::Map{{"b", 42}});
     });
-    auto flat = am::json::flatten(doc);
+    auto flat = *am::json::flatten(doc);
     EXPECT_EQ(flat["/a/b"], 42);
 }
 
@@ -884,7 +896,7 @@ TEST(JsonFlatten, list_indices) {
     doc.transact([](am::Transaction& tx) {
         tx.put(am::root, "items", am::List{"a", "b"});
     });
-    auto flat = am::json::flatten(doc);
+    auto flat = *am::json::flatten(doc);
     EXPECT_EQ(flat["/items/0"], "a");
     EXPECT_EQ(flat["/items/1"], "b");
 }
@@ -892,11 +904,11 @@ TEST(JsonFlatten, list_indices) {
 TEST(JsonFlatten, deeply_nested) {
     auto doc = am::Document{};
     doc.transact([](am::Transaction& tx) {
-        auto a = tx.put_object(am::root, "a", am::ObjType::map);
-        auto b = tx.put_object(a, "b", am::ObjType::map);
+        auto a = *tx.put_object(am::root, "a", am::ObjType::map);
+        auto b = *tx.put_object(a, "b", am::ObjType::map);
         tx.put(b, "c", 42);
     });
-    auto flat = am::json::flatten(doc);
+    auto flat = *am::json::flatten(doc);
     EXPECT_EQ(flat["/a/b/c"], 42);
 }
 
@@ -906,14 +918,14 @@ TEST(JsonFlatten, escaped_keys) {
         tx.put(am::root, "a/b", 1);
         tx.put(am::root, "c~d", 2);
     });
-    auto flat = am::json::flatten(doc);
+    auto flat = *am::json::flatten(doc);
     EXPECT_EQ(flat["/a~1b"], 1);
     EXPECT_EQ(flat["/c~0d"], 2);
 }
 
 TEST(JsonFlatten, empty_document) {
     auto doc = am::Document{};
-    auto flat = am::json::flatten(doc);
+    auto flat = *am::json::flatten(doc);
     EXPECT_TRUE(flat.empty());
 }
 
@@ -925,7 +937,7 @@ TEST(JsonUnflatten, recreates_nested_structure) {
     auto doc = am::Document{};
     am::json::unflatten(doc, flat);
     EXPECT_EQ(*doc.get<std::string>(am::root, "name"), "Alice");
-    auto val = doc.get_path("config", "port");
+    auto val = *doc.get_path("config", "port");
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(*am::get_scalar<std::int64_t>(*val), 8080);
 }
@@ -936,20 +948,20 @@ TEST(JsonFlatten, round_trip) {
         tx.put(am::root, "x", 1);
         tx.put(am::root, "config", am::Map{{"port", 8080}});
     });
-    auto flat = am::json::flatten(doc);
+    auto flat = *am::json::flatten(doc);
 
     auto doc2 = am::Document{};
     am::json::unflatten(doc2, flat);
-    EXPECT_EQ(am::json::export_json(doc), am::json::export_json(doc2));
+    EXPECT_EQ(*am::json::export_json(doc), *am::json::export_json(doc2));
 }
 
 TEST(JsonFlatten, text_object) {
     auto doc = am::Document{};
     doc.transact([](am::Transaction& tx) {
-        auto text = tx.put_object(am::root, "content", am::ObjType::text);
+        auto text = *tx.put_object(am::root, "content", am::ObjType::text);
         tx.splice_text(text, 0, 0, "hello");
     });
-    auto flat = am::json::flatten(doc);
+    auto flat = *am::json::flatten(doc);
     EXPECT_EQ(flat["/content"], "hello");
 }
 
@@ -968,7 +980,7 @@ TEST(JsonIntegration, merge_commutativity_in_json) {
     ab.merge(b);
     auto ba = am::Document{b};
     ba.merge(a);
-    EXPECT_EQ(am::json::export_json(ab), am::json::export_json(ba));
+    EXPECT_EQ(*am::json::export_json(ab), *am::json::export_json(ba));
 }
 
 TEST(JsonIntegration, import_export_save_load_round_trip) {
@@ -983,7 +995,7 @@ TEST(JsonIntegration, import_export_save_load_round_trip) {
     auto bytes = doc.save();
     auto loaded = am::Document::load(bytes);
     ASSERT_TRUE(loaded.has_value());
-    EXPECT_EQ(am::json::export_json(*loaded), input);
+    EXPECT_EQ(*am::json::export_json(*loaded), input);
 }
 
 TEST(JsonIntegration, json_patch_on_imported_doc) {
@@ -995,7 +1007,7 @@ TEST(JsonIntegration, json_patch_on_imported_doc) {
         {"op": "remove", "path": "/items/0"}
     ])"));
 
-    auto j = am::json::export_json(doc);
+    auto j = *am::json::export_json(doc);
     EXPECT_EQ(j["items"], json({"b", "c", "d"}));
 }
 
@@ -1004,7 +1016,7 @@ TEST(JsonIntegration, merge_patch_then_export) {
     am::json::import_json(doc, json{{"a", 1}, {"b", 2}});
     am::json::apply_merge_patch(doc, json{{"a", 10}, {"c", 3}});
 
-    auto j = am::json::export_json(doc);
+    auto j = *am::json::export_json(doc);
     EXPECT_EQ(j["a"], 10);
     EXPECT_EQ(j["b"], 2);
     EXPECT_EQ(j["c"], 3);
@@ -1013,7 +1025,7 @@ TEST(JsonIntegration, merge_patch_then_export) {
 TEST(JsonIntegration, pointer_on_imported_nested) {
     auto doc = am::Document{};
     am::json::import_json(doc, json{{"a", {{"b", {{"c", 42}}}}}});
-    auto val = am::json::get_pointer(doc, "/a/b/c");
+    auto val = *am::json::get_pointer(doc, "/a/b/c");
     ASSERT_TRUE(val.has_value());
     EXPECT_EQ(*am::get_scalar<std::int64_t>(*val), 42);
 }
@@ -1021,7 +1033,7 @@ TEST(JsonIntegration, pointer_on_imported_nested) {
 TEST(JsonIntegration, flatten_imported_document) {
     auto doc = am::Document{};
     am::json::import_json(doc, json{{"a", 1}, {"b", {{"c", 2}}}});
-    auto flat = am::json::flatten(doc);
+    auto flat = *am::json::flatten(doc);
     EXPECT_EQ(flat["/a"], 1);
     EXPECT_EQ(flat["/b/c"], 2);
 }

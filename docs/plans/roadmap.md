@@ -162,17 +162,17 @@
 ---
 
 ## Phase 5: Sync Protocol
-**Status**: Complete — 170 tests passing (154 Phase 1-4 + 16 sync)
+**Status**: Complete — 175 tests passing (154 Phase 1-4 + 21 sync)
 
 ### Deliverables
 - [x] `sync/bloom_filter.hpp` — bloom filter (10 bits/entry, 7 probes, ~1% FPR, LFSR hashing)
 - [x] `sync_state.hpp` — `SyncState` per-peer state machine with encode/decode
-- [x] `SyncMessage` — message type with heads, need, have (bloom), and changes
+- [x] `SyncMessage` — upstream v1 encode/decode with heads, need, have, changes, and capabilities
 - [x] `Document::generate_sync_message()` — produces next message to send
 - [x] `Document::receive_sync_message()` — processes received message, applies changes
 - [x] Bloom filter-based change discovery (get_hashes_to_send algorithm)
 - [x] In-flight message tracking and deduplication
-- [ ] Upstream Rust interop via message bytes (deferred)
+- [x] Upstream Rust interop via message bytes and a complete fixture exchange
 
 ### Protocol Design
 - Bloom filter summarizes changes since last sync point (Have struct)
@@ -180,7 +180,7 @@
 - `get_hashes_to_send` uses bloom + transitive dependency closure
 - SyncState persistence via encode/decode (shared_heads only)
 
-### Tests (16 new)
+### Tests (21 new)
 - [x] Two fresh documents sync to identical state
 - [x] One empty + one populated sync correctly
 - [x] Already-in-sync produces few/no change messages

@@ -12,10 +12,9 @@
 #include <automerge-cpp/types.hpp>
 #include "../encoding/leb128.hpp"
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
+#include <limits>
 #include <optional>
 #include <span>
 #include <vector>
@@ -101,13 +100,27 @@ public:
         if (!num_probes) return std::nullopt;
         pos += num_probes->bytes_read;
 
-        auto remaining = data.size() - pos;
+        if (num_entries->value > std::numeric_limits<std::uint32_t>::max() ||
+            bits_per_entry->value > std::numeric_limits<std::uint32_t>::max() ||
+            num_probes->value > std::numeric_limits<std::uint32_t>::max()) {
+            return std::nullopt;
+        }
+
+        const auto entries = static_cast<std::uint32_t>(num_entries->value);
+        const auto bits_per_entry_value = static_cast<std::uint32_t>(bits_per_entry->value);
+        const auto probes = static_cast<std::uint32_t>(num_probes->value);
+        const auto expected_size = bit_capacity(entries, bits_per_entry_value);
+        if (entries == 0 || bits_per_entry_value == 0 || probes == 0 ||
+            probes > expected_size * 8 || data.size() - pos != expected_size) {
+            return std::nullopt;
+        }
+
         auto bf = BloomFilter{};
-        bf.num_entries_ = static_cast<std::uint32_t>(num_entries->value);
-        bf.num_bits_per_entry_ = static_cast<std::uint32_t>(bits_per_entry->value);
-        bf.num_probes_ = static_cast<std::uint32_t>(num_probes->value);
-        bf.bits_.resize(remaining);
-        for (std::size_t i = 0; i < remaining; ++i) {
+        bf.num_entries_ = entries;
+        bf.num_bits_per_entry_ = bits_per_entry_value;
+        bf.num_probes_ = probes;
+        bf.bits_.resize(expected_size);
+        for (std::size_t i = 0; i < expected_size; ++i) {
             bf.bits_[i] = static_cast<std::uint8_t>(data[pos + i]);
         }
         return bf;
@@ -131,26 +144,32 @@ private:
         return static_cast<std::uint32_t>(bits_.size() * 8);
     }
 
-    // Extract probe positions using LFSR-based multi-hash.
-    // Returns a fixed-size stack-allocated array (no heap allocation).
-    auto get_probes(const ChangeHash& hash) const -> std::array<std::uint32_t, default_num_probes> {
-        auto probes = std::array<std::uint32_t, default_num_probes>{};
-        auto m = modulo();
-        if (m == 0) return probes;
+    static auto read_u32_le(const ChangeHash& hash, std::size_t offset) -> std::uint32_t {
+        return std::to_integer<std::uint32_t>(hash.bytes[offset]) |
+               (std::to_integer<std::uint32_t>(hash.bytes[offset + 1]) << 8) |
+               (std::to_integer<std::uint32_t>(hash.bytes[offset + 2]) << 16) |
+               (std::to_integer<std::uint32_t>(hash.bytes[offset + 3]) << 24);
+    }
 
-        std::uint32_t x{}, y{}, z{};
-        std::memcpy(&x, &hash.bytes[0], 4);
-        std::memcpy(&y, &hash.bytes[4], 4);
-        std::memcpy(&z, &hash.bytes[8], 4);
+    // Extract probe positions using upstream's little-endian multi-hash.
+    auto get_probes(const ChangeHash& hash) const -> std::vector<std::uint32_t> {
+        auto probes = std::vector<std::uint32_t>{};
+        const auto m = modulo();
+        if (m == 0) return probes;
+        probes.reserve(num_probes_);
+
+        auto x = read_u32_le(hash, 0);
+        auto y = read_u32_le(hash, 4);
+        const auto z = read_u32_le(hash, 8);
         x %= m;
         y %= m;
-        z %= m;
+        const auto z_modulo = z % m;
 
-        probes[0] = x;
-        for (std::uint32_t i = 1; i < default_num_probes; ++i) {
+        probes.push_back(x);
+        for (std::uint32_t i = 1; i < num_probes_; ++i) {
             x = (x + y) % m;
-            y = (y + z) % m;
-            probes[i] = x;
+            y = (y + z_modulo) % m;
+            probes.push_back(x);
         }
         return probes;
     }

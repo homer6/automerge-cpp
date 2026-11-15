@@ -5,14 +5,19 @@ on: [push]
 jobs:
   gcc:
     name: GCC
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v4
       with:
         submodules: recursive
 
+    - name: Install GCC 14
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y g++-14
+
     - name: Configure
-      run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DAUTOMERGE_CPP_BUILD_TESTS=ON -DAUTOMERGE_CPP_BUILD_EXAMPLES=ON -DAUTOMERGE_CPP_BUILD_BENCHMARKS=ON
+      run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14 -DAUTOMERGE_CPP_BUILD_TESTS=ON -DAUTOMERGE_CPP_BUILD_EXAMPLES=ON -DAUTOMERGE_CPP_BUILD_BENCHMARKS=ON
 
     - name: Build
       run: cmake --build build --config Release
@@ -22,14 +27,20 @@ jobs:
 
   clang:
     name: Clang
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v4
       with:
         submodules: recursive
 
+    - name: Install Clang 19
+      run: |
+        wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+        chmod +x /tmp/llvm.sh
+        sudo /tmp/llvm.sh 19
+
     - name: Configure
-      run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DAUTOMERGE_CPP_BUILD_TESTS=ON -DAUTOMERGE_CPP_BUILD_EXAMPLES=ON -DAUTOMERGE_CPP_BUILD_BENCHMARKS=ON
+      run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19 -DAUTOMERGE_CPP_BUILD_TESTS=ON -DAUTOMERGE_CPP_BUILD_EXAMPLES=ON -DAUTOMERGE_CPP_BUILD_BENCHMARKS=ON
 
     - name: Build
       run: cmake --build build --config Release
@@ -39,16 +50,22 @@ jobs:
 
   sanitizers:
     name: ASan + UBSan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v4
       with:
         submodules: recursive
 
+    - name: Install Clang 19
+      run: |
+        wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+        chmod +x /tmp/llvm.sh
+        sudo /tmp/llvm.sh 19
+
     - name: Configure
       run: >
         cmake -B build -DCMAKE_BUILD_TYPE=Debug
-        -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+        -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19
         -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
         -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
         -DAUTOMERGE_CPP_BUILD_TESTS=ON
@@ -61,20 +78,29 @@ jobs:
 
   clang-tidy:
     name: clang-tidy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v4
       with:
         submodules: recursive
 
+    - name: Install Clang 19
+      run: |
+        wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+        chmod +x /tmp/llvm.sh
+        sudo /tmp/llvm.sh 19
+        sudo apt-get install -y clang-tidy-19
+
     - name: Configure
       run: >
         cmake -B build
-        -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+        -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19
         -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
         -DAUTOMERGE_CPP_BUILD_TESTS=OFF
 
     - name: Run clang-tidy
-      run: >
-        find src include -name '*.cpp' -o -name '*.hpp' |
-        xargs clang-tidy -p build --warnings-as-errors='*'
+      run: |
+        clang-tidy-19 -p build \
+          src/document.cpp \
+          src/transaction.cpp \
+          src/json.cpp

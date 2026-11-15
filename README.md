@@ -12,7 +12,9 @@ This is a **from-scratch** reimplementation, not a wrapper. It mirrors the upstr
 Automerge semantics while embracing idiomatic C++23: algebraic types, ranges pipelines,
 strong types, and an API inspired by [nlohmann/json](https://github.com/nlohmann/json).
 
-**583 tests passing** across 14 test files. Deep [nlohmann/json](https://github.com/nlohmann/json) interoperability included.
+**690 GoogleTest cases passing** across 17 test files, plus two compatibility CTest steps when
+Cargo is available. Deep [nlohmann/json](https://github.com/nlohmann/json) interoperability
+included.
 
 ## Quick Example
 
@@ -24,7 +26,7 @@ int main() {
     auto doc = am::Document{};
 
     // Initializer lists — just like nlohmann/json
-    const auto items = doc.transact([](am::Transaction& tx) {
+    const auto items = *doc.transact([](am::Transaction& tx) {
         tx.put(am::root, "title", "Shopping List");
         tx.put(am::root, "config", {{"theme", "dark"}, {"lang", "en"}});
         return tx.put(am::root, "items", {"Milk", "Eggs", "Bread"});
@@ -80,12 +82,12 @@ doc.transact([](auto& tx) {
 
 ```cpp
 // Lambda return type is deduced — no external variable needed
-auto list_id = doc.transact([](Transaction& tx) {
+auto list_id = *doc.transact([](Transaction& tx) {
     return tx.put(root, "items", {"Milk", "Eggs", "Bread"});
 });
 
 // transact_with_patches returns {result, patches}
-auto [obj_id, patches] = doc.transact_with_patches([](Transaction& tx) {
+auto [obj_id, patches] = *doc.transact_with_patches([](Transaction& tx) {
     return tx.put(root, "data", Map{});
 });
 ```
@@ -167,11 +169,11 @@ auto doc = am::Document{};
 am::json::import_json(doc, input);
 
 // Export back to JSON — lossless round-trip
-auto output = am::json::export_json(doc);
+auto output = *am::json::export_json(doc);
 assert(input == output);
 
 // JSON Pointer (RFC 6901) — path-based access
-auto score = am::json::get_pointer(doc, "/scores/0");          // 10
+auto score = *am::json::get_pointer(doc, "/scores/0");          // 10
 am::json::put_pointer(doc, "/config/port", am::ScalarValue{std::int64_t{8080}});
 am::json::delete_pointer(doc, "/scores/2");
 
@@ -186,7 +188,7 @@ am::json::apply_json_patch(doc, json::parse(R"([
 am::json::apply_merge_patch(doc, json{{"name", "Charlie"}, {"scores", nullptr}});
 
 // Flatten to JSON Pointer paths
-auto flat = am::json::flatten(doc);  // {"/config/port": 8080, "/name": "Charlie"}
+auto flat = *am::json::flatten(doc);  // {"/config/port": 8080, "/name": "Charlie"}
 
 // ADL serialization — automerge types ↔ nlohmann::json (in am:: namespace)
 json j = am::ScalarValue{am::Counter{42}};  // {"__type": "counter", "value": 42}
@@ -194,7 +196,7 @@ json j = am::ScalarValue{am::Counter{42}};  // {"__type": "counter", "value": 42
 // Fork, diff as RFC 6902, then merge
 auto bob = doc.fork();
 bob.transact([](am::Transaction& tx) { tx.put(am::root, "name", "Dave"); });
-auto diff = am::json::diff_json_patch(doc, bob);
+auto diff = *am::json::diff_json_patch(doc, bob);
 doc.merge(bob);
 ```
 
@@ -233,23 +235,27 @@ a full working example.
 
 ### Serialization and Sync
 
-- **Binary serialization**: `save()` / `load()` with upstream-compatible columnar encoding
+- **Binary serialization**: full and incremental save/load with upstream-compatible chunks
+- **History checkpoints**: upstream compact saves and shallow loads that retain visible state at its heads
+- **Change queries**: changes since heads, changes added by another document, latest local change
 - **Columnar encoding**: RLE, delta, and boolean encoders matching upstream Rust format
 - **DEFLATE compression**: raw DEFLATE for columns exceeding 256 bytes
 - **SHA-256 checksums**: chunk envelope with integrity validation
-- **Backward compatibility**: v1 format loading with automatic detection
-- **Sync protocol**: bloom filter-based peer-to-peer synchronization
+- **Compatibility note**: files saved before this change must be recreated or exported
+- **Sync protocol**: upstream-compatible v1 messages, bloom filters, and resumable peer state
+- **Checked change application**: idempotent merge and sync delivery with queued dependencies
 
 ### Advanced Features
 
-- **Patches**: incremental change notifications via `transact_with_patches()`
+- **Patches**: incremental notifications for local transactions, remote changes, merge, sync, and load
 - **Time travel**: read document state at any historical point (`get_at()`, `text_at()`, etc.)
+- **Bounded historical reads**: cache the latest reconstructed state for nearby `get_at()` requests
 - **Cursors**: stable positions in lists/text that survive edits and merges
 - **Rich text marks**: range annotations (bold, italic, links) anchored by identity
 
 ### Quality and Performance
 
-- **583 tests** across 14 test files
+- **690 GoogleTest cases** across 17 test files, plus two compatibility CTest steps with Cargo
 - **Fuzz testing**: libFuzzer targets for `Document::load()`, LEB128, and change chunk parsing
 - **Static analysis**: clang-tidy CI with `bugprone-*`, `performance-*`, `clang-analyzer-*`
 - **Sanitizer CI**: Address Sanitizer + Undefined Behavior Sanitizer
@@ -341,12 +347,13 @@ automerge-cpp/
     document.cpp              #   Document methods
     transaction.cpp           #   Transaction methods
     json.cpp                  #   JSON interop implementation
+    sync_state.cpp            #   Sync message and persistent-state wire formats
     doc_state.hpp             #   internal: DocState, ObjectState
     crypto/                   #   SHA-256 (vendored)
     encoding/                 #   LEB128, RLE, delta, boolean codecs
     storage/                  #   columnar binary format
     sync/                     #   bloom filter for sync protocol
-  tests/                      # 583 tests (Google Test)
+  tests/                      # 690 tests (Google Test)
   examples/                   # 7 example programs
   benchmarks/                 # performance benchmarks (Google Benchmark)
   docs/                       # documentation
@@ -387,6 +394,14 @@ Seven example programs in `examples/`:
 - [JSON Integration Guide](docs/json-integration.md) — import/export, Pointer, Patch, Merge Patch, flatten, ADL serialization
 - [API Reference](docs/api.md) — every public type, method, and usage examples
 - [Benchmark Results](docs/benchmark-results.md) — performance measurements
+- [Linux Benchmark Results](docs/benchmark-results-linux.md) — Linux performance measurements
+- [Change Application](docs/change-application.md) — checked external changes and pending dependencies
+- [Change Hashes](docs/change-hashes.md) — hash definition, compatibility, and fixtures
+- [Incremental Save and Load](docs/incremental-save.md) — incremental persistence and change queries
+- [Remote Patches](docs/remote-patches.md) — visible-state patches from remote operations
+- [Transaction Rollback](docs/transactions/rollback.md) — transaction atomicity and rollback design
+- [Unicode Scalar-Value Text](docs/text/unicode-scalar-values.md) — validated UTF-8 text indexing
+- [Sync Wire Format](docs/sync-wire-format.md) — message bytes, bloom filters, state, and fixtures
 - [Style Guide](docs/style.md) — coding style (Ben Deane's modern C++ principles)
 - [Architecture](docs/plans/architecture.md) — design, types, modules
 - [Roadmap](docs/plans/roadmap.md) — phased development plan with status

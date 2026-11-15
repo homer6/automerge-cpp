@@ -1,0 +1,16 @@
+# automerge-cpp C++ style: LLVM as the base, 100 columns, 4-space indents (the org's C++ convention).
+# Format only the lines you change (`git clang-format`); existing code is not reformatted wholesale.
+BasedOnStyle: LLVM
+ColumnLimit: 100
+IndentWidth: 4
+AccessModifierOffset: -4
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Never
+BinPackArguments: false
+BinPackParameters: false
+PointerAlignment: Left
+DerivePointerAlignment: false
+IncludeBlocks: Preserve
+SortIncludes: CaseSensitive

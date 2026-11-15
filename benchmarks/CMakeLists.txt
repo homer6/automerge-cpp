@@ -18,3 +18,12 @@ target_link_libraries(automerge_cpp_benchmarks
         benchmark::benchmark
         benchmark::benchmark_main
 )
+
+add_executable(history_compaction_measure
+    history_compaction_measure.cpp
+)
+
+target_link_libraries(history_compaction_measure
+    PRIVATE
+        automerge-cpp::automerge-cpp
+)

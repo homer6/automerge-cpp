@@ -20,6 +20,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <expected>
 #include <map>
 #include <optional>
 #include <string>
@@ -83,12 +84,13 @@ namespace json {
 ///
 /// @param doc The document to export.
 /// @param obj The root of the subtree to export (default: document root).
-auto export_json(const Document& doc, const ObjId& obj = root) -> nlohmann::json;
+auto export_json(const Document& doc, const ObjId& obj = root)
+    -> std::expected<nlohmann::json, Error>;
 
 /// Export a document subtree as it was at a historical point.
 auto export_json_at(const Document& doc,
                     const std::vector<ChangeHash>& heads,
-                    const ObjId& obj = root) -> nlohmann::json;
+                    const ObjId& obj = root) -> std::expected<nlohmann::json, Error>;
 
 /// Import a JSON value into a document at the given target object.
 /// Wraps all mutations in a single transaction.
@@ -97,12 +99,12 @@ auto export_json_at(const Document& doc,
 /// @param doc The document to populate.
 /// @param j The JSON data.
 /// @param target The object to import into (default: root).
-void import_json(Document& doc, const nlohmann::json& j,
-                 const ObjId& target = root);
+auto import_json(Document& doc, const nlohmann::json& j, const ObjId& target = root)
+    -> std::expected<void, Error>;
 
 /// Import a JSON value within an existing transaction.
-void import_json(Transaction& tx, const nlohmann::json& j,
-                 const ObjId& target = root);
+auto import_json(Transaction& tx, const nlohmann::json& j, const ObjId& target = root)
+    -> std::expected<void, Error>;
 
 // =============================================================================
 // JSON Pointer (RFC 6901)  (Phase 12D)
@@ -112,19 +114,21 @@ void import_json(Transaction& tx, const nlohmann::json& j,
 /// @param doc The document to query.
 /// @param pointer RFC 6901 pointer (e.g. "/config/port", "/items/0").
 /// @return The value, or nullopt if the path doesn't exist.
-auto get_pointer(const Document& doc, std::string_view pointer) -> std::optional<Value>;
+auto get_pointer(const Document& doc, std::string_view pointer)
+    -> std::expected<std::optional<Value>, Error>;
 
 /// Put a scalar value at a JSON Pointer path.
 /// Creates intermediate map objects as needed.
 /// @param doc The document to modify (wrapped in a transaction).
 /// @param pointer RFC 6901 pointer path.
 /// @param val The scalar value to set.
-void put_pointer(Document& doc, std::string_view pointer, ScalarValue val);
+auto put_pointer(Document& doc, std::string_view pointer, ScalarValue val)
+    -> std::expected<void, Error>;
 
 /// Delete the value at a JSON Pointer path.
 /// @param doc The document to modify (wrapped in a transaction).
 /// @param pointer RFC 6901 pointer path.
-void delete_pointer(Document& doc, std::string_view pointer);
+auto delete_pointer(Document& doc, std::string_view pointer) -> std::expected<void, Error>;
 
 // =============================================================================
 // JSON Patch (RFC 6902)  (Phase 12E)
@@ -135,12 +139,12 @@ void delete_pointer(Document& doc, std::string_view pointer);
 /// Supported ops: add, remove, replace, move, copy, test.
 /// @param doc The document to patch.
 /// @param patch A JSON array of patch operations.
-/// @throws std::runtime_error on invalid patch or failed test op.
-void apply_json_patch(Document& doc, const nlohmann::json& patch);
+auto apply_json_patch(Document& doc, const nlohmann::json& patch) -> std::expected<void, Error>;
 
 /// Generate an RFC 6902 JSON Patch representing the diff between two documents.
 /// Uses nlohmann::json::diff() on the exported JSON.
-auto diff_json_patch(const Document& before, const Document& after) -> nlohmann::json;
+auto diff_json_patch(const Document& before, const Document& after)
+    -> std::expected<nlohmann::json, Error>;
 
 // =============================================================================
 // JSON Merge Patch (RFC 7386)  (Phase 12F)
@@ -150,12 +154,12 @@ auto diff_json_patch(const Document& before, const Document& after) -> nlohmann:
 /// - Non-null values: set/replace
 /// - null values: delete
 /// - Missing keys: unchanged
-void apply_merge_patch(Document& doc, const nlohmann::json& patch,
-                       const ObjId& target = root);
+auto apply_merge_patch(Document& doc, const nlohmann::json& patch, const ObjId& target = root)
+    -> std::expected<void, Error>;
 
 /// Generate a merge patch showing differences between two documents.
-auto generate_merge_patch(const Document& before,
-                          const Document& after) -> nlohmann::json;
+auto generate_merge_patch(const Document& before, const Document& after)
+    -> std::expected<nlohmann::json, Error>;
 
 // =============================================================================
 // Flatten / Unflatten  (Phase 12F)
@@ -164,13 +168,13 @@ auto generate_merge_patch(const Document& before,
 /// Flatten a document subtree to a map of JSON Pointer paths to values.
 /// Only leaf (scalar) values are included.
 auto flatten(const Document& doc, const ObjId& obj = root)
-    -> std::map<std::string, nlohmann::json>;
+    -> std::expected<std::map<std::string, nlohmann::json>, Error>;
 
 /// Unflatten a map of JSON Pointer paths into a document.
 /// Creates intermediate map/list objects as needed.
-void unflatten(Document& doc,
+auto unflatten(Document& doc,
                const std::map<std::string, nlohmann::json>& flat,
-               const ObjId& target = root);
+               const ObjId& target = root) -> std::expected<void, Error>;
 
 }  // namespace json
 

@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -51,6 +52,8 @@ struct Op {
     Value value;                             ///< The value being set/inserted.
     std::vector<OpId> pred;                  ///< Predecessor ops (for conflict tracking).
     std::optional<OpId> insert_after{};      ///< For insert/splice: the element to insert after.
+    bool expand{false};                      ///< Mark anchor expansion flag.
+    std::optional<std::string> mark_name{};  ///< Present on a mark's opening anchor.
 
     auto operator==(const Op&) const -> bool = default;
 };

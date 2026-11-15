@@ -43,12 +43,17 @@ target_sources(automerge-cpp PRIVATE
     src/document.cpp
     src/transaction.cpp
     src/json.cpp
+    src/sync_state.cpp
 )
 
 target_link_libraries(automerge-cpp
     PUBLIC Threads::Threads nlohmann_json::nlohmann_json
     PRIVATE ZLIB::ZLIB
 )
+
+if(WIN32)
+    target_link_libraries(automerge-cpp PRIVATE bcrypt)
+endif()
 
 # Subdirectories
 if(AUTOMERGE_CPP_BUILD_TESTS)

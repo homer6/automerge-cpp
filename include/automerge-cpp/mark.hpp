@@ -21,8 +21,8 @@ namespace automerge_cpp {
 /// Apply marks with Transaction::mark() and query them with
 /// Document::marks() or Document::marks_at().
 struct Mark {
-    std::size_t start;   ///< Start index (inclusive).
-    std::size_t end;     ///< End index (exclusive).
+    std::size_t start;   ///< Start list-element or text-scalar index (inclusive).
+    std::size_t end;     ///< End list-element or text-scalar index (exclusive).
     std::string name;    ///< The mark name (e.g. "bold", "italic", "link").
     ScalarValue value;   ///< The mark value (e.g. true, "https://...").
 
