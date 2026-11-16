@@ -23,9 +23,7 @@ One file per subject. A page says what exists, why, how to verify it, and how to
 | [`plans/`](plans/) | Design plans that preceded implementation |
 | `Doxyfile` | Doxygen configuration for the generated reference |
 
-This is oramasearch's private copy; what liquid needs from it is tracked at
-https://github.com/oramasearch/automerge-cpp/issues/13. Each change under that epic adds or
-updates a page here in the same commit.
+Each change adds or updates a page here in the same commit.
 
 ## Releases
 
